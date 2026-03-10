@@ -1,0 +1,77 @@
+import React, {
+  createContext,
+  useContext,
+  useState,
+  useCallback,
+} from 'react';
+import { GoogleSignin } from '@react-native-google-signin/google-signin';
+import { signInWithGoogle } from '../services/AuthService';
+import type { AuthUser } from '../types/auth';
+
+type AuthContextType = {
+  user: AuthUser | null;
+  isLoading: boolean;
+  error: string | null;
+  loginWithGoogle: () => Promise<void>;
+  logout: () => Promise<void>;
+  clearError: () => void;
+};
+
+const AuthContext = createContext<AuthContextType | null>(null);
+
+export function AuthProvider({ children }: { children: React.ReactNode }) {
+  const [user, setUser] = useState<AuthUser | null>(null);
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const loginWithGoogle = useCallback(async () => {
+    setIsLoading(true);
+    setError(null);
+    try {
+      const result = await signInWithGoogle();
+      if (result.success) {
+        setUser(result.data);
+        // onSuccess: data đã được trả về và lưu vào state (user)
+      } else {
+        console.warn('[AuthContext] Login không thành công:', result.error);
+        setError(result.error);
+      }
+    } catch (e) {
+      console.error('[AuthContext] Lỗi khi đăng nhập:', e);
+      setError('Đăng nhập thất bại');
+    } finally {
+      setIsLoading(false);
+    }
+  }, []);
+
+  const logout = useCallback(async () => {
+    await GoogleSignin.signOut();
+    setUser(null);
+    setError(null);
+  }, []);
+
+  const clearError = useCallback(() => setError(null), []);
+
+  return (
+    <AuthContext.Provider
+      value={{
+        user,
+        isLoading,
+        error,
+        loginWithGoogle,
+        logout,
+        clearError,
+      }}
+    >
+      {children}
+    </AuthContext.Provider>
+  );
+}
+
+export function useAuth() {
+  const ctx = useContext(AuthContext);
+  if (!ctx) {
+    throw new Error('useAuth must be used within AuthProvider');
+  }
+  return ctx;
+}

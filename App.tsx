@@ -1,20 +1,30 @@
 import { StatusBar } from 'expo-status-bar';
-import { StyleSheet, Text, View } from 'react-native';
+import { GoogleSignin } from '@react-native-google-signin/google-signin';
+import { AuthProvider, useAuth } from './src/context/AuthContext';
+import LoginScreen from './src/screens/LoginScreen';
+import HomeScreen from './src/screens/HomeScreen';
 
-export default function App() {
+GoogleSignin.configure({
+  webClientId:
+    '655929399159-abrmr7tl7oob6coek02f4i9g2jrtj9rd.apps.googleusercontent.com',
+  iosClientId:
+    '655929399159-kt2nf9h0qjj3dcnm2ue6opjmtac3rl8l.apps.googleusercontent.com',
+});
+
+function AppContent() {
+  const { user } = useAuth();
   return (
-    <View style={styles.container}>
-      <Text>Open up App.tsx to start working on your app!</Text>
-      <StatusBar style="auto" />
-    </View>
+    <>
+      {user ? <HomeScreen /> : <LoginScreen />}
+      <StatusBar style={user ? 'light' : 'auto'} />
+    </>
   );
 }
 
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#fff',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-});
+export default function App() {
+  return (
+    <AuthProvider>
+      <AppContent />
+    </AuthProvider>
+  );
+}
