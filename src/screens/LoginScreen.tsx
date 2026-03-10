@@ -20,64 +20,67 @@ export default function LoginScreen() {
   const { loginWithGoogle, isLoading, error, clearError } = useAuth();
 
   return (
-    <LinearGradient
-      colors={[...GRADIENT_COLORS]}
-      start={{ x: 0, y: 0 }}
-      end={{ x: 1, y: 1 }}
-      style={styles.gradient}
-    >
+    <View style={styles.screen}>
       <KeyboardAvoidingView
         style={styles.container}
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       >
         <View style={styles.content}>
-        <View style={styles.logoWrap}>
-          <Image
-            source={require('../../assets/LogoEdu2-removebg-preview.png')}
-            style={styles.logo}
-            resizeMode="contain"
-          />
-        </View>
-        <Text style={styles.title}>EduBridge HCM</Text>
-        <Text style={styles.subtitle}>
-          Kết nối tư vấn tuyển sinh lớp 10{'\n'}trường THPT tư thục tại TP.HCM
-        </Text>
+          <View style={styles.logoWrap}>
+            <Image
+              source={require('../../assets/LogoEdu2-removebg-preview.png')}
+              style={styles.logo}
+              resizeMode="contain"
+            />
+          </View>
+          <Text style={styles.title}>EduBridge HCM</Text>
+          <Text style={styles.subtitle}>
+            Kết nối tư vấn tuyển sinh lớp 10{'\n'}trường THPT tư thục tại TP.HCM
+          </Text>
 
-        {error ? (
-          <Pressable style={styles.errorCard} onPress={clearError}>
-            <Text style={styles.errorText}>{error}</Text>
-          </Pressable>
-        ) : null}
-
-        <View style={styles.actions}>
-          {isLoading ? (
-            <ActivityIndicator size="large" color="#fff" />
-          ) : (
-            <Pressable
-              style={({ pressed }) => [
-                styles.googleButton,
-                pressed && styles.googleButtonPressed,
-              ]}
-              onPress={loginWithGoogle}
-            >
-              <View style={styles.googleButtonContent}>
-                <View style={styles.googleLogoWrap}>
-                  <Ionicons name="logo-google" size={22} color="#4285F4" />
-                </View>
-                <Text style={styles.googleButtonText}>Continue with Google</Text>
-              </View>
+          {error ? (
+            <Pressable style={styles.errorCard} onPress={clearError}>
+              <Text style={styles.errorText}>{error}</Text>
             </Pressable>
-          )}
+          ) : null}
+
+          <View style={styles.actions}>
+            {isLoading ? (
+              <ActivityIndicator size="large" color="#1976d2" />
+            ) : (
+              <Pressable
+                style={({ pressed }) => [
+                  styles.googleButton,
+                  pressed && styles.googleButtonPressed,
+                ]}
+                onPress={loginWithGoogle}
+              >
+                <LinearGradient
+                  colors={[...GRADIENT_COLORS]}
+                  start={{ x: 0, y: 0 }}
+                  end={{ x: 1, y: 1 }}
+                  style={styles.googleButtonGradient}
+                >
+                  <View style={styles.googleButtonContent}>
+                    <View style={styles.googleLogoWrap}>
+                      <Ionicons name="logo-google" size={22} color="#fff" />
+                    </View>
+                    <Text style={styles.googleButtonText}>Continue with Google</Text>
+                  </View>
+                </LinearGradient>
+              </Pressable>
+            )}
+          </View>
         </View>
-      </View>
       </KeyboardAvoidingView>
-    </LinearGradient>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  gradient: {
+  screen: {
     flex: 1,
+    backgroundColor: '#fff',
   },
   container: {
     flex: 1,
@@ -102,13 +105,13 @@ const styles = StyleSheet.create({
   title: {
     fontSize: 26,
     fontWeight: '700',
-    color: '#fff',
+    color: '#0f172a',
     marginBottom: 8,
     letterSpacing: -0.5,
   },
   subtitle: {
     fontSize: 15,
-    color: 'rgba(255,255,255,0.92)',
+    color: '#64748b',
     textAlign: 'center',
     lineHeight: 22,
     marginBottom: 32,
@@ -138,18 +141,22 @@ const styles = StyleSheet.create({
   googleButton: {
     width: '100%',
     height: 52,
-    backgroundColor: '#fff',
     borderRadius: 14,
-    justifyContent: 'center',
-    alignItems: 'center',
-    shadowColor: '#0f172a',
+    overflow: 'hidden',
+    shadowColor: '#1976d2',
     shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.08,
+    shadowOpacity: 0.25,
     shadowRadius: 8,
-    elevation: 3,
+    elevation: 4,
   },
   googleButtonPressed: {
     opacity: 0.92,
+  },
+  googleButtonGradient: {
+    flex: 1,
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   googleButtonContent: {
     flexDirection: 'row',
@@ -166,6 +173,6 @@ const styles = StyleSheet.create({
   googleButtonText: {
     fontSize: 16,
     fontWeight: '600',
-    color: '#1f2937',
+    color: '#fff',
   },
 });
