@@ -1,13 +1,19 @@
 import { jwtDecode } from 'jwt-decode';
 import { GoogleSignin } from '@react-native-google-signin/google-signin';
 import { isSuccessResponse } from '@react-native-google-signin/google-signin';
-import { signin as apiSignin } from '../api/auth';
+import { register as apiRegister, signin as apiSignin } from '../api/auth';
 import type { AuthUser } from '../types/auth';
 import type { GoogleJwtPayload } from '../types/auth';
 
 export type SignInWithGoogleResult =
   | { success: true; data: AuthUser }
   | { success: false; error: string };
+
+export type RegisterWithGoogleResult =
+  | { success: true; data: AuthUser }
+  | { success: false; error: string };
+
+const PARENT_ROLE = 'PARENT';
 
 /**
  * Luồng theo BE:
@@ -43,6 +49,42 @@ export async function signInWithGoogle(): Promise<SignInWithGoogleResult> {
   } catch (e: unknown) {
     const message = e instanceof Error ? e.message : 'Đăng nhập thất bại';
     console.error('[AuthService] Gọi API login thất bại:', message, e);
+    return { success: false, error: message };
+  }
+}
+
+/**
+ * Đăng ký Parent bằng Google: lấy email từ Google → gọi POST /api/v1/auth/register
+ * với role PARENT, schoolRequest null.
+ */
+export async function registerWithGoogle(): Promise<RegisterWithGoogleResult> {
+  const response = await GoogleSignin.signIn();
+  if (!isSuccessResponse(response)) {
+    return { success: false, error: 'Đăng ký Google bị hủy' };
+  }
+
+  const tokens = await GoogleSignin.getTokens();
+  const idToken = tokens.idToken;
+  if (!idToken) {
+    return { success: false, error: 'Không nhận được JWT từ Google' };
+  }
+
+  const payload = jwtDecode<GoogleJwtPayload>(idToken);
+  const email = payload.email ?? response.data.email;
+  if (!email) {
+    return { success: false, error: 'Không lấy được email từ Google' };
+  }
+
+  try {
+    const registerResponse = await apiRegister({
+      email,
+      role: PARENT_ROLE,
+      schoolRequest: null,
+    });
+    return { success: true, data: registerResponse.body };
+  } catch (e: unknown) {
+    const message = e instanceof Error ? e.message : 'Đăng ký thất bại';
+    console.error('[AuthService] Gọi API register thất bại:', message, e);
     return { success: false, error: message };
   }
 }

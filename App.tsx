@@ -1,7 +1,9 @@
+import React, { useState } from 'react';
 import { StatusBar } from 'expo-status-bar';
 import { GoogleSignin } from '@react-native-google-signin/google-signin';
 import { AuthProvider, useAuth } from './src/context/AuthContext';
 import LoginScreen from './src/screens/LoginScreen';
+import RegisterScreen from './src/screens/RegisterScreen';
 import HomeScreen from './src/screens/HomeScreen';
 
 GoogleSignin.configure({
@@ -13,10 +15,24 @@ GoogleSignin.configure({
 
 function AppContent() {
   const { user } = useAuth();
+  const [authView, setAuthView] = useState<'login' | 'register'>('login');
+
+  if (user) {
+    return (
+      <>
+        <HomeScreen />
+        <StatusBar style="light" />
+      </>
+    );
+  }
   return (
     <>
-      {user ? <HomeScreen /> : <LoginScreen />}
-      <StatusBar style={user ? 'light' : 'auto'} />
+      {authView === 'login' ? (
+        <LoginScreen onGoToRegister={() => setAuthView('register')} />
+      ) : (
+        <RegisterScreen onGoToLogin={() => setAuthView('login')} />
+      )}
+      <StatusBar style="auto" />
     </>
   );
 }

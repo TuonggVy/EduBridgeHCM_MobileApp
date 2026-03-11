@@ -16,7 +16,11 @@ const Ionicons = require('@expo/vector-icons').Ionicons;
 
 const GRADIENT_COLORS = ['#1976d2', '#42a5f5', '#64b5f6'] as const;
 
-export default function LoginScreen() {
+type LoginScreenProps = {
+  onGoToRegister?: () => void;
+};
+
+export default function LoginScreen({ onGoToRegister }: LoginScreenProps) {
   const { loginWithGoogle, isLoading, error, clearError } = useAuth();
 
   return (
@@ -71,6 +75,15 @@ export default function LoginScreen() {
               </Pressable>
             )}
           </View>
+
+          {onGoToRegister ? (
+            <Pressable style={styles.registerLink} onPress={onGoToRegister}>
+              <Text style={styles.registerLinkText}>
+                Chưa có tài khoản?{' '}
+                <Text style={styles.registerLinkHighlight}>Đăng ký</Text>
+              </Text>
+            </Pressable>
+          ) : null}
         </View>
       </KeyboardAvoidingView>
     </View>
@@ -174,5 +187,17 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
     color: '#fff',
+  },
+  registerLink: {
+    marginTop: 24,
+    paddingVertical: 8,
+  },
+  registerLinkText: {
+    fontSize: 15,
+    color: '#64748b',
+  },
+  registerLinkHighlight: {
+    fontWeight: '600',
+    color: '#1976d2',
   },
 });
