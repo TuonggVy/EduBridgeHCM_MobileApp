@@ -5,7 +5,7 @@ import React, {
   useCallback,
 } from 'react';
 import { GoogleSignin } from '@react-native-google-signin/google-signin';
-import { signInWithGoogle } from '../services/AuthService';
+import { registerWithGoogle as registerWithGoogleService, signInWithGoogle } from '../services/AuthService';
 import type { AuthUser } from '../types/auth';
 
 type AuthContextType = {
@@ -13,6 +13,7 @@ type AuthContextType = {
   isLoading: boolean;
   error: string | null;
   loginWithGoogle: () => Promise<void>;
+  registerWithGoogle: () => Promise<void>;
   logout: () => Promise<void>;
   clearError: () => void;
 };
@@ -44,6 +45,24 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   }, []);
 
+  const registerWithGoogle = useCallback(async () => {
+    setIsLoading(true);
+    setError(null);
+    try {
+      const result = await registerWithGoogleService();
+      if (result.success) {
+        setUser(result.data);
+      } else {
+        setError(result.error);
+      }
+    } catch (e) {
+      console.error('[AuthContext] Lỗi khi đăng ký:', e);
+      setError('Đăng ký thất bại');
+    } finally {
+      setIsLoading(false);
+    }
+  }, []);
+
   const logout = useCallback(async () => {
     await GoogleSignin.signOut();
     setUser(null);
@@ -59,6 +78,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         isLoading,
         error,
         loginWithGoogle,
+        registerWithGoogle,
         logout,
         clearError,
       }}

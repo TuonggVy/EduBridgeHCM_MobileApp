@@ -20,6 +20,32 @@ export type LoginResponse = {
   body: AuthUser;
 };
 
+/** Dùng cho counsellor/school đăng ký; parent gửi null */
+export type SchoolRequest = {
+  personalEmail?: string;
+  schoolName?: string;
+  schoolAddress?: string;
+  campusName?: string;
+  campusAddress?: string;
+  taxCode?: string;
+  websiteUrl?: string;
+  businessLicenseUrl?: string;
+  reviewNote?: string;
+  rejectionReason?: string;
+  createdAt?: string;
+};
+
+export type RegisterRequest = {
+  email: string;
+  role: string;
+  schoolRequest: SchoolRequest | null;
+};
+
+export type RegisterResponse = {
+  message: string;
+  body: AuthUser;
+};
+
 /** Payload từ Google JWT (idToken) sau khi jwtDecode */
 export type GoogleJwtPayload = {
   email?: string;
