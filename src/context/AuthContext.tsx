@@ -5,7 +5,9 @@ import React, {
   useCallback,
 } from 'react';
 import { GoogleSignin } from '@react-native-google-signin/google-signin';
+import { logout as apiLogout } from '../api/auth';
 import { registerWithGoogle as registerWithGoogleService, signInWithGoogle } from '../services/AuthService';
+import { clearTokens } from '../services/TokenStorage';
 import type { AuthUser } from '../types/auth';
 
 type AuthContextType = {
@@ -65,6 +67,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const logout = useCallback(async () => {
     await GoogleSignin.signOut();
+    try {
+      await apiLogout();
+    } finally {
+      await clearTokens();
+    }
     setUser(null);
     setError(null);
   }, []);

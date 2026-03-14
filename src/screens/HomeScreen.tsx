@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -17,6 +17,11 @@ import { useAuth } from '../context/AuthContext';
 import { SchoolCard } from '../components/SchoolCard';
 import { SCHOOLS, FILTER_OPTIONS } from '../data/schools';
 import SearchScreen from './SearchScreen';
+import { CompleteProfileBottomSheet } from '../components/CompleteProfileBottomSheet';
+import { ConfirmDialog } from '../components/ConfirmDialog';
+import ParentProfileFormScreen from './ParentProfileFormScreen';
+import { getProfile, isProfileComplete } from '../api/profile';
+import type { ProfileGetBody } from '../types/auth';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
@@ -208,9 +213,19 @@ const PROFILE_MENU_SETTINGS = [
 ];
 
 // ─── Profile tab: full profile screen ───────────────────────────────────────
-function ProfileTabContent() {
+function ProfileTabContent({
+  profileData,
+  onEditProfile,
+}: {
+  profileData: ProfileGetBody | null;
+  onEditProfile: () => void;
+}) {
   const { user, logout } = useAuth();
-  const displayName = user?.email?.split('@')[0] ?? 'Phụ huynh';
+  const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
+  const displayName =
+    profileData?.parent?.name?.trim() ||
+    user?.email?.split('@')[0] ||
+    'Phụ huynh';
 
   const MenuCard = ({
     title,
@@ -257,6 +272,7 @@ function ProfileTabContent() {
               {user?.email ?? ''}
             </Text>
             <Pressable
+              onPress={onEditProfile}
               style={({ pressed }) => [
                 styles.profileEditButton,
                 pressed && styles.profileEditButtonPressed,
@@ -320,20 +336,69 @@ function ProfileTabContent() {
       {/* 6. Logout */}
       <Pressable
         style={({ pressed }) => [styles.profileLogoutButton, pressed && styles.profileLogoutButtonPressed]}
-        onPress={logout}
+        onPress={() => setShowLogoutConfirm(true)}
       >
         <Ionicons name="log-out-outline" size={22} color="#dc2626" />
         <Text style={styles.profileLogoutButtonText}>Đăng xuất</Text>
       </Pressable>
+
+      <ConfirmDialog
+        visible={showLogoutConfirm}
+        title="Đăng xuất"
+        message="Bạn có chắc chắn muốn đăng xuất?"
+        cancelLabel="Hủy"
+        confirmLabel="Đăng xuất"
+        confirmRole="destructive"
+        onCancel={() => setShowLogoutConfirm(false)}
+        onConfirm={() => {
+          setShowLogoutConfirm(false);
+          logout();
+        }}
+      />
     </View>
   );
 }
 
 // ─── Main ──────────────────────────────────────────────────────────────────
 export default function HomeScreen() {
+  const { user } = useAuth();
   const [activeTab, setActiveTab] = useState<TabId>('home');
   const [searchVisible, setSearchVisible] = useState(false);
   const [recentSearches, setRecentSearches] = useState<string[]>([]);
+  const [profileData, setProfileData] = useState<ProfileGetBody | null>(null);
+  const [profileChecked, setProfileChecked] = useState(false);
+  const [showProfileSheet, setShowProfileSheet] = useState(false);
+  const [showProfileForm, setShowProfileForm] = useState(false);
+
+  useEffect(() => {
+    if (!user) {
+      setProfileData(null);
+      setProfileChecked(false);
+      setShowProfileSheet(false);
+      return;
+    }
+    let cancelled = false;
+    getProfile()
+      .then((res) => {
+        if (cancelled) return;
+        setProfileData(res.body);
+        setProfileChecked(true);
+        if (res.body.firstLogin || !isProfileComplete(res.body)) {
+          setShowProfileSheet(true);
+        }
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setProfileChecked(true);
+        if (user.firstLogin) setShowProfileSheet(true);
+      });
+    return () => { cancelled = true; };
+  }, [user?.email]);
+
+  const handleProfileSaved = () => {
+    setShowProfileForm(false);
+    getProfile().then((res) => setProfileData(res.body));
+  };
 
   const showSearchInHeader = activeTab === 'home' || activeTab === 'schools';
 
@@ -394,7 +459,12 @@ export default function HomeScreen() {
             <Text style={styles.placeholderSub}>Sắp ra mắt</Text>
           </View>
         )}
-        {activeTab === 'account' && <ProfileTabContent />}
+        {activeTab === 'account' && (
+              <ProfileTabContent
+                profileData={profileData}
+                onEditProfile={() => setShowProfileForm(true)}
+              />
+            )}
         <View style={styles.bottomSpacer} />
       </ScrollView>
 
@@ -436,6 +506,22 @@ export default function HomeScreen() {
           onAddRecent={addRecent}
         />
       </Modal>
+
+      <CompleteProfileBottomSheet
+        visible={showProfileSheet}
+        onComplete={() => {
+          setShowProfileSheet(false);
+          setShowProfileForm(true);
+        }}
+        onDismiss={() => setShowProfileSheet(false)}
+      />
+
+      <ParentProfileFormScreen
+        visible={showProfileForm}
+        initialData={profileData?.parent ?? null}
+        onSaved={handleProfileSaved}
+        onClose={() => setShowProfileForm(false)}
+      />
     </View>
   );
 }

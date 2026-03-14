@@ -1,5 +1,30 @@
-import { apiRequest } from './client';
+import { apiRequest, API_BASE } from './client';
+import { getAccessToken } from '../services/TokenStorage';
 import type { LoginResponse, RegisterRequest, RegisterResponse } from '../types/auth';
+
+const MOBILE_HEADERS: HeadersInit = {
+  'Content-Type': 'application/json',
+  'X-Device-Type': 'mobile',
+};
+
+/** Gọi API logout BE. Dùng fetch để tránh lỗi khi BE trả 403/body rỗng; luôn xóa token ở FE sau. */
+export async function logout(): Promise<void> {
+  const token = await getAccessToken();
+  try {
+    const res = await fetch(`${API_BASE}/api/v1/auth/logout`, {
+      method: 'POST',
+      headers: {
+        ...MOBILE_HEADERS,
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+    });
+    if (!res.ok) return;
+    const text = await res.text();
+    if (text) JSON.parse(text);
+  } catch {
+    // Bỏ qua: BE có thể trả 403/body rỗng; FE vẫn xóa token
+  }
+}
 
 /**
  * Gọi API signin(email) của backend.

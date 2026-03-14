@@ -1,4 +1,7 @@
 export type ParentInfo = {
+  gender: string | null;
+  name: string | null;
+  phone: string | null;
   occupation: string | null;
   idCardNumber: string | null;
   relationship: string | null;
@@ -15,9 +18,19 @@ export type AuthUser = {
   status: string;
 };
 
+/** Body login/register cho mobile: account (user) + tokens */
+export type LoginRegisterBody = {
+  account: AuthUser;
+  accessToken: string;
+  refreshToken: string;
+  tokenType?: string;
+  accessExpiresIn?: number;
+  refreshExpiresIn?: number;
+};
+
 export type LoginResponse = {
   message: string;
-  body: AuthUser;
+  body: LoginRegisterBody;
 };
 
 /** Dùng cho counsellor/school đăng ký; parent gửi null */
@@ -43,7 +56,13 @@ export type RegisterRequest = {
 
 export type RegisterResponse = {
   message: string;
-  body: AuthUser;
+  body: LoginRegisterBody;
+};
+
+/** Response POST /api/v1/auth/refresh - body thường là accessToken mới */
+export type RefreshResponse = {
+  message: string;
+  body: string;
 };
 
 /** Payload từ Google JWT (idToken) sau khi jwtDecode */
@@ -53,4 +72,40 @@ export type GoogleJwtPayload = {
   picture?: string;
   sub?: string;
   [key: string]: unknown;
+};
+
+// ─── Profile API ───────────────────────────────────────────────────────────
+
+export type ProfileGetBody = {
+  parent: ParentInfo;
+  role: string;
+  firstLogin: boolean;
+  email: string;
+  status: string;
+};
+
+export type ProfileGetResponse = {
+  message: string;
+  body: ProfileGetBody;
+};
+
+export type ParentDataInput = {
+  gender?: string;
+  name?: string;
+  phone?: string;
+  relationship?: string;
+  workplace?: string;
+  occupation?: string;
+  currentAddress?: string;
+};
+
+export type ProfilePostRequest = {
+  parentData?: ParentDataInput;
+  counsellorData?: { name?: string };
+  campusData?: Record<string, unknown>;
+};
+
+export type ProfilePostResponse = {
+  message: string;
+  body: string;
 };
