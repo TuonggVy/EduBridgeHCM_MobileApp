@@ -93,6 +93,7 @@ export type ParentDataInput = {
   gender?: string;
   name?: string;
   phone?: string;
+  idCardNumber?: string;
   relationship?: string;
   workplace?: string;
   occupation?: string;

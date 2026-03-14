@@ -50,6 +50,8 @@ export default function ParentProfileFormScreen({
 }: ParentProfileFormScreenProps) {
   const [name, setName] = useState(initialData?.name ?? '');
   const [phone, setPhone] = useState(initialData?.phone ?? '');
+  const [idCardNumber, setIdCardNumber] = useState(initialData?.idCardNumber ?? '');
+  const [showIdCardPreview, setShowIdCardPreview] = useState(false);
   const [gender, setGender] = useState(initialData?.gender ?? '');
   const [relationship, setRelationship] = useState(initialData?.relationship ?? '');
   const [workplace, setWorkplace] = useState(initialData?.workplace ?? '');
@@ -57,10 +59,15 @@ export default function ParentProfileFormScreen({
   const [currentAddress, setCurrentAddress] = useState(initialData?.currentAddress ?? '');
   const [saving, setSaving] = useState(false);
 
+  /** Đã lưu CCCD rồi thì không cho sửa, chỉ xem (3 số đầu khi bấm View). */
+  const idCardLocked = !!(initialData?.idCardNumber?.trim());
+
   useEffect(() => {
     if (visible && initialData) {
       setName(initialData.name ?? '');
       setPhone(initialData.phone ?? '');
+      setIdCardNumber(initialData.idCardNumber ?? '');
+      setShowIdCardPreview(false);
       setGender(initialData.gender ?? '');
       setRelationship(initialData.relationship ?? '');
       setWorkplace(initialData.workplace ?? '');
@@ -68,6 +75,11 @@ export default function ParentProfileFormScreen({
       setCurrentAddress(initialData.currentAddress ?? '');
     }
   }, [visible, initialData]);
+
+  const handleIdCardChange = (text: string) => {
+    const digits = text.replace(/\D/g, '').slice(0, 12);
+    setIdCardNumber(digits);
+  };
 
   const handleSave = async () => {
     const trimmedName = name.trim();
@@ -77,11 +89,24 @@ export default function ParentProfileFormScreen({
       return;
     }
 
+    const trimmedIdCard = idCardNumber.trim();
+    if (trimmedIdCard) {
+      if (trimmedIdCard.length !== 12) {
+        Alert.alert('Số CCCD/CMND không hợp lệ', 'Số CCCD/CMND phải đúng 12 chữ số.');
+        return;
+      }
+      if (/\D/.test(trimmedIdCard)) {
+        Alert.alert('Số CCCD/CMND không hợp lệ', 'Chỉ được nhập 12 chữ số.');
+        return;
+      }
+    }
+
     setSaving(true);
     try {
       const parentData: ParentDataInput = {
         name: trimmedName,
         phone: trimmedPhone,
+        idCardNumber: trimmedIdCard || undefined,
         gender: gender || undefined,
         relationship: relationship || undefined,
         workplace: workplace || undefined,
@@ -145,6 +170,39 @@ export default function ParentProfileFormScreen({
               placeholderTextColor="#94a3b8"
               keyboardType="phone-pad"
             />
+          </View>
+
+          <View style={styles.field}>
+            <Text style={styles.label}>Số CCCD/CMND</Text>
+            {idCardLocked ? (
+              <View style={styles.idCardRow}>
+                <Text style={styles.idCardMasked}>
+                  {showIdCardPreview
+                    ? idCardNumber.slice(0, 3) + '*********'
+                    : '••••••••••••'}
+                </Text>
+                <Pressable
+                  onPress={() => setShowIdCardPreview((v) => !v)}
+                  style={({ pressed }) => [styles.viewIdCardButton, pressed && styles.viewIdCardButtonPressed]}
+                >
+                  <Ionicons name={showIdCardPreview ? 'eye-off-outline' : 'eye-outline'} size={20} color="#1976d2" />
+                  <Text style={styles.viewIdCardText}>{showIdCardPreview ? 'Ẩn' : 'Xem'}</Text>
+                </Pressable>
+              </View>
+            ) : (
+              <TextInput
+                style={styles.input}
+                value={idCardNumber}
+                onChangeText={handleIdCardChange}
+                placeholder="Nhập đúng 12 chữ số CCCD"
+                placeholderTextColor="#94a3b8"
+                keyboardType="number-pad"
+                maxLength={12}
+              />
+            )}
+            {!idCardLocked && (
+              <Text style={styles.idCardHint}>Chỉ được nhập 1 lần, đúng 12 chữ số.</Text>
+            )}
           </View>
 
           <View style={styles.field}>
@@ -304,6 +362,42 @@ const styles = StyleSheet.create({
     paddingVertical: 14,
     fontSize: 16,
     color: '#0f172a',
+  },
+  idCardRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: '#fff',
+    borderRadius: radius.lg,
+    borderWidth: 1,
+    borderColor: '#e2e8f0',
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+  },
+  idCardMasked: {
+    fontSize: 16,
+    color: '#0f172a',
+    letterSpacing: 2,
+  },
+  viewIdCardButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingVertical: 6,
+    paddingHorizontal: 10,
+  },
+  viewIdCardButtonPressed: {
+    opacity: 0.7,
+  },
+  viewIdCardText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#1976d2',
+  },
+  idCardHint: {
+    fontSize: 12,
+    color: '#64748b',
+    marginTop: 6,
   },
   inputMultiline: {
     minHeight: 88,
