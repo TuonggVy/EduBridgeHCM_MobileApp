@@ -2,6 +2,7 @@ import { jwtDecode } from 'jwt-decode';
 import { GoogleSignin } from '@react-native-google-signin/google-signin';
 import { isSuccessResponse } from '@react-native-google-signin/google-signin';
 import { register as apiRegister, signin as apiSignin } from '../api/auth';
+import { setAccessToken, setRefreshToken } from './TokenStorage';
 import type { AuthUser } from '../types/auth';
 import type { GoogleJwtPayload } from '../types/auth';
 
@@ -37,7 +38,7 @@ export async function signInWithGoogle(): Promise<SignInWithGoogleResult> {
   }
 
   const payload = jwtDecode<GoogleJwtPayload>(idToken);
-  const email = payload.email ?? response.data.email;
+  const email = payload.email ?? (response.data as { email?: string }).email;
   if (!email) {
     console.error('[AuthService] Không lấy được email từ JWT. Payload:', payload);
     return { success: false, error: 'Không lấy được email từ Google' };
@@ -45,7 +46,10 @@ export async function signInWithGoogle(): Promise<SignInWithGoogleResult> {
 
   try {
     const loginResponse = await apiSignin(email);
-    return { success: true, data: loginResponse.body };
+    const body = loginResponse.body;
+    if (body.accessToken) await setAccessToken(body.accessToken);
+    if (body.refreshToken) await setRefreshToken(body.refreshToken);
+    return { success: true, data: body.account };
   } catch (e: unknown) {
     const message = e instanceof Error ? e.message : 'Đăng nhập thất bại';
     console.error('[AuthService] Gọi API login thất bại:', message, e);
@@ -70,7 +74,7 @@ export async function registerWithGoogle(): Promise<RegisterWithGoogleResult> {
   }
 
   const payload = jwtDecode<GoogleJwtPayload>(idToken);
-  const email = payload.email ?? response.data.email;
+  const email = payload.email ?? (response.data as { email?: string }).email;
   if (!email) {
     return { success: false, error: 'Không lấy được email từ Google' };
   }
@@ -81,7 +85,10 @@ export async function registerWithGoogle(): Promise<RegisterWithGoogleResult> {
       role: PARENT_ROLE,
       schoolRequest: null,
     });
-    return { success: true, data: registerResponse.body };
+    const body = registerResponse.body;
+    if (body.accessToken) await setAccessToken(body.accessToken);
+    if (body.refreshToken) await setRefreshToken(body.refreshToken);
+    return { success: true, data: body.account };
   } catch (e: unknown) {
     const message = e instanceof Error ? e.message : 'Đăng ký thất bại';
     console.error('[AuthService] Gọi API register thất bại:', message, e);
