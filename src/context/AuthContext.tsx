@@ -22,7 +22,12 @@ type AuthContextType = {
 
 const AuthContext = createContext<AuthContextType | null>(null);
 
-export function AuthProvider({ children }: { children: React.ReactNode }) {
+type AuthProviderProps = {
+  children: React.ReactNode;
+  onRegisterSuccess?: () => void;
+};
+
+export function AuthProvider({ children, onRegisterSuccess }: AuthProviderProps) {
   const [user, setUser] = useState<AuthUser | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -53,7 +58,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     try {
       const result = await registerWithGoogleService();
       if (result.success) {
-        setUser(result.data);
+        onRegisterSuccess?.();
+        // Không set user: chuyển sang màn hình đăng nhập để user đăng nhập lại.
       } else {
         setError(result.error);
       }
@@ -63,7 +69,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     } finally {
       setIsLoading(false);
     }
-  }, []);
+  }, [onRegisterSuccess]);
 
   const logout = useCallback(async () => {
     await GoogleSignin.signOut();

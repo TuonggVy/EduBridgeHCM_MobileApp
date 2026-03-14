@@ -13,9 +13,14 @@ GoogleSignin.configure({
     '655929399159-kt2nf9h0qjj3dcnm2ue6opjmtac3rl8l.apps.googleusercontent.com',
 });
 
-function AppContent() {
+function AppContent({
+  authView,
+  setAuthView,
+}: {
+  authView: 'login' | 'register';
+  setAuthView: (v: 'login' | 'register') => void;
+}) {
   const { user } = useAuth();
-  const [authView, setAuthView] = useState<'login' | 'register'>('login');
 
   if (user) {
     return (
@@ -38,9 +43,10 @@ function AppContent() {
 }
 
 export default function App() {
+  const [authView, setAuthView] = useState<'login' | 'register'>('login');
   return (
-    <AuthProvider>
-      <AppContent />
+    <AuthProvider onRegisterSuccess={() => setAuthView('login')}>
+      <AppContent authView={authView} setAuthView={setAuthView} />
     </AuthProvider>
   );
 }
