@@ -23,14 +23,14 @@ export async function getProfile(): Promise<ProfileGetResponse> {
 }
 
 /**
- * POST cập nhật / tạo hồ sơ (parentData, counsellorData, campusData).
+ * PUT cập nhật / tạo hồ sơ (parentData, counsellorData, campusData).
  * Parent chỉ cần gửi parentData.
  */
 export async function updateProfile(
   payload: ProfilePostRequest
 ): Promise<ProfilePostResponse> {
   return apiRequest<ProfilePostResponse>(PROFILE_PATH, {
-    method: 'POST',
+    method: 'PUT',
     body: payload,
   });
 }
