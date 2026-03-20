@@ -20,8 +20,11 @@ import SearchScreen from './SearchScreen';
 import { CompleteProfileBottomSheet } from '../components/CompleteProfileBottomSheet';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import ParentProfileFormScreen from './ParentProfileFormScreen';
+import ConversationsScreen from './ConversationsScreen';
+import ChatScreen from './ChatScreen';
 import { getProfile, isProfileComplete } from '../api/profile';
 import type { ProfileGetBody } from '../types/auth';
+import type { ParentConversationsItem } from '../types/chat';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
@@ -63,7 +66,13 @@ const CARD_WIDTH = SCREEN_WIDTH * 0.72;
 const BANNER_IMAGE = require('../../assets/Banner.png');
 
 // ─── Home tab: banner, quick actions, featured, popular ─────────────────────
-function HomeTabContent({ onOpenSearch }: { onOpenSearch: () => void }) {
+function HomeTabContent({
+  onOpenSearch,
+  onOpenConsult,
+}: {
+  onOpenSearch: () => void;
+  onOpenConsult: () => void;
+}) {
   return (
     <>
       {/* Promotional banner - above Quick actions */}
@@ -80,6 +89,9 @@ function HomeTabContent({ onOpenSearch }: { onOpenSearch: () => void }) {
         {QUICK_ACTIONS.map((action) => (
           <Pressable
             key={action.id}
+            onPress={() => {
+              if (action.id === 'consult') onOpenConsult();
+            }}
             style={({ pressed }) => [
               styles.quickActionItem,
               pressed && styles.quickActionPressed,
@@ -369,6 +381,8 @@ export default function HomeScreen() {
   const [profileChecked, setProfileChecked] = useState(false);
   const [showProfileSheet, setShowProfileSheet] = useState(false);
   const [showProfileForm, setShowProfileForm] = useState(false);
+  const [chatView, setChatView] = useState<'app' | 'conversations' | 'chat'>('app');
+  const [selectedConversation, setSelectedConversation] = useState<ParentConversationsItem | null>(null);
 
   useEffect(() => {
     if (!user) {
@@ -408,6 +422,31 @@ export default function HomeScreen() {
       return next;
     });
   };
+
+  if (chatView === 'conversations') {
+    return (
+      <ConversationsScreen
+        parentEmail={user?.email ?? ''}
+        onBack={() => setChatView('app')}
+        onOpenChat={(conversation) => {
+          setSelectedConversation(conversation);
+          setChatView('chat');
+        }}
+      />
+    );
+  }
+
+  if (chatView === 'chat' && selectedConversation) {
+    return (
+      <ChatScreen
+        conversationId={selectedConversation.conversationId}
+        parentEmail={user?.email ?? ''}
+        counsellorEmail={selectedConversation.counsellorEmail}
+        counsellorName={selectedConversation.counsellorName ?? undefined}
+        onBack={() => setChatView('conversations')}
+      />
+    );
+  }
 
   return (
     <View style={styles.screen}>
@@ -450,7 +489,12 @@ export default function HomeScreen() {
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
       >
-        {activeTab === 'home' && <HomeTabContent onOpenSearch={() => setSearchVisible(true)} />}
+        {activeTab === 'home' && (
+          <HomeTabContent
+            onOpenSearch={() => setSearchVisible(true)}
+            onOpenConsult={() => setChatView('conversations')}
+          />
+        )}
         {activeTab === 'schools' && <SchoolsTabContent />}
         {activeTab === 'news' && (
           <View style={styles.placeholder}>
