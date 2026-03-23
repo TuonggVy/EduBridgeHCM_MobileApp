@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  AppState,
   FlatList,
   KeyboardAvoidingView,
   Platform,
@@ -14,7 +15,13 @@ import {
 } from 'react-native';
 const Ionicons = require('@expo/vector-icons').Ionicons;
 
-import { connectWebSocket, disconnect, sendMessage, type PrivateMessageBody } from '../services/parentChatWebSocket';
+import {
+  buildPrivateChatPayload,
+  connectWebSocket,
+  disconnect,
+  sendMessage,
+  type PrivateMessageBody,
+} from '../services/parentChatWebSocket';
 import {
   fetchParentMessagesHistory,
   markConversationMessagesRead,
@@ -30,6 +37,9 @@ type ChatScreenProps = {
   counsellorEmail: string;
   counsellorName?: string | null;
   counsellorAvatarUrl?: string | null;
+  /** Preview từ GET conversations khi GET history trả về rỗng (vẫn thấy tin trên list). */
+  initialLastMessageContent?: string | null;
+  initialLastMessageAt?: string | null;
   onBack: () => void;
 };
 
@@ -37,6 +47,26 @@ function asString(v: unknown): string | null {
   if (typeof v === 'string') return v;
   if (typeof v === 'number') return String(v);
   return null;
+}
+
+function emailsEqual(a: string, b: string): boolean {
+  return a.trim().toLowerCase() === b.trim().toLowerCase();
+}
+
+/** seen > sent > sending — tránh poll/history ghi đè Seen → Delivered liên tục */
+function rankStatus(s: ChatMessage['status'] | undefined): number {
+  if (s === 'seen') return 3;
+  if (s === 'sent') return 2;
+  if (s === 'sending') return 1;
+  return 0;
+}
+
+function pickBetterStatus(
+  a: ChatMessage['status'] | undefined,
+  b: ChatMessage['status'] | undefined
+): ChatMessage['status'] | undefined {
+  if (rankStatus(a) >= rankStatus(b)) return a ?? b;
+  return b ?? a;
 }
 
 function toISO(v: unknown): string {
@@ -71,24 +101,87 @@ function formatTime(date: Date): string {
   return `${hh}:${mm}`;
 }
 
-function normalizeIncomingMessage(body: any, fallbackConversationId: string): ChatMessage | null {
-  const content = asString(
-    body?.content ??
-      body?.message ??
-      body?.text ??
-      body?.body ??
-      body?.messageContent ??
-      body?.chatMessage
+/**
+ * Gộp theo id; tin của `myEmail` giữ status “mạnh” nhất (seen không bị API MESSAGE_SENT lật về Delivered).
+ */
+function mergeUniqueMessages(a: ChatMessage[], b: ChatMessage[], myEmail?: string): ChatMessage[] {
+  const map = new Map<string, ChatMessage>();
+  for (const m of a) map.set(m.id, { ...m });
+  for (const m of b) {
+    const ex = map.get(m.id);
+    if (!ex) {
+      map.set(m.id, { ...m });
+      continue;
+    }
+    const mine = myEmail && emailsEqual(m.senderEmail, myEmail);
+    const status = mine
+      ? pickBetterStatus(ex.status, m.status)
+      : (m.status ?? ex.status);
+    map.set(m.id, { ...ex, ...m, status });
+  }
+  return Array.from(map.values()).sort(
+    (x, y) => new Date(x.createdAt).getTime() - new Date(y.createdAt).getTime()
   );
-  if (!content || typeof content !== 'string') return null;
+}
+
+const LIST_PREVIEW_MESSAGE_ID = '_list_preview_';
+
+function nestedObjectEmail(v: unknown): string | null {
+  if (!v || typeof v !== 'object') return null;
+  return asString((v as Record<string, unknown>).email);
+}
+
+function textFromBody(body: any): string | null {
+  const raw =
+    body?.content ??
+    body?.message ??
+    body?.text ??
+    body?.body ??
+    body?.messageContent ??
+    body?.chatMessage;
+  if (raw == null) return null;
+  if (typeof raw === 'string') return raw;
+  if (typeof raw === 'number' || typeof raw === 'boolean') return String(raw);
+  return null;
+}
+
+function historyMessagesFromBody(body: Record<string, unknown>): unknown[] {
+  if (Array.isArray(body.messages)) return body.messages;
+  if (Array.isArray(body.items)) return body.items;
+  return [];
+}
+
+/** BE: MESSAGE_READ, … → ChatMessage.status cho label Seen / Delivered */
+function mapHistoryStatusToUi(raw: unknown): ChatMessage['status'] | undefined {
+  if (raw == null || raw === '') return undefined;
+  const u = String(raw).toUpperCase();
+  if (u === 'MESSAGE_READ' || u === 'READ' || u === 'SEEN') return 'seen';
+  if (u === 'MESSAGE_SENT' || u === 'SENT' || u === 'DELIVERED') return 'sent';
+  if (u.includes('PENDING') || u.includes('SENDING')) return 'sending';
+  return undefined;
+}
+
+function normalizeIncomingMessage(body: any, fallbackConversationId: string): ChatMessage | null {
+  const content = textFromBody(body);
+  if (content == null || content === '') return null;
+
+  const senderFromSenderField =
+    typeof body?.sender === 'string'
+      ? asString(body.sender)
+      : nestedObjectEmail(body?.sender);
 
   const senderEmail =
     asString(body?.senderEmail) ??
-    asString(body?.sender) ??
+    senderFromSenderField ??
+    asString(body?.senderName) ??
     asString(body?.username) ??
     asString(body?.from) ??
+    asString(body?.createdBy) ??
+    asString(body?.authorEmail) ??
+    asString(body?.userEmail) ??
     '';
-  if (!senderEmail) return null;
+  // Vẫn hiển thị bubble (có thể lệch trái/phải) thay vì nuốt cả tin khi BE thiếu sender
+  const resolvedSender = senderEmail || 'unknown';
 
   const conversationId =
     asString(body?.conversationId) ??
@@ -114,10 +207,10 @@ function normalizeIncomingMessage(body: any, fallbackConversationId: string): Ch
   return {
     id,
     conversationId,
-    senderEmail,
+    senderEmail: resolvedSender,
     content,
     createdAt,
-    status: body?.status as any,
+    status: mapHistoryStatusToUi(body?.status),
     clientMessageId: asString(body?.clientMessageId) ?? undefined,
   };
 }
@@ -127,6 +220,8 @@ export default function ChatScreen({
   parentEmail,
   counsellorEmail,
   counsellorName,
+  initialLastMessageContent,
+  initialLastMessageAt,
   onBack,
 }: ChatScreenProps) {
   const scheme = useColorScheme();
@@ -134,6 +229,7 @@ export default function ChatScreen({
 
   const listRef = useRef<FlatList<any> | null>(null);
   const markReadTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const chatContextRef = useRef({ parentEmail, counsellorEmail, conversationId });
 
   const [connected, setConnected] = useState(false);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -144,8 +240,10 @@ export default function ChatScreen({
   const [cursorId, setCursorId] = useState<string>(''); // cursor for the "next older" page
 
   const [inputText, setInputText] = useState('');
-  const [isTyping, setIsTyping] = useState(false);
-  const [typingDotIndex, setTypingDotIndex] = useState(0);
+
+  useEffect(() => {
+    chatContextRef.current = { parentEmail, counsellorEmail, conversationId };
+  }, [parentEmail, counsellorEmail, conversationId]);
 
   const displayMessages = useMemo(() => {
     // For inverted FlatList: we want newest at bottom, so reverse data.
@@ -163,7 +261,7 @@ export default function ChatScreen({
         try {
           await markConversationMessagesRead(conversationId, parentEmail);
           setMessages((prev) =>
-            prev.map((m) => (m.senderEmail === parentEmail ? { ...m, status: 'seen' } : m))
+            prev.map((m) => (emailsEqual(m.senderEmail, parentEmail) ? { ...m, status: 'seen' } : m))
           );
         } catch (e) {
           // Silence; marking read is best-effort
@@ -179,12 +277,10 @@ export default function ChatScreen({
     setLoadingMore(false);
     setHasMore(true);
     try {
-      // BE: GET .../history/{parentEmail}/{counsellorEmail} returns `body.messages`
       const res = await fetchParentMessagesHistory(parentEmail, counsellorEmail);
-      const resBody = (res as any)?.body ?? res;
-      const rawItems: any[] = resBody?.messages ?? resBody?.items ?? [];
-      const nextCursor: string | undefined =
-        asString(resBody?.nextCursorId) ?? asString(resBody?.nextCursor) ?? undefined;
+      const resBody = res.body as Record<string, unknown>;
+      const rawItems = historyMessagesFromBody(resBody);
+      const nextCursor: string | undefined = asString(resBody.nextCursorId) ?? undefined;
       const pageHasMore: boolean =
         typeof resBody?.hasMore === 'boolean' ? resBody.hasMore : Boolean(resBody?.hasMore);
 
@@ -193,17 +289,37 @@ export default function ChatScreen({
         .filter((m): m is ChatMessage => !!m)
         .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
 
-      setMessages(normalized);
+      if (normalized.length > 0) {
+        setMessages(normalized);
+      } else if (initialLastMessageContent?.trim()) {
+        setMessages([
+          {
+            id: LIST_PREVIEW_MESSAGE_ID,
+            conversationId,
+            senderEmail: counsellorEmail || 'unknown',
+            content: initialLastMessageContent.trim(),
+            createdAt: toISO(initialLastMessageAt) ?? new Date().toISOString(),
+          },
+        ]);
+      } else {
+        setMessages([]);
+      }
       setHasMore(pageHasMore);
       setCursorId(nextCursor ?? '');
-      // Auto-scroll to bottom after first render
       requestAnimationFrame(() => listRef.current?.scrollToOffset({ offset: 0, animated: false }));
 
       handleMarkRead('open');
     } finally {
       setLoadingLatest(false);
     }
-  }, [counsellorEmail, conversationId, handleMarkRead, parentEmail]);
+  }, [
+    counsellorEmail,
+    conversationId,
+    handleMarkRead,
+    initialLastMessageAt,
+    initialLastMessageContent,
+    parentEmail,
+  ]);
 
   const loadMoreOlder = useCallback(async () => {
     if (!hasMore || loadingMore) return;
@@ -211,10 +327,9 @@ export default function ChatScreen({
     setLoadingMore(true);
     try {
       const res = await fetchParentMessagesHistory(parentEmail, counsellorEmail, cursorId);
-      const resBody = (res as any)?.body ?? res;
-      const rawItems: any[] = resBody?.messages ?? resBody?.items ?? [];
-      const nextCursor: string | undefined =
-        asString(resBody?.nextCursorId) ?? asString(resBody?.nextCursor) ?? undefined;
+      const resBody = res.body as Record<string, unknown>;
+      const rawItems = historyMessagesFromBody(resBody);
+      const nextCursor: string | undefined = asString(resBody.nextCursorId) ?? undefined;
       const pageHasMore: boolean =
         typeof resBody?.hasMore === 'boolean' ? resBody.hasMore : Boolean(resBody?.hasMore);
 
@@ -246,29 +361,57 @@ export default function ChatScreen({
   // Connect WS + initial history
   useEffect(() => {
     const onMessage = (body: PrivateMessageBody) => {
+      const raw = body as Record<string, unknown> | null;
+      if (!raw || typeof raw !== 'object') return;
+      const incomingCid = raw.conversationId ?? (raw.conversation as { id?: unknown } | undefined)?.id;
+      if (incomingCid == null || incomingCid === '') return;
+      if (String(incomingCid) !== String(conversationId)) return;
+
       const normalized = normalizeIncomingMessage(body as any, conversationId);
       if (!normalized) return;
 
       setMessages((prev) => {
-        const isMine = normalized.senderEmail === parentEmail;
-        const alreadyExists = prev.some((m) => m.id === normalized.id);
+        const base = prev.filter((m) => m.id !== LIST_PREVIEW_MESSAGE_ID);
+        const isMine = emailsEqual(normalized.senderEmail, parentEmail);
+        if (base.some((m) => m.id === normalized.id)) return prev;
 
-        if (alreadyExists) return prev;
-
-        // Try to match optimistic message by clientMessageId
         if (isMine && normalized.clientMessageId) {
-          const idx = prev.findIndex((m) => m.clientMessageId === normalized.clientMessageId);
+          const idx = base.findIndex((m) => m.clientMessageId === normalized.clientMessageId);
           if (idx >= 0) {
-            const next = prev.slice();
-            next[idx] = { ...next[idx], id: normalized.id, status: 'sent', createdAt: normalized.createdAt };
+            const next = base.slice();
+            next[idx] = {
+              ...next[idx],
+              id: normalized.id,
+              status: pickBetterStatus(next[idx].status, normalized.status) ?? normalized.status ?? 'sent',
+              createdAt: normalized.createdAt,
+            };
             return next;
           }
         }
 
-        return [...prev, { ...normalized, status: isMine ? 'sent' : undefined }];
+        if (isMine) {
+          let stripped = false;
+          const withoutTmp = base.filter((m) => {
+            if (!String(m.id).startsWith('tmp-')) return true;
+            if (!normalized.content || m.content !== normalized.content) return true;
+            if (stripped) return true;
+            stripped = true;
+            return false;
+          });
+          if (stripped) {
+            return mergeUniqueMessages(withoutTmp, [normalized], parentEmail);
+          }
+        }
+
+        return [
+          ...base,
+          {
+            ...normalized,
+            status: isMine ? pickBetterStatus(undefined, normalized.status) ?? 'sent' : undefined,
+          },
+        ];
       });
 
-      // Auto-scroll + mark read when user is at bottom (we always scroll to bottom on new msg)
       requestAnimationFrame(() => listRef.current?.scrollToOffset({ offset: 0, animated: true }));
       handleMarkRead('new-message');
     };
@@ -281,24 +424,37 @@ export default function ChatScreen({
     };
   }, [counsellorEmail, conversationId, handleMarkRead, loadLatest, parentEmail]);
 
-  // Typing indicator (local)
+  /** WS trễ / lỡ — đồng bộ REST định kỳ khi màn hình đang active (giống web ~3.5s). */
   useEffect(() => {
-    if (!inputText.trim()) {
-      setIsTyping(false);
-      return;
-    }
-    setIsTyping(true);
-    const t = setTimeout(() => setIsTyping(false), 1200);
-    return () => clearTimeout(t);
-  }, [inputText]);
+    const tick = async () => {
+      if (AppState.currentState !== 'active') return;
+      const { parentEmail: pe, counsellorEmail: ce, conversationId: cid } = chatContextRef.current;
+      if (!pe?.trim() || !ce?.trim() || !cid) return;
+      try {
+        const res = await fetchParentMessagesHistory(pe, ce);
+        const resBody = res.body as Record<string, unknown>;
+        const rawItems = historyMessagesFromBody(resBody);
+        const normalized = (rawItems ?? [])
+          .map((it) => normalizeIncomingMessage(it, cid))
+          .filter((m): m is ChatMessage => !!m)
+          .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
 
-  useEffect(() => {
-    if (!isTyping) return;
-    const id = setInterval(() => {
-      setTypingDotIndex((v) => (v + 1) % 3);
-    }, 300);
-    return () => clearInterval(id);
-  }, [isTyping]);
+        setMessages((prev) => {
+          if (normalized.length === 0) return prev;
+          const base = prev.filter((m) => m.id !== LIST_PREVIEW_MESSAGE_ID);
+          return mergeUniqueMessages(base, normalized, pe);
+        });
+        setHasMore(typeof resBody.hasMore === 'boolean' ? resBody.hasMore : Boolean(resBody?.hasMore));
+        setCursorId(asString(resBody.nextCursorId) ?? '');
+      } catch {
+        /* im lặng */
+      }
+    };
+    const intervalId = setInterval(() => {
+      void tick();
+    }, 3500);
+    return () => clearInterval(intervalId);
+  }, []);
 
   const handleSend = useCallback(() => {
     const text = inputText.trim();
@@ -322,25 +478,28 @@ export default function ChatScreen({
     setInputText('');
     requestAnimationFrame(() => listRef.current?.scrollToOffset({ offset: 0, animated: true }));
 
-    // Mark as sent optimistically; exact state depends on backend echo
     setTimeout(() => {
       setMessages((prev) =>
-        prev.map((m) => (m.id === tmpId ? { ...m, status: 'sent' } : m))
+        prev.map((m) =>
+          m.id === tmpId ? { ...m, status: pickBetterStatus(m.status, 'sent') } : m
+        )
       );
     }, 500);
 
-    sendMessage({
-      conversationId,
-      receiver: counsellorEmail,
-      sender: parentEmail,
-      content: text,
-      clientMessageId: tmpId,
-    });
+    sendMessage(
+      buildPrivateChatPayload({
+        conversationId,
+        message: text,
+        senderName: parentEmail.trim(),
+        receiverName: counsellorEmail.trim(),
+        clientMessageId: tmpId,
+      })
+    );
   }, [counsellorEmail, conversationId, inputText, parentEmail]);
 
   const renderMessageItem = useCallback(
     ({ item, index }: { item: ChatMessage & { _chronoIndex: number }; index: number }) => {
-      const isMine = item.senderEmail === parentEmail;
+      const isMine = emailsEqual(item.senderEmail, parentEmail);
 
       const above = displayMessages[index + 1] as (ChatMessage & { _chronoIndex: number }) | undefined;
       const showDateSeparator = (() => {
@@ -443,10 +602,12 @@ export default function ChatScreen({
           </Text>
         </View>
       ) : (
+        <View style={styles.listWrap}>
         <FlatList
           ref={(r) => {
             listRef.current = r;
           }}
+          style={styles.listFlex}
           data={displayMessages}
           keyExtractor={(it) => it.id}
           renderItem={renderMessageItem}
@@ -479,6 +640,7 @@ export default function ChatScreen({
           }}
           scrollEventThrottle={250}
         />
+        </View>
       )}
 
       <KeyboardAvoidingView
@@ -505,27 +667,6 @@ export default function ChatScreen({
           />
 
           <View style={styles.rightIcons}>
-            {isTyping ? (
-              <View style={styles.typingWrap}>
-                {[0, 1, 2].map((i) => {
-                  const active = i === typingDotIndex;
-                  return (
-                    <View
-                      key={i}
-                      style={[
-                        styles.dot,
-                        {
-                          backgroundColor: isDark ? '#90caf9' : '#1976d2',
-                          opacity: active ? 1 : 0.35,
-                          transform: [{ translateY: active ? -3 : 0 }],
-                        },
-                      ]}
-                    />
-                  );
-                })}
-              </View>
-            ) : null}
-
             <Pressable
               style={({ pressed }) => [styles.sendBtn, pressed && { opacity: 0.92 }, isDark && styles.sendBtnDark]}
               onPress={handleSend}
@@ -577,7 +718,9 @@ const styles = StyleSheet.create({
   emptyTitle: { fontSize: 15, fontWeight: '700', color: '#64748b', textAlign: 'center' },
   emptyTitleDark: { color: '#94a3b8' },
 
-  listContent: { paddingHorizontal: 14, paddingTop: 10, paddingBottom: 10 },
+  listWrap: { flex: 1, minHeight: 0 },
+  listFlex: { flex: 1 },
+  listContent: { paddingHorizontal: 14, paddingTop: 10, paddingBottom: 10, flexGrow: 1 },
 
   dateSep: { alignItems: 'center', marginVertical: 8 },
   dateSepText: { backgroundColor: 'rgba(148,163,184,0.18)', paddingHorizontal: 10, paddingVertical: 6, borderRadius: 9999, fontSize: 12, fontWeight: '700', color: '#475569' },
@@ -641,9 +784,6 @@ const styles = StyleSheet.create({
   rightIcons: { flexDirection: 'row', alignItems: 'flex-end', gap: 10 },
   sendBtn: { width: 40, height: 40, borderRadius: 20, backgroundColor: '#1976d2', alignItems: 'center', justifyContent: 'center' },
   sendBtnDark: { backgroundColor: '#1976d2' },
-
-  typingWrap: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingBottom: 10 },
-  dot: { width: 6, height: 6, borderRadius: 9999, opacity: 0.6 },
 
   loadingMore: { paddingVertical: 16, alignItems: 'center', justifyContent: 'center' },
   loadingMoreText: { marginTop: 8, color: '#64748b', fontWeight: '700', fontSize: 12 },

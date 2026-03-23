@@ -25,6 +25,7 @@ import ChatScreen from './ChatScreen';
 import { getProfile, isProfileComplete } from '../api/profile';
 import type { ProfileGetBody } from '../types/auth';
 import type { ParentConversationsItem } from '../types/chat';
+import { resolveParentChatEmails } from '../utils/resolveParentChatEmails';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
@@ -437,12 +438,18 @@ export default function HomeScreen() {
   }
 
   if (chatView === 'chat' && selectedConversation) {
+    const { parentEmail: resolvedParent, counsellorEmail: resolvedCounsellor } = resolveParentChatEmails(
+      selectedConversation,
+      user?.email ?? ''
+    );
     return (
       <ChatScreen
         conversationId={selectedConversation.conversationId}
-        parentEmail={user?.email ?? ''}
-        counsellorEmail={selectedConversation.counsellorEmail}
+        parentEmail={resolvedParent}
+        counsellorEmail={resolvedCounsellor}
         counsellorName={selectedConversation.counsellorName ?? undefined}
+        initialLastMessageContent={selectedConversation.lastMessageContent ?? undefined}
+        initialLastMessageAt={selectedConversation.lastMessageAt ?? undefined}
         onBack={() => setChatView('conversations')}
       />
     );
