@@ -32,40 +32,73 @@ function normalizeConversations(raw: unknown): ParentConversationsItem[] {
     : (raw as any)?.items ?? (raw as any)?.body?.items ?? [];
 
   return (arr ?? []).map((it: any) => {
-    const conversationId = asString(it?.conversationId) ?? '';
+    // Giống web Header.jsx normalizeConversation + resolveConversationEmails
+    const conversationId =
+      asString(it?.conversationId) ??
+      asString(it?.id) ??
+      asString(it?.conversation?.id) ??
+      '';
 
-    // BE response: `otherUser` is counsellor email
-    const counsellorEmail = asString(it?.otherUser) ?? '';
-    const counsellorName = asString(it?.otherUser) ?? null;
+    const counsellorEmail =
+      asString(it?.counsellorEmail) ??
+      asString(it?.otherUser) ??
+      asString(it?.schoolEmail) ??
+      asString(it?.participantCounsellorEmail) ??
+      asString(it?.participantEmail) ??
+      '';
+
+    const counsellorName =
+      asString(it?.name) ??
+      asString(it?.participantName) ??
+      asString(it?.title) ??
+      asString(it?.schoolName) ??
+      asString(it?.otherUser) ??
+      null;
+
+    const participantParentEmail =
+      asString(it?.parentEmail) ?? asString(it?.participantParentEmail) ?? null;
 
     const unreadCount =
       typeof it?.unreadCount === 'number'
         ? it.unreadCount
         : typeof it?.unreadCount === 'string'
           ? Number(it.unreadCount)
-          : undefined;
+          : typeof it?.unreadMessages === 'number'
+            ? it.unreadMessages
+            : typeof it?.unreadMessages === 'string'
+              ? Number(it.unreadMessages)
+              : undefined;
 
-    const lastMessageContent =
-      it?.lastMessage == null
-        ? null
-        : (asString(it?.lastMessage?.content) ??
-            asString(it?.lastMessage?.message) ??
-            asString(it?.lastMessage?.text) ??
-            asString(it?.lastMessage)) ??
-          null;
-
-    const lastMessageAt =
-      it?.lastMessage == null
-        ? null
-        : (asString(it?.lastMessage?.createdAt) ??
-            asString(it?.lastMessage?.timestamp) ??
-            asString(it?.lastMessage?.updatedAt)) ??
-          null;
+    let lastMessageContent: string | null = null;
+    let lastMessageAt: string | null = null;
+    if (it?.lastMessage == null) {
+      lastMessageContent = asString(it?.latestMessage);
+    } else if (typeof it.lastMessage === 'string') {
+      lastMessageContent = it.lastMessage;
+    } else {
+      lastMessageContent =
+        asString(it?.lastMessage?.content) ??
+        asString(it?.lastMessage?.message) ??
+        asString(it?.lastMessage?.text) ??
+        null;
+      lastMessageAt =
+        asString(it?.lastMessage?.createdAt) ??
+        asString(it?.lastMessage?.timestamp) ??
+        asString(it?.lastMessage?.updatedAt) ??
+        asString(it?.lastMessageTime) ??
+        asString(it?.time) ??
+        null;
+    }
+    if (!lastMessageAt) {
+      lastMessageAt =
+        asString(it?.updatedAt) ?? asString(it?.lastMessageTime) ?? asString(it?.time) ?? null;
+    }
 
     return {
       conversationId,
       counsellorEmail,
       counsellorName,
+      participantParentEmail,
       counsellorAvatarUrl: asString(it?.counsellorAvatarUrl) ?? null,
       unreadCount: typeof unreadCount === 'number' && !Number.isNaN(unreadCount) ? unreadCount : undefined,
       lastMessageContent,
