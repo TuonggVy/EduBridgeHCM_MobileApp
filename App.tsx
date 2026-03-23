@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { StatusBar } from 'expo-status-bar';
 import { GoogleSignin } from '@react-native-google-signin/google-signin';
 import { AuthProvider, useAuth } from './src/context/AuthContext';
+import { ToastProvider } from './src/components/AppToast';
 import LoginScreen from './src/screens/LoginScreen';
 import RegisterScreen from './src/screens/RegisterScreen';
 import HomeScreen from './src/screens/HomeScreen';
@@ -45,8 +46,10 @@ function AppContent({
 export default function App() {
   const [authView, setAuthView] = useState<'login' | 'register'>('login');
   return (
-    <AuthProvider onRegisterSuccess={() => setAuthView('login')}>
-      <AppContent authView={authView} setAuthView={setAuthView} />
-    </AuthProvider>
+    <ToastProvider>
+      <AuthProvider onRegisterSuccess={() => setAuthView('login')}>
+        <AppContent authView={authView} setAuthView={setAuthView} />
+      </AuthProvider>
+    </ToastProvider>
   );
 }

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
@@ -20,10 +20,15 @@ import SearchScreen from './SearchScreen';
 import { CompleteProfileBottomSheet } from '../components/CompleteProfileBottomSheet';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import ParentProfileFormScreen from './ParentProfileFormScreen';
+import StudentProfileScreen from './StudentProfileScreen';
+import StudentProfileFormScreen from './StudentProfileFormScreen';
 import ConversationsScreen from './ConversationsScreen';
 import ChatScreen from './ChatScreen';
 import { getProfile, isProfileComplete } from '../api/profile';
+import { fetchParentPersonalityTypes, fetchParentStudents } from '../api/parentStudent';
 import type { ProfileGetBody } from '../types/auth';
+import type { ParentStudentProfile, PersonalityTypesGrouped } from '../types/studentProfile';
+import { formatGradeLevel } from '../utils/gradeLevel';
 import type { ParentConversationsItem } from '../types/chat';
 import { resolveParentChatEmails } from '../utils/resolveParentChatEmails';
 
@@ -199,12 +204,6 @@ function SchoolsTabContent() {
   );
 }
 
-// ─── Mock data for profile ──────────────────────────────────────────────────
-const MOCK_CHILDREN = [
-  { id: '1', name: 'Nguyễn Văn A', age: 15, grade: 'Lớp 9' },
-  { id: '2', name: 'Nguyễn Thị B', age: 12, grade: 'Lớp 6' },
-];
-
 const PROFILE_MENU_ACTIVITIES = [
   { id: 'consultation', label: 'Lịch sử tư vấn', icon: 'chatbubble-ellipses-outline' },
   { id: 'saved', label: 'Trường đã lưu', icon: 'bookmark-outline' },
@@ -229,9 +228,17 @@ const PROFILE_MENU_SETTINGS = [
 function ProfileTabContent({
   profileData,
   onEditProfile,
+  students,
+  studentsLoading,
+  onAddChild,
+  onOpenChild,
 }: {
   profileData: ProfileGetBody | null;
   onEditProfile: () => void;
+  students: ParentStudentProfile[];
+  studentsLoading: boolean;
+  onAddChild: () => void;
+  onOpenChild: (s: ParentStudentProfile) => void;
 }) {
   const { user, logout } = useAuth();
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
@@ -298,31 +305,62 @@ function ProfileTabContent({
         </View>
       </View>
 
-      {/* 2. My children */}
+      {/* 2. My children — API parent/student */}
       <View style={styles.profileSectionCard}>
         <View style={styles.profileSectionRow}>
           <Text style={styles.profileSectionTitle}>Con của tôi</Text>
-          <Pressable style={styles.profileAddButton}>
+          <Pressable onPress={onAddChild} style={styles.profileAddButton}>
             <Ionicons name="add-circle-outline" size={22} color="#1976d2" />
             <Text style={styles.profileAddButtonText}>Thêm con</Text>
           </Pressable>
         </View>
-        <View style={styles.profileChildrenList}>
-          {MOCK_CHILDREN.map((child) => (
-            <View key={child.id} style={styles.profileChildItem}>
-              <View style={styles.profileChildAvatar}>
-                <Ionicons name="person-outline" size={24} color="#64748b" />
-              </View>
-              <View style={styles.profileChildInfo}>
-                <Text style={styles.profileChildName}>{child.name}</Text>
-                <Text style={styles.profileChildMeta}>
-                  {child.age} tuổi · {child.grade}
-                </Text>
-              </View>
-              <Ionicons name="chevron-forward" size={20} color="#cbd5e1" />
+        {studentsLoading ? (
+          <View style={styles.profileChildrenSkeleton}>
+            <Text style={styles.profileSkeletonText}>Đang tải hồ sơ con…</Text>
+          </View>
+        ) : students.length === 0 ? (
+          <View style={styles.profileEmptyChildren}>
+            <View style={styles.profileEmptyIconWrap}>
+              <Ionicons name="people-outline" size={48} color="#c7d2fe" />
             </View>
-          ))}
-        </View>
+            <Text style={styles.profileEmptyTitle}>Chưa có hồ sơ con</Text>
+            <Text style={styles.profileEmptySub}>
+              Thêm hồ sơ để lưu MBTI, điểm số và định hướng nghề nghiệp cho con.
+            </Text>
+            <Pressable onPress={onAddChild} style={({ pressed }) => [styles.profileEmptyCta, pressed && { opacity: 0.9 }]}>
+              <Ionicons name="add" size={22} color="#fff" />
+              <Text style={styles.profileEmptyCtaText}>Thêm con</Text>
+            </Pressable>
+          </View>
+        ) : (
+          <View style={styles.profileChildrenList}>
+            {students.map((child, index) => {
+              const key = child.id != null ? String(child.id) : `student-${index}`;
+              const grade = formatGradeLevel(child.academicInfos?.[0]?.gradeLevel);
+              const meta = [child.gender === 'MALE' ? 'Nam' : child.gender === 'FEMALE' ? 'Nữ' : child.gender, grade]
+                .filter(Boolean)
+                .join(' · ');
+              return (
+                <Pressable
+                  key={key}
+                  onPress={() => onOpenChild(child)}
+                  style={({ pressed }) => [styles.profileChildItem, pressed && { opacity: 0.85 }]}
+                >
+                  <View style={styles.profileChildAvatar}>
+                    <Ionicons name="happy-outline" size={24} color="#1976d2" />
+                  </View>
+                  <View style={styles.profileChildInfo}>
+                    <Text style={styles.profileChildName}>{child.studentName}</Text>
+                    <Text style={styles.profileChildMeta} numberOfLines={1}>
+                      {meta || 'Xem hồ sơ chi tiết'}
+                    </Text>
+                  </View>
+                  <Ionicons name="chevron-forward" size={20} color="#cbd5e1" />
+                </Pressable>
+              );
+            })}
+          </View>
+        )}
       </View>
 
       {/* 3. My activities */}
@@ -384,6 +422,52 @@ export default function HomeScreen() {
   const [showProfileForm, setShowProfileForm] = useState(false);
   const [chatView, setChatView] = useState<'app' | 'conversations' | 'chat'>('app');
   const [selectedConversation, setSelectedConversation] = useState<ParentConversationsItem | null>(null);
+
+  const [students, setStudents] = useState<ParentStudentProfile[]>([]);
+  const [studentsLoading, setStudentsLoading] = useState(false);
+  const [personalityGrouped, setPersonalityGrouped] = useState<PersonalityTypesGrouped | null>(null);
+  const [showStudentProfile, setShowStudentProfile] = useState(false);
+  const [profileStudent, setProfileStudent] = useState<ParentStudentProfile | null>(null);
+  const [showStudentForm, setShowStudentForm] = useState(false);
+  const [studentFormInitial, setStudentFormInitial] = useState<ParentStudentProfile | null>(null);
+
+  const refreshStudents = useCallback(async () => {
+    try {
+      const res = await fetchParentStudents();
+      setStudents(Array.isArray(res.body) ? res.body : []);
+    } catch {
+      setStudents([]);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (activeTab !== 'account' || !user) return;
+    let cancelled = false;
+    setStudentsLoading(true);
+    (async () => {
+      try {
+        const [stuRes, perRes] = await Promise.all([
+          fetchParentStudents(),
+          fetchParentPersonalityTypes(),
+        ]);
+        if (cancelled) return;
+        setStudents(Array.isArray(stuRes.body) ? stuRes.body : []);
+        setPersonalityGrouped(
+          perRes.body && typeof perRes.body === 'object' ? perRes.body : null
+        );
+      } catch {
+        if (!cancelled) {
+          setStudents([]);
+          setPersonalityGrouped(null);
+        }
+      } finally {
+        if (!cancelled) setStudentsLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [activeTab, user?.email]);
 
   useEffect(() => {
     if (!user) {
@@ -511,11 +595,21 @@ export default function HomeScreen() {
           </View>
         )}
         {activeTab === 'account' && (
-              <ProfileTabContent
-                profileData={profileData}
-                onEditProfile={() => setShowProfileForm(true)}
-              />
-            )}
+          <ProfileTabContent
+            profileData={profileData}
+            onEditProfile={() => setShowProfileForm(true)}
+            students={students}
+            studentsLoading={studentsLoading}
+            onAddChild={() => {
+              setStudentFormInitial(null);
+              setShowStudentForm(true);
+            }}
+            onOpenChild={(s) => {
+              setProfileStudent(s);
+              setShowStudentProfile(true);
+            }}
+          />
+        )}
         <View style={styles.bottomSpacer} />
       </ScrollView>
 
@@ -572,6 +666,33 @@ export default function HomeScreen() {
         initialData={profileData?.parent ?? null}
         onSaved={handleProfileSaved}
         onClose={() => setShowProfileForm(false)}
+      />
+
+      <StudentProfileScreen
+        visible={showStudentProfile}
+        student={profileStudent}
+        personalityGrouped={personalityGrouped}
+        onClose={() => {
+          setShowStudentProfile(false);
+          setProfileStudent(null);
+        }}
+        onEdit={(s) => {
+          setShowStudentProfile(false);
+          setStudentFormInitial(s);
+          setShowStudentForm(true);
+        }}
+      />
+
+      <StudentProfileFormScreen
+        visible={showStudentForm}
+        initialStudent={studentFormInitial}
+        onClose={() => {
+          setShowStudentForm(false);
+          setStudentFormInitial(null);
+        }}
+        onSaved={() => {
+          refreshStudents();
+        }}
       />
     </View>
   );
@@ -923,6 +1044,55 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: '#64748b',
     marginTop: 2,
+  },
+  profileChildrenSkeleton: {
+    paddingVertical: 24,
+    alignItems: 'center',
+  },
+  profileSkeletonText: {
+    fontSize: 14,
+    color: '#94a3b8',
+  },
+  profileEmptyChildren: {
+    alignItems: 'center',
+    paddingVertical: 20,
+    paddingHorizontal: 8,
+  },
+  profileEmptyIconWrap: {
+    width: 88,
+    height: 88,
+    borderRadius: 44,
+    backgroundColor: '#eef2ff',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 12,
+  },
+  profileEmptyTitle: {
+    fontSize: 17,
+    fontWeight: '700',
+    color: '#334155',
+    marginBottom: 6,
+  },
+  profileEmptySub: {
+    fontSize: 14,
+    color: '#94a3b8',
+    textAlign: 'center',
+    lineHeight: 20,
+    marginBottom: 16,
+  },
+  profileEmptyCta: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: '#1976d2',
+    paddingVertical: 12,
+    paddingHorizontal: 20,
+    borderRadius: 999,
+  },
+  profileEmptyCtaText: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: '#fff',
   },
   profileMenuList: {
     marginTop: sp.xxs,

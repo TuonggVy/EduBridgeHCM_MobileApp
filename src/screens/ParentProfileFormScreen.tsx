@@ -8,7 +8,6 @@ import {
   Pressable,
   Modal,
   ActivityIndicator,
-  Alert,
   KeyboardAvoidingView,
   Platform,
 } from 'react-native';
@@ -16,6 +15,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 const Ionicons = require('@expo/vector-icons').Ionicons;
 import { updateProfile } from '../api/profile';
 import type { ParentInfo, ParentDataInput } from '../types/auth';
+import { useToast } from '../components/AppToast';
 
 const radius = { sm: 8, md: 12, lg: 16, xl: 20 } as const;
 
@@ -48,6 +48,7 @@ export default function ParentProfileFormScreen({
   onSaved,
   onClose,
 }: ParentProfileFormScreenProps) {
+  const { showWarning, showError, showSuccess } = useToast();
   const [name, setName] = useState(initialData?.name ?? '');
   const [phone, setPhone] = useState(initialData?.phone ?? '');
   const [idCardNumber, setIdCardNumber] = useState(initialData?.idCardNumber ?? '');
@@ -85,18 +86,18 @@ export default function ParentProfileFormScreen({
     const trimmedName = name.trim();
     const trimmedPhone = phone.trim();
     if (!trimmedName || !trimmedPhone) {
-      Alert.alert('Thiếu thông tin', 'Vui lòng nhập Họ tên và Số điện thoại.');
+      showWarning('Vui lòng nhập Họ tên và Số điện thoại.', 'Warning');
       return;
     }
 
     const trimmedIdCard = idCardNumber.trim();
     if (trimmedIdCard) {
       if (trimmedIdCard.length !== 12) {
-        Alert.alert('Số CCCD/CMND không hợp lệ', 'Số CCCD/CMND phải đúng 12 chữ số.');
+        showWarning('Số CCCD/CMND phải đúng 12 chữ số.', 'Warning');
         return;
       }
       if (/\D/.test(trimmedIdCard)) {
-        Alert.alert('Số CCCD/CMND không hợp lệ', 'Chỉ được nhập 12 chữ số.');
+        showWarning('Số CCCD/CMND chỉ được nhập 12 chữ số.', 'Warning');
         return;
       }
     }
@@ -114,10 +115,11 @@ export default function ParentProfileFormScreen({
         currentAddress: currentAddress || undefined,
       };
       await updateProfile({ parentData });
+      showSuccess('Profile updated', 'Success');
       onSaved();
     } catch (e) {
       const msg = e instanceof Error ? e.message : 'Không lưu được hồ sơ';
-      Alert.alert('Lỗi', msg);
+      showError(msg, 'Something went wrong');
     } finally {
       setSaving(false);
     }
