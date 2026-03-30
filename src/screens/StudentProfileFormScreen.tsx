@@ -23,7 +23,7 @@ import {
 } from '../api/parentStudent';
 import type {
   AcademicInfo,
-  MajorItem,
+  MajorGroup,
   ParentStudentProfile,
   SubjectGroup,
   PersonalityTypesGrouped,
@@ -193,7 +193,8 @@ export default function StudentProfileFormScreen({ visible, initialStudent, onCl
   const [loadingRefs, setLoadingRefs] = useState(false);
   const [subjectGroups, setSubjectGroups] = useState<SubjectGroup[]>([]);
   const [personalityGrouped, setPersonalityGrouped] = useState<PersonalityTypesGrouped | null>(null);
-  const [flatMajors, setFlatMajors] = useState<MajorItem[]>([]);
+  const [majorGroups, setMajorGroups] = useState<MajorGroup[]>([]);
+  const [majorGroupsExpanded, setMajorGroupsExpanded] = useState<Record<string, boolean>>({});
 
   const [studentName, setStudentName] = useState('');
   const [gender, setGender] = useState('');
@@ -207,11 +208,16 @@ export default function StudentProfileFormScreen({ visible, initialStudent, onCl
   const [saving, setSaving] = useState(false);
   const [jobSuggestOpen, setJobSuggestOpen] = useState(false);
 
-  const jobSuggestions = useMemo(() => {
+  const filteredMajorGroups = useMemo(() => {
     const q = favouriteJob.trim().toLowerCase();
-    if (q.length < 1) return flatMajors.slice(0, 12);
-    return flatMajors.filter((m) => m.name.toLowerCase().includes(q)).slice(0, 20);
-  }, [favouriteJob, flatMajors]);
+    if (q.length < 1) return majorGroups;
+    return majorGroups
+      .map((g) => ({
+        ...g,
+        majors: g.majors.filter((m) => m.name.toLowerCase().includes(q)),
+      }))
+      .filter((g) => g.majors.length > 0);
+  }, [favouriteJob, majorGroups]);
 
   useEffect(() => {
     if (!visible) return;
@@ -220,9 +226,7 @@ export default function StudentProfileFormScreen({ visible, initialStudent, onCl
       .then(([subRes, perRes, majRes]) => {
         setSubjectGroups(Array.isArray(subRes.body) ? subRes.body : []);
         setPersonalityGrouped(perRes.body && typeof perRes.body === 'object' ? perRes.body : null);
-        const majors: MajorItem[] = [];
-        (majRes.body || []).forEach((grp) => grp.majors?.forEach((m) => majors.push(m)));
-        setFlatMajors(majors);
+        setMajorGroups(Array.isArray(majRes.body) ? majRes.body : []);
       })
       .catch((e) => {
         const msg = e instanceof Error ? e.message : 'Không tải được danh mục';
@@ -230,6 +234,30 @@ export default function StudentProfileFormScreen({ visible, initialStudent, onCl
       })
       .finally(() => setLoadingRefs(false));
   }, [visible]);
+
+  useEffect(() => {
+    if (!majorGroups.length) return;
+    setMajorGroupsExpanded((prev) => {
+      const next = { ...prev };
+      majorGroups.forEach((g) => {
+        if (next[g.group] === undefined) next[g.group] = true;
+      });
+      return next;
+    });
+  }, [majorGroups]);
+
+  // Khi mở dropdown gợi ý, luôn expand lại tất cả group
+  // để người dùng không bị "kẹt" ở trạng thái thu (false) cho một group nào đó.
+  useEffect(() => {
+    if (!jobSuggestOpen) return;
+    setMajorGroupsExpanded(() => {
+      const next: Record<string, boolean> = {};
+      majorGroups.forEach((g) => {
+        next[g.group] = true;
+      });
+      return next;
+    });
+  }, [jobSuggestOpen, majorGroups]);
 
   useEffect(() => {
     if (!visible) return;
@@ -529,24 +557,63 @@ export default function StudentProfileFormScreen({ visible, initialStudent, onCl
                 placeholder="Gõ để gợi ý từ danh ngành đại học"
                 placeholderTextColor="#94a3b8"
               />
-              {jobSuggestOpen && jobSuggestions.length > 0 && (
+              {jobSuggestOpen && filteredMajorGroups.length > 0 && (
                 <View style={styles.suggestBox}>
-                  {jobSuggestions.map((m) => (
-                    <Pressable
-                      key={m.code}
-                      onPress={() => {
-                        setFavouriteJob(m.name);
-                        setJobSuggestOpen(false);
-                      }}
-                      style={styles.suggestRow}
-                    >
-                      <Text style={styles.suggestText} numberOfLines={2}>
-                        {m.name}
-                      </Text>
-                    </Pressable>
-                  ))}
+                  <ScrollView
+                    nestedScrollEnabled
+                    keyboardShouldPersistTaps="handled"
+                    showsVerticalScrollIndicator
+                    style={styles.suggestScroll}
+                    contentContainerStyle={styles.suggestScrollContent}
+                  >
+                    {filteredMajorGroups.map((g) => {
+                      const open = majorGroupsExpanded[g.group] !== false;
+                      return (
+                        <View key={g.group} style={styles.suggestAcc}>
+                          <Pressable
+                            onPress={() =>
+                              setMajorGroupsExpanded((s) => ({ ...s, [g.group]: !open }))
+                            }
+                            style={styles.suggestAccHead}
+                          >
+                            <Text style={styles.suggestGroupTitle} numberOfLines={2}>
+                              {g.group}
+                            </Text>
+                            <Ionicons
+                              name={open ? 'chevron-up' : 'chevron-down'}
+                              size={20}
+                              color="#64748b"
+                            />
+                          </Pressable>
+                          {open &&
+                            g.majors.map((m) => (
+                              <Pressable
+                                key={`${g.group}-${m.code}`}
+                                onPress={() => {
+                                  setFavouriteJob(m.name);
+                                  setJobSuggestOpen(false);
+                                }}
+                                style={styles.suggestRow}
+                              >
+                                <Text style={styles.suggestText} numberOfLines={2}>
+                                  {m.name}
+                                </Text>
+                              </Pressable>
+                            ))}
+                        </View>
+                      );
+                    })}
+                  </ScrollView>
                 </View>
               )}
+              {jobSuggestOpen &&
+                favouriteJob.trim().length > 0 &&
+                majorGroups.length > 0 &&
+                filteredMajorGroups.length === 0 && (
+                  <View style={styles.suggestBox}>
+                    <Text style={styles.suggestEmpty}>Không tìm thấy ngành phù hợp</Text>
+                  </View>
+                )}
             </View>
 
             <Text style={styles.sectionHdr}>Kết quả học tập theo khối</Text>
@@ -746,15 +813,35 @@ const styles = StyleSheet.create({
   pCardName: { fontSize: 11, color: '#64748b', textAlign: 'center' },
   suggestBox: {
     marginTop: 8,
-    maxHeight: 200,
+    maxHeight: 320,
     borderRadius: radius.lg,
     borderWidth: 1,
     borderColor: '#e2e8f0',
     backgroundColor: '#fff',
     overflow: 'hidden',
   },
-  suggestRow: { paddingVertical: 12, paddingHorizontal: 14, borderBottomWidth: 1, borderBottomColor: '#f1f5f9' },
+  suggestScroll: { maxHeight: 320 },
+  suggestScrollContent: { paddingBottom: 8 },
+  suggestAcc: { borderBottomWidth: 1, borderBottomColor: '#f1f5f9' },
+  suggestAccHead: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    backgroundColor: '#f8fafc',
+    gap: 8,
+  },
+  suggestGroupTitle: { flex: 1, fontSize: 14, fontWeight: '700', color: '#0f172a' },
+  suggestRow: {
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+    paddingLeft: 16,
+    borderTopWidth: 1,
+    borderTopColor: '#f1f5f9',
+  },
   suggestText: { fontSize: 14, color: '#334155' },
+  suggestEmpty: { padding: 14, fontSize: 14, color: '#64748b', textAlign: 'center' },
   sectionHdr: { fontSize: 17, fontWeight: '800', color: '#0f172a', marginBottom: sp.sm },
   academicCard: {
     backgroundColor: '#fff',
