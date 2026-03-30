@@ -58,8 +58,7 @@ export async function signInWithGoogle(): Promise<SignInWithGoogleResult> {
 }
 
 /**
- * Đăng ký Parent bằng Google: lấy email từ Google → gọi POST /api/v1/auth/register
- * với role PARENT, schoolRequest null.
+ * Đăng ký Parent bằng Google: email + avatar (URL ảnh đại diện Gmail từ JWT `picture`) → POST /api/v1/auth/register.
  */
 export async function registerWithGoogle(): Promise<RegisterWithGoogleResult> {
   const response = await GoogleSignin.signIn();
@@ -79,11 +78,16 @@ export async function registerWithGoogle(): Promise<RegisterWithGoogleResult> {
     return { success: false, error: 'Không lấy được email từ Google' };
   }
 
+  const avatar =
+    typeof payload.picture === 'string' && payload.picture.length > 0
+      ? payload.picture
+      : '';
+
   try {
     const registerResponse = await apiRegister({
       email,
+      avatar,
       role: PARENT_ROLE,
-      schoolRequest: null,
     });
     const body = registerResponse.body;
     if (body.accessToken) await setAccessToken(body.accessToken);

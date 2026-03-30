@@ -4,6 +4,7 @@ export type ParentInfo = {
   phone: string | null;
   occupation: string | null;
   idCardNumber: string | null;
+  avatar: string | null;
   relationship: string | null;
   workplace: string | null;
   currentAddress: string | null;
@@ -48,10 +49,11 @@ export type SchoolRequest = {
   createdAt?: string;
 };
 
+/** POST /api/v1/auth/register — đăng ký Parent: avatar là URL ảnh Google (JWT claim `picture`) */
 export type RegisterRequest = {
   email: string;
+  avatar: string;
   role: string;
-  schoolRequest: SchoolRequest | null;
 };
 
 export type RegisterResponse = {

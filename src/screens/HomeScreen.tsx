@@ -247,6 +247,8 @@ function ProfileTabContent({
     user?.email?.split('@')[0] ||
     'Phụ huynh';
 
+  const avatarUrl = profileData?.parent?.avatar?.trim() || '';
+
   const MenuCard = ({
     title,
     items,
@@ -284,7 +286,15 @@ function ProfileTabContent({
       <View style={styles.profileHeaderCard}>
         <View style={styles.profileHeaderRow}>
           <View style={styles.profileAvatarLarge}>
-            <Ionicons name="person" size={40} color="#64748b" />
+            {avatarUrl ? (
+              <Image
+                source={{ uri: avatarUrl }}
+                style={styles.profileAvatarImage}
+                resizeMode="cover"
+              />
+            ) : (
+              <Ionicons name="person" size={40} color="#64748b" />
+            )}
           </View>
           <View style={styles.profileHeaderInfo}>
             <Text style={styles.profileUserName}>{displayName}</Text>
@@ -947,6 +957,11 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     marginRight: sp.lg,
+    overflow: 'hidden',
+  },
+  profileAvatarImage: {
+    width: 72,
+    height: 72,
   },
   profileHeaderInfo: {
     flex: 1,
