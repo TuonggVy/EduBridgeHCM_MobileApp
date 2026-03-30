@@ -37,7 +37,7 @@ export async function signin(email: string): Promise<LoginResponse> {
 }
 
 /**
- * Gọi API đăng ký. Parent: role "PARENT", schoolRequest null.
+ * Gọi API đăng ký. Parent: role "PARENT", avatar = URL ảnh Google (JWT `picture`).
  */
 export async function register(
   payload: RegisterRequest
