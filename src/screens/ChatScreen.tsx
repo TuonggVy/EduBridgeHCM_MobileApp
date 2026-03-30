@@ -33,6 +33,8 @@ const INPUT_BAR_ICON_SIZE = 22;
 
 type ChatScreenProps = {
   conversationId: string;
+  /** Path GET /parent/messages/history/.../{studentProfileId} */
+  studentProfileId: string | number;
   parentEmail: string;
   counsellorEmail: string;
   counsellorName?: string | null;
@@ -102,6 +104,44 @@ function formatTime(date: Date): string {
 }
 
 /**
+ * Tin gửi tạo bubble `tmp-*`; khi history/WS trả cùng nội dung với `id` từ server, merge theo id sẽ
+ * giữ cả hai — gỡ bản tmp khi đã có bản “thật” (cùng người gửi, cùng nội dung, gần thời gian).
+ */
+const OPTIMISTIC_DEDUPE_WINDOW_MS = 3 * 60 * 1000;
+
+function dropOptimisticDuplicatesOfServer(messages: ChatMessage[], myEmail: string): ChatMessage[] {
+  const tmps = messages.filter(
+    (m) => String(m.id).startsWith('tmp-') && emailsEqual(m.senderEmail, myEmail)
+  );
+  if (tmps.length === 0) return messages;
+
+  const serverMine = messages.filter(
+    (m) =>
+      !String(m.id).startsWith('tmp-') && emailsEqual(m.senderEmail, myEmail)
+  );
+
+  const usedServer = new Set<string>();
+  const dropTmpIds = new Set<string>();
+
+  for (const tmp of [...tmps].sort(
+    (a, b) => +new Date(a.createdAt) - +new Date(b.createdAt)
+  )) {
+    const match = serverMine.find(
+      (s) =>
+        !usedServer.has(s.id) &&
+        s.content.trim() === tmp.content.trim() &&
+        Math.abs(+new Date(s.createdAt) - +new Date(tmp.createdAt)) <= OPTIMISTIC_DEDUPE_WINDOW_MS
+    );
+    if (match) {
+      dropTmpIds.add(tmp.id);
+      usedServer.add(match.id);
+    }
+  }
+
+  return messages.filter((m) => !dropTmpIds.has(m.id));
+}
+
+/**
  * Gộp theo id; tin của `myEmail` giữ status “mạnh” nhất (seen không bị API MESSAGE_SENT lật về Delivered).
  */
 function mergeUniqueMessages(a: ChatMessage[], b: ChatMessage[], myEmail?: string): ChatMessage[] {
@@ -119,9 +159,10 @@ function mergeUniqueMessages(a: ChatMessage[], b: ChatMessage[], myEmail?: strin
       : (m.status ?? ex.status);
     map.set(m.id, { ...ex, ...m, status });
   }
-  return Array.from(map.values()).sort(
+  const merged = Array.from(map.values()).sort(
     (x, y) => new Date(x.createdAt).getTime() - new Date(y.createdAt).getTime()
   );
+  return myEmail ? dropOptimisticDuplicatesOfServer(merged, myEmail) : merged;
 }
 
 const LIST_PREVIEW_MESSAGE_ID = '_list_preview_';
@@ -217,6 +258,7 @@ function normalizeIncomingMessage(body: any, fallbackConversationId: string): Ch
 
 export default function ChatScreen({
   conversationId,
+  studentProfileId,
   parentEmail,
   counsellorEmail,
   counsellorName,
@@ -229,7 +271,7 @@ export default function ChatScreen({
 
   const listRef = useRef<FlatList<any> | null>(null);
   const markReadTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const chatContextRef = useRef({ parentEmail, counsellorEmail, conversationId });
+  const chatContextRef = useRef({ parentEmail, counsellorEmail, conversationId, studentProfileId });
 
   const [connected, setConnected] = useState(false);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -242,8 +284,8 @@ export default function ChatScreen({
   const [inputText, setInputText] = useState('');
 
   useEffect(() => {
-    chatContextRef.current = { parentEmail, counsellorEmail, conversationId };
-  }, [parentEmail, counsellorEmail, conversationId]);
+    chatContextRef.current = { parentEmail, counsellorEmail, conversationId, studentProfileId };
+  }, [parentEmail, counsellorEmail, conversationId, studentProfileId]);
 
   const displayMessages = useMemo(() => {
     // For inverted FlatList: we want newest at bottom, so reverse data.
@@ -277,7 +319,7 @@ export default function ChatScreen({
     setLoadingMore(false);
     setHasMore(true);
     try {
-      const res = await fetchParentMessagesHistory(parentEmail, counsellorEmail);
+      const res = await fetchParentMessagesHistory(parentEmail, counsellorEmail, studentProfileId);
       const resBody = res.body as Record<string, unknown>;
       const rawItems = historyMessagesFromBody(resBody);
       const nextCursor: string | undefined = asString(resBody.nextCursorId) ?? undefined;
@@ -319,6 +361,7 @@ export default function ChatScreen({
     initialLastMessageAt,
     initialLastMessageContent,
     parentEmail,
+    studentProfileId,
   ]);
 
   const loadMoreOlder = useCallback(async () => {
@@ -326,7 +369,7 @@ export default function ChatScreen({
     if (!cursorId) return;
     setLoadingMore(true);
     try {
-      const res = await fetchParentMessagesHistory(parentEmail, counsellorEmail, cursorId);
+      const res = await fetchParentMessagesHistory(parentEmail, counsellorEmail, studentProfileId, cursorId);
       const resBody = res.body as Record<string, unknown>;
       const rawItems = historyMessagesFromBody(resBody);
       const nextCursor: string | undefined = asString(resBody.nextCursorId) ?? undefined;
@@ -348,7 +391,7 @@ export default function ChatScreen({
           seen.add(m.id);
           deduped.push(m);
         }
-        return deduped;
+        return dropOptimisticDuplicatesOfServer(deduped, parentEmail);
       });
 
       setHasMore(pageHasMore);
@@ -356,7 +399,15 @@ export default function ChatScreen({
     } finally {
       setLoadingMore(false);
     }
-  }, [counsellorEmail, cursorId, conversationId, hasMore, loadingMore, parentEmail]);
+  }, [
+    counsellorEmail,
+    cursorId,
+    conversationId,
+    hasMore,
+    loadingMore,
+    parentEmail,
+    studentProfileId,
+  ]);
 
   // Connect WS + initial history
   useEffect(() => {
@@ -385,7 +436,7 @@ export default function ChatScreen({
               status: pickBetterStatus(next[idx].status, normalized.status) ?? normalized.status ?? 'sent',
               createdAt: normalized.createdAt,
             };
-            return next;
+            return dropOptimisticDuplicatesOfServer(next, parentEmail);
           }
         }
 
@@ -393,7 +444,7 @@ export default function ChatScreen({
           let stripped = false;
           const withoutTmp = base.filter((m) => {
             if (!String(m.id).startsWith('tmp-')) return true;
-            if (!normalized.content || m.content !== normalized.content) return true;
+            if (!normalized.content || m.content.trim() !== normalized.content.trim()) return true;
             if (stripped) return true;
             stripped = true;
             return false;
@@ -403,13 +454,16 @@ export default function ChatScreen({
           }
         }
 
-        return [
-          ...base,
-          {
-            ...normalized,
-            status: isMine ? pickBetterStatus(undefined, normalized.status) ?? 'sent' : undefined,
-          },
-        ];
+        return dropOptimisticDuplicatesOfServer(
+          [
+            ...base,
+            {
+              ...normalized,
+              status: isMine ? pickBetterStatus(undefined, normalized.status) ?? 'sent' : undefined,
+            },
+          ],
+          parentEmail
+        );
       });
 
       requestAnimationFrame(() => listRef.current?.scrollToOffset({ offset: 0, animated: true }));
@@ -422,16 +476,17 @@ export default function ChatScreen({
     return () => {
       disconnect();
     };
-  }, [counsellorEmail, conversationId, handleMarkRead, loadLatest, parentEmail]);
+  }, [counsellorEmail, conversationId, handleMarkRead, loadLatest, parentEmail, studentProfileId]);
 
   /** WS trễ / lỡ — đồng bộ REST định kỳ khi màn hình đang active (giống web ~3.5s). */
   useEffect(() => {
     const tick = async () => {
       if (AppState.currentState !== 'active') return;
-      const { parentEmail: pe, counsellorEmail: ce, conversationId: cid } = chatContextRef.current;
-      if (!pe?.trim() || !ce?.trim() || !cid) return;
+      const { parentEmail: pe, counsellorEmail: ce, conversationId: cid, studentProfileId: sid } =
+        chatContextRef.current;
+      if (!pe?.trim() || !ce?.trim() || !cid || sid == null || String(sid).trim() === '') return;
       try {
-        const res = await fetchParentMessagesHistory(pe, ce);
+        const res = await fetchParentMessagesHistory(pe, ce, sid);
         const resBody = res.body as Record<string, unknown>;
         const rawItems = historyMessagesFromBody(resBody);
         const normalized = (rawItems ?? [])

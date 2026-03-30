@@ -47,7 +47,11 @@ function normalizeConversations(raw: unknown): ParentConversationsItem[] {
       asString(it?.participantEmail) ??
       '';
 
+    // Người được hiển thị ở tiêu đề chat nên là Counsoller (không ưu tiên student/child).
+    const studentName = asString(it?.studentName) ?? null;
+
     const counsellorName =
+      asString(it?.counsellorName) ??
       asString(it?.name) ??
       asString(it?.participantName) ??
       asString(it?.title) ??
@@ -94,17 +98,44 @@ function normalizeConversations(raw: unknown): ParentConversationsItem[] {
         asString(it?.updatedAt) ?? asString(it?.lastMessageTime) ?? asString(it?.time) ?? null;
     }
 
+    const studentProfileIdRaw = it?.studentId ?? it?.studentProfileId;
+    const studentProfileId =
+      typeof studentProfileIdRaw === 'number'
+        ? studentProfileIdRaw
+        : typeof studentProfileIdRaw === 'string'
+          ? studentProfileIdRaw
+          : undefined;
+
     return {
       conversationId,
+      studentProfileId,
       counsellorEmail,
       counsellorName,
+      studentName,
       participantParentEmail,
-      counsellorAvatarUrl: asString(it?.counsellorAvatarUrl) ?? null,
+      counsellorAvatarUrl: asString(it?.counsellorAvatarUrl) ?? asString(it?.avatarUrl) ?? null,
       unreadCount: typeof unreadCount === 'number' && !Number.isNaN(unreadCount) ? unreadCount : undefined,
       lastMessageContent,
       lastMessageAt,
     };
   });
+}
+
+/** Tránh hai dòng cùng cuộc (API/refresh) — giữ bản có `lastMessageAt` mới hơn. */
+function dedupeConversations(items: ParentConversationsItem[]): ParentConversationsItem[] {
+  const map = new Map<string, ParentConversationsItem>();
+  for (const it of items) {
+    const key = `${it.conversationId}|${String(it.studentProfileId ?? '')}`;
+    const prev = map.get(key);
+    if (!prev) {
+      map.set(key, it);
+      continue;
+    }
+    const tPrev = prev.lastMessageAt ? +new Date(prev.lastMessageAt) : 0;
+    const tCur = it.lastMessageAt ? +new Date(it.lastMessageAt) : 0;
+    map.set(key, tCur >= tPrev ? it : prev);
+  }
+  return Array.from(map.values());
 }
 
 export default function ConversationsScreen({
@@ -124,7 +155,7 @@ export default function ConversationsScreen({
     setError(null);
     try {
       const res = await fetchParentConversations();
-      setItems(normalizeConversations(res));
+      setItems(dedupeConversations(normalizeConversations(res)));
     } catch (e) {
       const msg = e instanceof Error ? e.message : 'Không tải được danh sách cuộc trò chuyện';
       setError(msg);
@@ -167,7 +198,13 @@ export default function ConversationsScreen({
         </View>
       ) : (
         <FlatList
-          data={items.filter((it) => !!it.conversationId && !!it.counsellorEmail)}
+          data={items.filter(
+            (it) =>
+              !!it.conversationId &&
+              !!it.counsellorEmail &&
+              it.studentProfileId != null &&
+              String(it.studentProfileId).trim() !== ''
+          )}
           keyExtractor={(it) => it.conversationId}
           contentContainerStyle={styles.listContent}
           renderItem={({ item }) => {
@@ -183,7 +220,7 @@ export default function ConversationsScreen({
                 <View style={styles.rowMain}>
                   <View style={styles.rowTop}>
                     <Text numberOfLines={1} style={[styles.rowTitle, isDark && styles.rowTitleDark]}>
-                      {item.counsellorName ?? 'Tư vấn'}
+                      {item.counsellorName ?? item.counsellorEmail ?? 'Tư vấn'}
                     </Text>
                     {unread > 0 ? (
                       <View style={styles.badge}>
