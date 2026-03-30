@@ -12,8 +12,11 @@ export type ChatMessage = {
 
 export type ParentConversationsItem = {
   conversationId: string;
+  /** GET /parent/conversations — `studentId`, dùng cho path /messages/history/.../{studentProfileId} */
+  studentProfileId?: number | string;
   counsellorEmail: string;
   counsellorName?: string | null;
+  studentName?: string | null;
   counsellorAvatarUrl?: string | null;
   /** parentEmail / participantParentEmail từ BE — fallback khi cần khớp history API */
   participantParentEmail?: string | null;
@@ -23,12 +26,37 @@ export type ParentConversationsItem = {
 };
 
 /** REST envelope: PUT /api/v1/parent/messages/read/... */
-export type ParentMessagesReadResponse = {
+export type ParentMessageReadItem = {
+  id: number;
+  senderName: string;
+  receiverName: string;
   message: string;
-  body: unknown[];
+  conversationId: number;
+  timestamp: string;
+  status: string;
 };
 
-/** REST body: GET /api/v1/parent/messages/history/... */
+export type ParentMessagesReadResponse = {
+  message: string;
+  body: ParentMessageReadItem[];
+};
+
+export type ParentMessagesHistoryTrait = {
+  name: string;
+  description: string;
+};
+
+export type ParentMessagesHistorySubjectResult = {
+  score: number;
+  subjectName: string;
+};
+
+export type ParentMessagesHistoryGradeBlock = {
+  gradeLevel: string;
+  subjectResults: ParentMessagesHistorySubjectResult[];
+};
+
+/** REST body: GET /api/v1/parent/messages/history/.../{studentProfileId} */
 export type ParentMessagesHistoryBody = {
   nextCursorId: number | null;
   conversationId: number;
@@ -36,6 +64,12 @@ export type ParentMessagesHistoryBody = {
   messages?: unknown[];
   /** Một số bản BE dùng `items` thay cho `messages`. */
   items?: unknown[];
+  favouriteJob?: string | null;
+  traits?: ParentMessagesHistoryTrait[];
+  gender?: string | null;
+  academicProfileMetadata?: ParentMessagesHistoryGradeBlock[];
+  childName?: string | null;
+  personalityCode?: string | null;
 };
 
 export type ParentMessagesHistoryResponse = {
