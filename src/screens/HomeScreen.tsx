@@ -8,17 +8,20 @@ import {
   Platform,
   StatusBar,
   Modal,
-  Image,
-  Dimensions,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
-const Ionicons = require('@expo/vector-icons').Ionicons;
+const MaterialIcons = require('@expo/vector-icons').MaterialIcons;
 import { useAuth } from '../context/AuthContext';
-import { SchoolCard } from '../components/SchoolCard';
-import { SCHOOLS, FILTER_OPTIONS } from '../data/schools';
 import SearchScreen from './SearchScreen';
+import {
+  HomeTabScreen,
+  SchoolsTabScreen,
+  NewsTabScreen,
+  AccountTabScreen,
+  sp,
+  radius,
+} from './tabs';
 import { CompleteProfileBottomSheet } from '../components/CompleteProfileBottomSheet';
-import { ConfirmDialog } from '../components/ConfirmDialog';
 import ParentProfileFormScreen from './ParentProfileFormScreen';
 import StudentProfileScreen from './StudentProfileScreen';
 import StudentProfileFormScreen from './StudentProfileFormScreen';
@@ -28,16 +31,11 @@ import { getProfile, isProfileComplete } from '../api/profile';
 import { fetchParentPersonalityTypes, fetchParentStudents } from '../api/parentStudent';
 import type { ProfileGetBody } from '../types/auth';
 import type { ParentStudentProfile, PersonalityTypesGrouped } from '../types/studentProfile';
-import { formatGradeLevel } from '../utils/gradeLevel';
 import type { ParentConversationsItem } from '../types/chat';
 import { resolveParentChatEmails } from '../utils/resolveParentChatEmails';
-
-const { width: SCREEN_WIDTH } = Dimensions.get('window');
-
-const sp = {
-  xxs: 4, xs: 8, sm: 12, md: 16, lg: 20, xl: 24, xxl: 32, xxxl: 40,
-} as const;
-const radius = { sm: 8, md: 12, lg: 16, xl: 20, xxl: 24, full: 9999 } as const;
+import { fetchSchoolPublicDetail, fetchSchoolPublicList } from '../api/school';
+import type { SchoolDetail, SchoolSummary } from '../types/school';
+import { SchoolDetailModal } from '../components/SchoolDetailModal';
 
 const HEADER_TOP_PADDING =
   Platform.OS === 'ios' ? 50 : (StatusBar.currentHeight ?? 24) + 8;
@@ -48,379 +46,16 @@ const GRADIENT_END = { x: 1, y: 1 };
 
 type TabId = 'home' | 'schools' | 'news' | 'account';
 
-const TABS: { id: TabId; label: string; icon: string; iconOutline: string }[] = [
-  { id: 'home', label: 'Trang chủ', icon: 'home', iconOutline: 'home-outline' },
-  { id: 'schools', label: 'Trường', icon: 'school', iconOutline: 'school-outline' },
-  { id: 'news', label: 'Tin tức', icon: 'newspaper', iconOutline: 'newspaper-outline' },
-  { id: 'account', label: 'Tài khoản', icon: 'person', iconOutline: 'person-outline' },
+const TABS: { id: TabId; label: string; icon: string }[] = [
+  { id: 'home', label: 'Trang chủ', icon: 'home' },
+  { id: 'schools', label: 'Trường', icon: 'school' },
+  { id: 'news', label: 'Tin tức', icon: 'article' },
+  { id: 'account', label: 'Tài khoản', icon: 'person' },
 ];
 
 const MAX_RECENT_SEARCHES = 5;
 
-const QUICK_ACTIONS = [
-  { id: 'profile', label: 'Hồ sơ', icon: 'document-text-outline' },
-  { id: 'consult', label: 'Tư vấn', icon: 'chatbubbles-outline' },
-  { id: 'news', label: 'Tin tức', icon: 'newspaper-outline' },
-  { id: 'contact', label: 'Liên hệ', icon: 'call-outline' },
-];
-
-const FEATURED_SCHOOLS = SCHOOLS.slice(0, 3);
-const POPULAR_SCHOOLS = SCHOOLS;
-const CARD_WIDTH = SCREEN_WIDTH * 0.72;
-
-// Banner asset - path without special chars can be more reliable; keep exact name
-const BANNER_IMAGE = require('../../assets/Banner.png');
-
-// ─── Home tab: banner, quick actions, featured, popular ─────────────────────
-function HomeTabContent({
-  onOpenSearch,
-  onOpenConsult,
-}: {
-  onOpenSearch: () => void;
-  onOpenConsult: () => void;
-}) {
-  return (
-    <>
-      {/* Promotional banner - above Quick actions */}
-      <Pressable style={({ pressed }) => [styles.bannerCard, pressed && styles.bannerPressed]}>
-        <Image
-          source={BANNER_IMAGE}
-          style={styles.bannerImage}
-          resizeMode="cover"
-        />
-      </Pressable>
-
-      {/* Quick actions */}
-      <View style={styles.quickActions}>
-        {QUICK_ACTIONS.map((action) => (
-          <Pressable
-            key={action.id}
-            onPress={() => {
-              if (action.id === 'consult') onOpenConsult();
-            }}
-            style={({ pressed }) => [
-              styles.quickActionItem,
-              pressed && styles.quickActionPressed,
-            ]}
-          >
-            <View style={styles.quickActionIconWrap}>
-              <Ionicons name={action.icon as any} size={24} color="#1976d2" />
-            </View>
-            <Text style={styles.quickActionLabel}>{action.label}</Text>
-          </Pressable>
-        ))}
-      </View>
-
-      {/* Featured schools - horizontal */}
-      <View style={styles.section}>
-        <View style={styles.sectionRow}>
-          <Text style={styles.sectionTitle}>Trường nổi bật</Text>
-          <Pressable hitSlop={sp.sm} onPress={onOpenSearch}>
-            <Text style={styles.sectionLink}>Xem tất cả</Text>
-          </Pressable>
-        </View>
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          contentContainerStyle={styles.featuredScroll}
-          style={styles.featuredScrollView}
-        >
-          {FEATURED_SCHOOLS.map((school) => (
-            <View key={school.id} style={[styles.featuredCardWrap, { width: CARD_WIDTH }]}>
-              <SchoolCard
-                name={school.name}
-                address={school.address}
-                imageUrl={school.imageUrl}
-                onPress={() => {}}
-              />
-            </View>
-          ))}
-        </ScrollView>
-      </View>
-
-      {/* Popular schools list */}
-      <View style={styles.section}>
-        <Text style={styles.sectionTitle}>Trường phổ biến</Text>
-        <View style={styles.schoolList}>
-          {POPULAR_SCHOOLS.map((school) => (
-            <SchoolCard
-              key={school.id}
-              name={school.name}
-              address={school.address}
-              imageUrl={school.imageUrl}
-              onPress={() => {}}
-            />
-          ))}
-        </View>
-      </View>
-    </>
-  );
-}
-
-// ─── Schools tab: filter + full list ───────────────────────────────────────
-function SchoolsTabContent() {
-  const [activeFilter, setActiveFilter] = useState(FILTER_OPTIONS[0]);
-  return (
-    <>
-      <Text style={styles.sectionTitle}>Tất cả trường</Text>
-      <ScrollView
-        horizontal
-        showsHorizontalScrollIndicator={false}
-        contentContainerStyle={styles.filterScroll}
-        style={styles.filterScrollView}
-      >
-        {FILTER_OPTIONS.map((option) => (
-          <Pressable
-            key={option}
-            onPress={() => setActiveFilter(option)}
-            style={[
-              styles.filterChip,
-              activeFilter === option && styles.filterChipActive,
-            ]}
-          >
-            <Text
-              style={[
-                styles.filterChipText,
-                activeFilter === option && styles.filterChipTextActive,
-              ]}
-            >
-              {option}
-            </Text>
-          </Pressable>
-        ))}
-      </ScrollView>
-      <View style={styles.schoolList}>
-        {SCHOOLS.map((school) => (
-          <SchoolCard
-            key={school.id}
-            name={school.name}
-            address={school.address}
-            imageUrl={school.imageUrl}
-            onPress={() => {}}
-          />
-        ))}
-      </View>
-    </>
-  );
-}
-
-const PROFILE_MENU_ACTIVITIES = [
-  { id: 'consultation', label: 'Lịch sử tư vấn', icon: 'chatbubble-ellipses-outline' },
-  { id: 'saved', label: 'Trường đã lưu', icon: 'bookmark-outline' },
-  { id: 'application', label: 'Trạng thái hồ sơ', icon: 'document-text-outline' },
-];
-
-const PROFILE_MENU_QUICK = [
-  { id: 'compare', label: 'So sánh trường', icon: 'git-compare-outline' },
-  { id: 'plans', label: 'Kế hoạch tuyển sinh', icon: 'calendar-outline' },
-  { id: 'notifications', label: 'Thông báo', icon: 'notifications-outline' },
-  { id: 'support', label: 'Hỗ trợ', icon: 'help-circle-outline' },
-];
-
-const PROFILE_MENU_SETTINGS = [
-  { id: 'account', label: 'Tài khoản', icon: 'person-outline' },
-  { id: 'privacy', label: 'Quyền riêng tư', icon: 'shield-checkmark-outline' },
-  { id: 'language', label: 'Ngôn ngữ', icon: 'language-outline' },
-  { id: 'help', label: 'Trung tâm trợ giúp', icon: 'information-circle-outline' },
-];
-
-// ─── Profile tab: full profile screen ───────────────────────────────────────
-function ProfileTabContent({
-  profileData,
-  onEditProfile,
-  students,
-  studentsLoading,
-  onAddChild,
-  onOpenChild,
-}: {
-  profileData: ProfileGetBody | null;
-  onEditProfile: () => void;
-  students: ParentStudentProfile[];
-  studentsLoading: boolean;
-  onAddChild: () => void;
-  onOpenChild: (s: ParentStudentProfile) => void;
-}) {
-  const { user, logout } = useAuth();
-  const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
-  const displayName =
-    profileData?.parent?.name?.trim() ||
-    user?.email?.split('@')[0] ||
-    'Phụ huynh';
-
-  const avatarUrl = profileData?.parent?.avatar?.trim() || '';
-
-  const MenuCard = ({
-    title,
-    items,
-    onItemPress,
-  }: {
-    title: string;
-    items: { id: string; label: string; icon: string }[];
-    onItemPress: (id: string) => void;
-  }) => (
-    <View style={styles.profileSectionCard}>
-      <Text style={styles.profileSectionTitle}>{title}</Text>
-      <View style={styles.profileMenuList}>
-        {items.map((item, index) => (
-          <Pressable
-            key={item.id}
-            style={({ pressed }) => [
-              styles.profileMenuItem,
-              index < items.length - 1 && styles.profileMenuItemBorder,
-              pressed && styles.profileMenuItemPressed,
-            ]}
-            onPress={() => onItemPress(item.id)}
-          >
-            <Ionicons name={item.icon as any} size={22} color="#64748b" />
-            <Text style={styles.profileMenuItemLabel}>{item.label}</Text>
-            <Ionicons name="chevron-forward" size={20} color="#cbd5e1" />
-          </Pressable>
-        ))}
-      </View>
-    </View>
-  );
-
-  return (
-    <View style={styles.profileScreen}>
-      {/* 1. Profile header */}
-      <View style={styles.profileHeaderCard}>
-        <View style={styles.profileHeaderRow}>
-          <View style={styles.profileAvatarLarge}>
-            {avatarUrl ? (
-              <Image
-                source={{ uri: avatarUrl }}
-                style={styles.profileAvatarImage}
-                resizeMode="cover"
-              />
-            ) : (
-              <Ionicons name="person" size={40} color="#64748b" />
-            )}
-          </View>
-          <View style={styles.profileHeaderInfo}>
-            <Text style={styles.profileUserName}>{displayName}</Text>
-            <Text style={styles.profileUserEmail} numberOfLines={1}>
-              {user?.email ?? ''}
-            </Text>
-            <Pressable
-              onPress={onEditProfile}
-              style={({ pressed }) => [
-                styles.profileEditButton,
-                pressed && styles.profileEditButtonPressed,
-              ]}
-            >
-              <Ionicons name="pencil" size={16} color="#1976d2" />
-              <Text style={styles.profileEditButtonText}>Chỉnh sửa</Text>
-            </Pressable>
-          </View>
-        </View>
-      </View>
-
-      {/* 2. My children — API parent/student */}
-      <View style={styles.profileSectionCard}>
-        <View style={styles.profileSectionRow}>
-          <Text style={styles.profileSectionTitle}>Con của tôi</Text>
-          <Pressable onPress={onAddChild} style={styles.profileAddButton}>
-            <Ionicons name="add-circle-outline" size={22} color="#1976d2" />
-            <Text style={styles.profileAddButtonText}>Thêm con</Text>
-          </Pressable>
-        </View>
-        {studentsLoading ? (
-          <View style={styles.profileChildrenSkeleton}>
-            <Text style={styles.profileSkeletonText}>Đang tải hồ sơ con…</Text>
-          </View>
-        ) : students.length === 0 ? (
-          <View style={styles.profileEmptyChildren}>
-            <View style={styles.profileEmptyIconWrap}>
-              <Ionicons name="people-outline" size={48} color="#c7d2fe" />
-            </View>
-            <Text style={styles.profileEmptyTitle}>Chưa có hồ sơ con</Text>
-            <Text style={styles.profileEmptySub}>
-              Thêm hồ sơ để lưu MBTI, điểm số và định hướng nghề nghiệp cho con.
-            </Text>
-            <Pressable onPress={onAddChild} style={({ pressed }) => [styles.profileEmptyCta, pressed && { opacity: 0.9 }]}>
-              <Ionicons name="add" size={22} color="#fff" />
-              <Text style={styles.profileEmptyCtaText}>Thêm con</Text>
-            </Pressable>
-          </View>
-        ) : (
-          <View style={styles.profileChildrenList}>
-            {students.map((child, index) => {
-              const key = child.id != null ? String(child.id) : `student-${index}`;
-              const grade = formatGradeLevel(child.academicInfos?.[0]?.gradeLevel);
-              const meta = [child.gender === 'MALE' ? 'Nam' : child.gender === 'FEMALE' ? 'Nữ' : child.gender, grade]
-                .filter(Boolean)
-                .join(' · ');
-              return (
-                <Pressable
-                  key={key}
-                  onPress={() => onOpenChild(child)}
-                  style={({ pressed }) => [styles.profileChildItem, pressed && { opacity: 0.85 }]}
-                >
-                  <View style={styles.profileChildAvatar}>
-                    <Ionicons name="happy-outline" size={24} color="#1976d2" />
-                  </View>
-                  <View style={styles.profileChildInfo}>
-                    <Text style={styles.profileChildName}>{child.studentName}</Text>
-                    <Text style={styles.profileChildMeta} numberOfLines={1}>
-                      {meta || 'Xem hồ sơ chi tiết'}
-                    </Text>
-                  </View>
-                  <Ionicons name="chevron-forward" size={20} color="#cbd5e1" />
-                </Pressable>
-              );
-            })}
-          </View>
-        )}
-      </View>
-
-      {/* 3. My activities */}
-      <MenuCard
-        title="Hoạt động của tôi"
-        items={PROFILE_MENU_ACTIVITIES}
-        onItemPress={() => {}}
-      />
-
-      {/* 4. Quick access */}
-      <MenuCard
-        title="Truy cập nhanh"
-        items={PROFILE_MENU_QUICK}
-        onItemPress={() => {}}
-      />
-
-      {/* 5. Settings */}
-      <MenuCard
-        title="Cài đặt"
-        items={PROFILE_MENU_SETTINGS}
-        onItemPress={() => {}}
-      />
-
-      {/* 6. Logout */}
-      <Pressable
-        style={({ pressed }) => [styles.profileLogoutButton, pressed && styles.profileLogoutButtonPressed]}
-        onPress={() => setShowLogoutConfirm(true)}
-      >
-        <Ionicons name="log-out-outline" size={22} color="#dc2626" />
-        <Text style={styles.profileLogoutButtonText}>Đăng xuất</Text>
-      </Pressable>
-
-      <ConfirmDialog
-        visible={showLogoutConfirm}
-        title="Đăng xuất"
-        message="Bạn có chắc chắn muốn đăng xuất?"
-        cancelLabel="Hủy"
-        confirmLabel="Đăng xuất"
-        confirmRole="destructive"
-        onCancel={() => setShowLogoutConfirm(false)}
-        onConfirm={() => {
-          setShowLogoutConfirm(false);
-          logout();
-        }}
-      />
-    </View>
-  );
-}
-
-// ─── Main ──────────────────────────────────────────────────────────────────
+// ─── Main (shell: header, bottom tabs, modals) ───────────────────────────────
 export default function HomeScreen() {
   const { user } = useAuth();
   const [activeTab, setActiveTab] = useState<TabId>('home');
@@ -440,6 +75,14 @@ export default function HomeScreen() {
   const [profileStudent, setProfileStudent] = useState<ParentStudentProfile | null>(null);
   const [showStudentForm, setShowStudentForm] = useState(false);
   const [studentFormInitial, setStudentFormInitial] = useState<ParentStudentProfile | null>(null);
+  const [schools, setSchools] = useState<SchoolSummary[]>([]);
+  const [schoolsLoading, setSchoolsLoading] = useState(false);
+  const [schoolsError, setSchoolsError] = useState<string | null>(null);
+  const [selectedSchoolId, setSelectedSchoolId] = useState<number | null>(null);
+  const [selectedSchoolDetail, setSelectedSchoolDetail] = useState<SchoolDetail | null>(null);
+  const [schoolDetailLoading, setSchoolDetailLoading] = useState(false);
+  const [schoolDetailVisible, setSchoolDetailVisible] = useState(false);
+  const [schoolsRefreshing, setSchoolsRefreshing] = useState(false);
 
   const refreshStudents = useCallback(async () => {
     try {
@@ -449,6 +92,54 @@ export default function HomeScreen() {
       setStudents([]);
     }
   }, []);
+
+  const refreshSchools = useCallback(async (mode: 'initial' | 'pull' = 'initial') => {
+    if (mode === 'initial') {
+      setSchoolsLoading(true);
+    } else {
+      setSchoolsRefreshing(true);
+    }
+    setSchoolsError(null);
+    try {
+      const res = await fetchSchoolPublicList();
+      setSchools(Array.isArray(res.body) ? res.body : []);
+    } catch (error) {
+      setSchools([]);
+      setSchoolsError(error instanceof Error ? error.message : 'Không thể tải danh sách trường');
+    } finally {
+      setSchoolsLoading(false);
+      setSchoolsRefreshing(false);
+    }
+  }, []);
+
+  const openSchoolDetail = useCallback(async (schoolId: number) => {
+    setSchoolDetailVisible(true);
+    setSelectedSchoolId(schoolId);
+    setSchoolDetailLoading(true);
+    try {
+      const res = await fetchSchoolPublicDetail(schoolId);
+      setSelectedSchoolDetail(res.body ?? null);
+    } catch {
+      setSelectedSchoolDetail(null);
+    } finally {
+      setSchoolDetailLoading(false);
+    }
+  }, []);
+
+  const toggleSchoolFavourite = useCallback((schoolId: number) => {
+    setSchools((prev) =>
+      prev.map((item) =>
+        item.id === schoolId ? { ...item, isFavourite: !item.isFavourite } : item
+      )
+    );
+    setSelectedSchoolDetail((prev) =>
+      prev && prev.id === schoolId ? { ...prev, isFavourite: !prev.isFavourite } : prev
+    );
+  }, []);
+
+  useEffect(() => {
+    refreshSchools();
+  }, [refreshSchools]);
 
   useEffect(() => {
     if (activeTab !== 'account' || !user) return;
@@ -509,7 +200,8 @@ export default function HomeScreen() {
     getProfile().then((res) => setProfileData(res.body));
   };
 
-  const showSearchInHeader = activeTab === 'home' || activeTab === 'schools';
+  /** Chỉ tab Trang chủ dùng gradient + ô tìm + thông báo; tab Trường có header chữ trong `headerPlain`. */
+  const showSearchInHeader = activeTab === 'home';
 
   const addRecent = (term: string) => {
     setRecentSearches((prev) => {
@@ -552,7 +244,7 @@ export default function HomeScreen() {
 
   return (
     <View style={styles.screen}>
-      {/* Header: search + notification (home/schools only) */}
+      {/* Header: gradient + search + notification (Trang chủ); các tab khác: tiêu đề */}
       {showSearchInHeader ? (
         <LinearGradient
           colors={[...GRADIENT_COLORS]}
@@ -566,13 +258,13 @@ export default function HomeScreen() {
                 style={styles.searchBarPlaceholder}
                 onPress={() => setSearchVisible(true)}
               >
-                <Ionicons name="search" size={20} color="rgba(255,255,255,0.9)" />
+                <MaterialIcons name="search" size={20} color="rgba(255,255,255,0.9)" />
                 <Text style={styles.searchPlaceholderText}>
                   Tìm trường, địa điểm...
                 </Text>
               </Pressable>
               <Pressable style={styles.notifButton}>
-                <Ionicons name="notifications-outline" size={24} color="#fff" />
+                <MaterialIcons name="notifications-none" size={24} color="#fff" />
               </Pressable>
             </View>
           </View>
@@ -580,49 +272,65 @@ export default function HomeScreen() {
       ) : (
         <View style={[styles.headerPlain, { paddingTop: HEADER_TOP_PADDING }]}>
           <Text style={styles.headerPlainTitle}>
-            {activeTab === 'news' ? 'Tin tức' : 'Tài khoản'}
+            {activeTab === 'news'
+              ? 'Tin tức'
+              : activeTab === 'schools'
+                ? 'Trường'
+                : 'Tài khoản'}
           </Text>
         </View>
       )}
 
-      {/* Tab content */}
-      <ScrollView
-        style={styles.scroll}
-        contentContainerStyle={styles.scrollContent}
-        showsVerticalScrollIndicator={false}
-      >
-        {activeTab === 'home' && (
-          <HomeTabContent
-            onOpenSearch={() => setSearchVisible(true)}
-            onOpenConsult={() => setChatView('conversations')}
+      {/* Tab content: tab Trường dùng FlatList + refresh + lazy load */}
+      <View style={styles.tabBody}>
+        {activeTab === 'schools' ? (
+          <SchoolsTabScreen
+            schools={schools}
+            loading={schoolsLoading}
+            refreshing={schoolsRefreshing}
+            errorMessage={schoolsError}
+            onRefresh={() => refreshSchools('pull')}
+            onRetry={() => refreshSchools('initial')}
+            onOpenSchool={openSchoolDetail}
+            onToggleFavourite={toggleSchoolFavourite}
           />
+        ) : (
+          <ScrollView
+            style={styles.scroll}
+            contentContainerStyle={styles.scrollContent}
+            showsVerticalScrollIndicator={false}
+          >
+            {activeTab === 'home' && (
+              <HomeTabScreen
+                schools={schools}
+                onOpenSearch={() => setSearchVisible(true)}
+                onOpenSchool={openSchoolDetail}
+                onToggleFavourite={toggleSchoolFavourite}
+                onOpenConsult={() => setChatView('conversations')}
+                onOpenNews={() => setActiveTab('news')}
+              />
+            )}
+            {activeTab === 'news' && <NewsTabScreen />}
+            {activeTab === 'account' && (
+              <AccountTabScreen
+                profileData={profileData}
+                onEditProfile={() => setShowProfileForm(true)}
+                students={students}
+                studentsLoading={studentsLoading}
+                onAddChild={() => {
+                  setStudentFormInitial(null);
+                  setShowStudentForm(true);
+                }}
+                onOpenChild={(s) => {
+                  setProfileStudent(s);
+                  setShowStudentProfile(true);
+                }}
+              />
+            )}
+            <View style={styles.bottomSpacer} />
+          </ScrollView>
         )}
-        {activeTab === 'schools' && <SchoolsTabContent />}
-        {activeTab === 'news' && (
-          <View style={styles.placeholder}>
-            <Ionicons name="newspaper-outline" size={48} color="#cbd5e1" />
-            <Text style={styles.placeholderText}>Tin tức tuyển sinh</Text>
-            <Text style={styles.placeholderSub}>Sắp ra mắt</Text>
-          </View>
-        )}
-        {activeTab === 'account' && (
-          <ProfileTabContent
-            profileData={profileData}
-            onEditProfile={() => setShowProfileForm(true)}
-            students={students}
-            studentsLoading={studentsLoading}
-            onAddChild={() => {
-              setStudentFormInitial(null);
-              setShowStudentForm(true);
-            }}
-            onOpenChild={(s) => {
-              setProfileStudent(s);
-              setShowStudentProfile(true);
-            }}
-          />
-        )}
-        <View style={styles.bottomSpacer} />
-      </ScrollView>
+      </View>
 
       {/* Bottom nav */}
       <View style={styles.bottomNav}>
@@ -632,11 +340,7 @@ export default function HomeScreen() {
             onPress={() => setActiveTab(tab.id)}
             style={styles.tabButton}
           >
-            <Ionicons
-              name={activeTab === tab.id ? tab.icon : tab.iconOutline}
-              size={24}
-              color={activeTab === tab.id ? '#1976d2' : '#94a3b8'}
-            />
+            <MaterialIcons name={tab.icon as any} size={24} color={activeTab === tab.id ? '#1976d2' : '#94a3b8'} />
             <Text
               style={[
                 styles.tabLabel,
@@ -657,11 +361,36 @@ export default function HomeScreen() {
       >
         <SearchScreen
           onClose={() => setSearchVisible(false)}
+          schools={schools}
           recentSearches={recentSearches}
+          onSelectSchool={(schoolId) => {
+            setSearchVisible(false);
+            openSchoolDetail(schoolId);
+          }}
+          onToggleFavourite={toggleSchoolFavourite}
           onClearRecent={() => setRecentSearches([])}
           onAddRecent={addRecent}
         />
       </Modal>
+
+      <SchoolDetailModal
+        visible={schoolDetailVisible}
+        loading={schoolDetailLoading}
+        school={selectedSchoolDetail}
+        isFavourite={
+          selectedSchoolId != null
+            ? schools.find((item) => item.id === selectedSchoolId)?.isFavourite ?? false
+            : false
+        }
+        onToggleFavourite={() => {
+          if (selectedSchoolId != null) toggleSchoolFavourite(selectedSchoolId);
+        }}
+        onClose={() => {
+          setSchoolDetailVisible(false);
+          setSelectedSchoolId(null);
+          setSelectedSchoolDetail(null);
+        }}
+      />
 
       <CompleteProfileBottomSheet
         visible={showProfileSheet}
@@ -714,20 +443,22 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: '#f8fafc',
   },
+  tabBody: {
+    flex: 1,
+  },
   header: {
     paddingBottom: sp.lg,
   },
   headerPlain: {
     backgroundColor: '#fff',
     paddingHorizontal: sp.lg,
-    paddingBottom: sp.md,
-    borderBottomWidth: 1,
-    borderBottomColor: '#e2e8f0',
+    paddingBottom: sp.lg,
   },
   headerPlainTitle: {
-    fontSize: 20,
+    fontSize: 25,
     fontWeight: '700',
     color: '#0f172a',
+    marginTop: sp.lg,
   },
   headerInner: {
     paddingHorizontal: sp.lg,
@@ -767,135 +498,6 @@ const styles = StyleSheet.create({
     paddingTop: sp.lg,
     paddingBottom: sp.xxl,
   },
-  quickActions: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginBottom: sp.xl,
-  },
-  quickActionItem: {
-    alignItems: 'center',
-    flex: 1,
-  },
-  quickActionPressed: {
-    opacity: 0.7,
-  },
-  quickActionIconWrap: {
-    width: 56,
-    height: 56,
-    borderRadius: radius.xxl,
-    backgroundColor: '#fff',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: sp.xs,
-    shadowColor: '#0f172a',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.06,
-    shadowRadius: 6,
-    elevation: 2,
-  },
-  quickActionLabel: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: '#475569',
-  },
-  section: {
-    marginBottom: sp.xl,
-  },
-  sectionRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: sp.md,
-  },
-  sectionTitle: {
-    fontSize: 20,
-    fontWeight: '700',
-    color: '#0f172a',
-    marginBottom: sp.md,
-    letterSpacing: -0.3,
-  },
-  sectionLink: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#1976d2',
-  },
-  featuredScrollView: {
-    marginHorizontal: -sp.lg,
-  },
-  featuredScroll: {
-    paddingHorizontal: sp.lg,
-    gap: sp.md,
-    paddingBottom: sp.sm,
-  },
-  featuredCardWrap: {
-    marginRight: sp.md,
-  },
-  bannerCard: {
-    width: '100%',
-    minHeight: 160,
-    borderRadius: radius.xl,
-    overflow: 'hidden',
-    marginBottom: sp.xl,
-    backgroundColor: '#e0f2fe',
-    shadowColor: '#0f172a',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.06,
-    shadowRadius: 8,
-    elevation: 3,
-  },
-  bannerPressed: {
-    opacity: 0.98,
-  },
-  bannerImage: {
-    width: '100%',
-    height: 160,
-    borderRadius: radius.xl,
-  },
-  filterScrollView: {
-    marginHorizontal: -sp.lg,
-    marginBottom: sp.md,
-  },
-  filterScroll: {
-    paddingHorizontal: sp.lg,
-    flexDirection: 'row',
-    gap: sp.xs,
-  },
-  filterChip: {
-    paddingHorizontal: sp.md,
-    paddingVertical: sp.sm,
-    borderRadius: radius.full,
-    backgroundColor: '#fff',
-    marginRight: sp.xs,
-  },
-  filterChipActive: {
-    backgroundColor: '#1976d2',
-  },
-  filterChipText: {
-    fontSize: 14,
-    fontWeight: '500',
-    color: '#64748b',
-  },
-  filterChipTextActive: {
-    color: '#fff',
-  },
-  schoolList: {
-    gap: sp.md,
-  },
-  placeholder: {
-    alignItems: 'center',
-    paddingVertical: sp.xxxl,
-  },
-  placeholderText: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: '#64748b',
-    marginTop: sp.md,
-  },
-  placeholderSub: {
-    fontSize: 14,
-    color: '#94a3b8',
-    marginTop: sp.xs,
-  },
   bottomSpacer: {
     height: 100,
   },
@@ -931,223 +533,5 @@ const styles = StyleSheet.create({
   },
   tabLabelActive: {
     color: '#1976d2',
-  },
-  // ─── Profile screen ───────────────────────────────────────────────────────
-  profileScreen: {
-    gap: sp.lg,
-  },
-  profileHeaderCard: {
-    backgroundColor: '#fff',
-    borderRadius: radius.xl,
-    padding: sp.xl,
-    shadowColor: '#0f172a',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.06,
-    shadowRadius: 8,
-    elevation: 2,
-  },
-  profileHeaderRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  profileAvatarLarge: {
-    width: 72,
-    height: 72,
-    borderRadius: 36,
-    backgroundColor: '#e0f2fe',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginRight: sp.lg,
-    overflow: 'hidden',
-  },
-  profileAvatarImage: {
-    width: 72,
-    height: 72,
-  },
-  profileHeaderInfo: {
-    flex: 1,
-  },
-  profileUserName: {
-    fontSize: 20,
-    fontWeight: '700',
-    color: '#0f172a',
-    marginBottom: sp.xxs,
-  },
-  profileUserEmail: {
-    fontSize: 14,
-    color: '#64748b',
-    marginBottom: sp.sm,
-  },
-  profileEditButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    alignSelf: 'flex-start',
-    gap: sp.xxs,
-    paddingVertical: sp.xs,
-    paddingHorizontal: sp.sm,
-    borderRadius: radius.md,
-    backgroundColor: '#eff6ff',
-  },
-  profileEditButtonPressed: {
-    backgroundColor: '#dbeafe',
-  },
-  profileEditButtonText: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#1976d2',
-  },
-  profileSectionCard: {
-    backgroundColor: '#fff',
-    borderRadius: radius.xl,
-    padding: sp.lg,
-    shadowColor: '#0f172a',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.05,
-    shadowRadius: 6,
-    elevation: 2,
-  },
-  profileSectionRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: sp.md,
-  },
-  profileSectionTitle: {
-    fontSize: 17,
-    fontWeight: '700',
-    color: '#0f172a',
-    marginBottom: sp.sm,
-  },
-  profileAddButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: sp.xxs,
-  },
-  profileAddButtonText: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#1976d2',
-  },
-  profileChildrenList: {
-    gap: sp.xs,
-  },
-  profileChildItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: sp.sm,
-    paddingHorizontal: sp.sm,
-    borderRadius: radius.md,
-    backgroundColor: '#f8fafc',
-  },
-  profileChildAvatar: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    backgroundColor: '#e0f2fe',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginRight: sp.md,
-  },
-  profileChildInfo: {
-    flex: 1,
-  },
-  profileChildName: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#0f172a',
-  },
-  profileChildMeta: {
-    fontSize: 13,
-    color: '#64748b',
-    marginTop: 2,
-  },
-  profileChildrenSkeleton: {
-    paddingVertical: 24,
-    alignItems: 'center',
-  },
-  profileSkeletonText: {
-    fontSize: 14,
-    color: '#94a3b8',
-  },
-  profileEmptyChildren: {
-    alignItems: 'center',
-    paddingVertical: 20,
-    paddingHorizontal: 8,
-  },
-  profileEmptyIconWrap: {
-    width: 88,
-    height: 88,
-    borderRadius: 44,
-    backgroundColor: '#eef2ff',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 12,
-  },
-  profileEmptyTitle: {
-    fontSize: 17,
-    fontWeight: '700',
-    color: '#334155',
-    marginBottom: 6,
-  },
-  profileEmptySub: {
-    fontSize: 14,
-    color: '#94a3b8',
-    textAlign: 'center',
-    lineHeight: 20,
-    marginBottom: 16,
-  },
-  profileEmptyCta: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    backgroundColor: '#1976d2',
-    paddingVertical: 12,
-    paddingHorizontal: 20,
-    borderRadius: 999,
-  },
-  profileEmptyCtaText: {
-    fontSize: 15,
-    fontWeight: '700',
-    color: '#fff',
-  },
-  profileMenuList: {
-    marginTop: sp.xxs,
-  },
-  profileMenuItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: sp.md,
-    gap: sp.sm,
-  },
-  profileMenuItemBorder: {
-    borderBottomWidth: 1,
-    borderBottomColor: '#f1f5f9',
-  },
-  profileMenuItemPressed: {
-    opacity: 0.7,
-  },
-  profileMenuItemLabel: {
-    flex: 1,
-    fontSize: 16,
-    color: '#334155',
-  },
-  profileLogoutButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: sp.sm,
-    paddingVertical: sp.md,
-    borderRadius: radius.lg,
-    borderWidth: 1,
-    borderColor: '#fecaca',
-    backgroundColor: '#fef2f2',
-  },
-  profileLogoutButtonPressed: {
-    opacity: 0.9,
-  },
-  profileLogoutButtonText: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#dc2626',
   },
 });
