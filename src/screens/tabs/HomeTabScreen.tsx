@@ -22,18 +22,18 @@ const QUICK_ACTIONS: { id: string; label: string; icon: string }[] = [
 
 export type HomeTabScreenProps = {
   schools: SchoolSummary[];
-  onOpenSearch: () => void;
   onOpenSchool: (schoolId: number) => void;
   onToggleFavourite: (schoolId: number) => void;
+  onViewAllFeaturedSchools: () => void;
   onOpenConsult: () => void;
   onOpenNews: () => void;
 };
 
 export function HomeTabScreen({
   schools,
-  onOpenSearch,
   onOpenSchool,
   onToggleFavourite,
+  onViewAllFeaturedSchools,
   onOpenConsult,
   onOpenNews,
 }: HomeTabScreenProps) {
@@ -69,7 +69,7 @@ export function HomeTabScreen({
       <View style={styles.section}>
         <View style={styles.sectionRow}>
           <Text style={styles.sectionTitle}>Trường nổi bật</Text>
-          <Pressable hitSlop={sp.sm} onPress={onOpenSearch}>
+          <Pressable hitSlop={sp.sm} onPress={onViewAllFeaturedSchools}>
             <Text style={styles.sectionLink}>Xem tất cả</Text>
           </Pressable>
         </View>
@@ -87,9 +87,9 @@ export function HomeTabScreen({
                 imageUrl={school.logoUrl}
                 rating={school.averageRating}
                 totalCampus={school.totalCampus}
-                representativeName={school.representativeName}
                 isFavourite={school.isFavourite}
                 onToggleFavourite={() => onToggleFavourite(school.id)}
+                showFooter={false}
                 onPress={() => onOpenSchool(school.id)}
               />
             </View>

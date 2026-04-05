@@ -44,3 +44,38 @@ export type SchoolDetailResponse = {
   message: string;
   body: SchoolDetail;
 };
+
+/** Một mục trong GET /api/v1/parent/favourite/school — `id` là id bản ghi yêu thích (dùng cho DELETE). */
+export type FavouriteSchoolItem = {
+  id: number;
+  schoolId: number;
+  foundingDate: string | null;
+  websiteUrl: string | null;
+  hotline: string | null;
+  averageRating: number | null;
+  name: string;
+  description: string | null;
+  representativeName: string | null;
+  totalCampus: number;
+  logoUrl: string | null;
+};
+
+export type FavouriteSchoolListPageBody = {
+  items: FavouriteSchoolItem[];
+  currentPage: number;
+  pageSize: number;
+  totalItems: number;
+  totalPages: number;
+  hasNext: boolean;
+  hasPrevious: boolean;
+};
+
+export type FavouriteSchoolListResponse = {
+  message: string;
+  body: FavouriteSchoolListPageBody;
+};
+
+export type FavouriteSchoolMutationResponse = {
+  message: string;
+  body: null;
+};

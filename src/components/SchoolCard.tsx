@@ -10,9 +10,10 @@ type SchoolCardProps = {
   imageUrl?: string | null;
   rating?: number | null;
   totalCampus?: number;
-  representativeName?: string | null;
   isFavourite?: boolean;
   onToggleFavourite?: () => void;
+  /** false: ẩn hàng “Xem chi tiết”, cả card vẫn bấm được (onPress). */
+  showFooter?: boolean;
   ctaLabel?: string;
   onPress: () => void;
 };
@@ -23,9 +24,9 @@ export function SchoolCard({
   imageUrl,
   rating,
   totalCampus,
-  representativeName,
   isFavourite,
   onToggleFavourite,
+  showFooter = true,
   ctaLabel = 'Xem chi tiết',
   onPress,
 }: SchoolCardProps) {
@@ -70,20 +71,14 @@ export function SchoolCard({
             <MaterialIcons name="business" size={14} color="#64748b" />
             <Text style={styles.metaText}>{`${totalCampus ?? 0} cơ sở`}</Text>
           </View>
-          {representativeName ? (
-            <View style={styles.metaRow}>
-              <MaterialIcons name="person-outline" size={14} color="#64748b" />
-              <Text style={styles.metaText} numberOfLines={1}>
-                {representativeName}
-              </Text>
-            </View>
-          ) : null}
         </View>
       </View>
-      <View style={styles.footer}>
-        <Text style={styles.ctaText}>{ctaLabel}</Text>
-        <MaterialIcons name="chevron-right" size={18} color="#2563eb" />
-      </View>
+      {showFooter ? (
+        <View style={styles.footer}>
+          <Text style={styles.ctaText}>{ctaLabel}</Text>
+          <MaterialIcons name="chevron-right" size={18} color="#2563eb" />
+        </View>
+      ) : null}
     </Pressable>
   );
 }
