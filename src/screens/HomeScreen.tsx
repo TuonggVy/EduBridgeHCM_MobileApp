@@ -33,9 +33,16 @@ import type { ProfileGetBody } from '../types/auth';
 import type { ParentStudentProfile, PersonalityTypesGrouped } from '../types/studentProfile';
 import type { ParentConversationsItem } from '../types/chat';
 import { resolveParentChatEmails } from '../utils/resolveParentChatEmails';
+import {
+  addFavouriteSchool,
+  fetchFavouriteSchoolIdMap,
+  removeFavouriteSchool,
+} from '../api/favouriteSchool';
 import { fetchSchoolPublicDetail, fetchSchoolPublicList } from '../api/school';
 import type { SchoolDetail, SchoolSummary } from '../types/school';
 import { SchoolDetailModal } from '../components/SchoolDetailModal';
+import { useToast } from '../components/AppToast';
+import FavouriteSchoolsScreen from './FavouriteSchoolsScreen';
 
 const HEADER_TOP_PADDING =
   Platform.OS === 'ios' ? 50 : (StatusBar.currentHeight ?? 24) + 8;
@@ -44,12 +51,12 @@ const GRADIENT_COLORS = ['#1976d2', '#42a5f5', '#64b5f6'] as const;
 const GRADIENT_START = { x: 0, y: 0 };
 const GRADIENT_END = { x: 1, y: 1 };
 
-type TabId = 'home' | 'schools' | 'news' | 'account';
+type TabId = 'home' | 'schools' | 'consult' | 'account';
 
 const TABS: { id: TabId; label: string; icon: string }[] = [
   { id: 'home', label: 'Trang chủ', icon: 'home' },
   { id: 'schools', label: 'Trường', icon: 'school' },
-  { id: 'news', label: 'Tin tức', icon: 'article' },
+  { id: 'consult', label: 'Tư vấn', icon: 'chat-bubble-outline' },
   { id: 'account', label: 'Tài khoản', icon: 'person' },
 ];
 
@@ -58,6 +65,7 @@ const MAX_RECENT_SEARCHES = 5;
 // ─── Main (shell: header, bottom tabs, modals) ───────────────────────────────
 export default function HomeScreen() {
   const { user } = useAuth();
+  const { showSuccess, showError } = useToast();
   const [activeTab, setActiveTab] = useState<TabId>('home');
   const [searchVisible, setSearchVisible] = useState(false);
   const [recentSearches, setRecentSearches] = useState<string[]>([]);
@@ -65,7 +73,8 @@ export default function HomeScreen() {
   const [profileChecked, setProfileChecked] = useState(false);
   const [showProfileSheet, setShowProfileSheet] = useState(false);
   const [showProfileForm, setShowProfileForm] = useState(false);
-  const [chatView, setChatView] = useState<'app' | 'conversations' | 'chat'>('app');
+  const [chatView, setChatView] = useState<'app' | 'chat'>('app');
+  const [newsModalVisible, setNewsModalVisible] = useState(false);
   const [selectedConversation, setSelectedConversation] = useState<ParentConversationsItem | null>(null);
 
   const [students, setStudents] = useState<ParentStudentProfile[]>([]);
@@ -83,6 +92,8 @@ export default function HomeScreen() {
   const [schoolDetailLoading, setSchoolDetailLoading] = useState(false);
   const [schoolDetailVisible, setSchoolDetailVisible] = useState(false);
   const [schoolsRefreshing, setSchoolsRefreshing] = useState(false);
+  const [favouriteModalVisible, setFavouriteModalVisible] = useState(false);
+  const [favouriteIdBySchoolId, setFavouriteIdBySchoolId] = useState<Record<number, number>>({});
 
   const refreshStudents = useCallback(async () => {
     try {
@@ -102,9 +113,24 @@ export default function HomeScreen() {
     setSchoolsError(null);
     try {
       const res = await fetchSchoolPublicList();
-      setSchools(Array.isArray(res.body) ? res.body : []);
+      const list = Array.isArray(res.body) ? res.body : [];
+      let favMap: Record<number, number> = {};
+      try {
+        favMap = await fetchFavouriteSchoolIdMap();
+      } catch {
+        favMap = {};
+      }
+      setFavouriteIdBySchoolId(favMap);
+      setSchools(
+        list.map((s) => ({
+          ...s,
+          isFavourite:
+            Object.prototype.hasOwnProperty.call(favMap, s.id) || Boolean(s.isFavourite),
+        }))
+      );
     } catch (error) {
       setSchools([]);
+      setFavouriteIdBySchoolId({});
       setSchoolsError(error instanceof Error ? error.message : 'Không thể tải danh sách trường');
     } finally {
       setSchoolsLoading(false);
@@ -126,15 +152,69 @@ export default function HomeScreen() {
     }
   }, []);
 
-  const toggleSchoolFavourite = useCallback((schoolId: number) => {
+  const toggleSchoolFavourite = useCallback(
+    async (schoolId: number): Promise<boolean> => {
+      const school = schools.find((s) => s.id === schoolId);
+      if (!school) return false;
+      const willFavourite = !school.isFavourite;
+      try {
+        if (willFavourite) {
+          await addFavouriteSchool(schoolId);
+          const map = await fetchFavouriteSchoolIdMap();
+          setFavouriteIdBySchoolId(map);
+          setSchools((prev) =>
+            prev.map((s) => (s.id === schoolId ? { ...s, isFavourite: true } : s))
+          );
+          setSelectedSchoolDetail((prev) =>
+            prev && prev.id === schoolId ? { ...prev, isFavourite: true } : prev
+          );
+          showSuccess('Đã thêm vào yêu thích');
+          return true;
+        }
+        let fid = favouriteIdBySchoolId[schoolId];
+        if (fid == null) {
+          const map = await fetchFavouriteSchoolIdMap();
+          setFavouriteIdBySchoolId(map);
+          fid = map[schoolId];
+        }
+        if (fid == null) {
+          showError('Không tìm thấy mục yêu thích để gỡ');
+          return false;
+        }
+        await removeFavouriteSchool(fid);
+        setFavouriteIdBySchoolId((prev) => {
+          const next = { ...prev };
+          delete next[schoolId];
+          return next;
+        });
+        setSchools((prev) =>
+          prev.map((s) => (s.id === schoolId ? { ...s, isFavourite: false } : s))
+        );
+        setSelectedSchoolDetail((prev) =>
+          prev && prev.id === schoolId ? { ...prev, isFavourite: false } : prev
+        );
+        showSuccess('Đã gỡ khỏi yêu thích');
+        return true;
+      } catch (e) {
+        showError(e instanceof Error ? e.message : 'Thao tác yêu thích thất bại');
+        return false;
+      }
+    },
+    [schools, favouriteIdBySchoolId, showSuccess, showError]
+  );
+
+  const handleUnfavouritedFromList = useCallback((schoolId: number) => {
     setSchools((prev) =>
-      prev.map((item) =>
-        item.id === schoolId ? { ...item, isFavourite: !item.isFavourite } : item
-      )
+      prev.map((s) => (s.id === schoolId ? { ...s, isFavourite: false } : s))
     );
     setSelectedSchoolDetail((prev) =>
-      prev && prev.id === schoolId ? { ...prev, isFavourite: !prev.isFavourite } : prev
+      prev && prev.id === schoolId ? { ...prev, isFavourite: false } : prev
     );
+    setFavouriteIdBySchoolId((prev) => {
+      const next = { ...prev };
+      delete next[schoolId];
+      return next;
+    });
   }, []);
 
   useEffect(() => {
@@ -210,19 +290,6 @@ export default function HomeScreen() {
     });
   };
 
-  if (chatView === 'conversations') {
-    return (
-      <ConversationsScreen
-        parentEmail={user?.email ?? ''}
-        onBack={() => setChatView('app')}
-        onOpenChat={(conversation) => {
-          setSelectedConversation(conversation);
-          setChatView('chat');
-        }}
-      />
-    );
-  }
-
   if (chatView === 'chat' && selectedConversation) {
     const { parentEmail: resolvedParent, counsellorEmail: resolvedCounsellor } = resolveParentChatEmails(
       selectedConversation,
@@ -237,7 +304,7 @@ export default function HomeScreen() {
         counsellorName={selectedConversation.counsellorName ?? undefined}
         initialLastMessageContent={selectedConversation.lastMessageContent ?? undefined}
         initialLastMessageAt={selectedConversation.lastMessageAt ?? undefined}
-        onBack={() => setChatView('conversations')}
+        onBack={() => setChatView('app')}
       />
     );
   }
@@ -272,8 +339,8 @@ export default function HomeScreen() {
       ) : (
         <View style={[styles.headerPlain, { paddingTop: HEADER_TOP_PADDING }]}>
           <Text style={styles.headerPlainTitle}>
-            {activeTab === 'news'
-              ? 'Tin tức'
+            {activeTab === 'consult'
+              ? 'Tư vấn'
               : activeTab === 'schools'
                 ? 'Trường'
                 : 'Tài khoản'}
@@ -294,6 +361,16 @@ export default function HomeScreen() {
             onOpenSchool={openSchoolDetail}
             onToggleFavourite={toggleSchoolFavourite}
           />
+        ) : activeTab === 'consult' ? (
+          <ConversationsScreen
+            parentEmail={user?.email ?? ''}
+            onBack={() => {}}
+            showNavigationHeader={false}
+            onOpenChat={(conversation) => {
+              setSelectedConversation(conversation);
+              setChatView('chat');
+            }}
+          />
         ) : (
           <ScrollView
             style={styles.scroll}
@@ -303,14 +380,13 @@ export default function HomeScreen() {
             {activeTab === 'home' && (
               <HomeTabScreen
                 schools={schools}
-                onOpenSearch={() => setSearchVisible(true)}
                 onOpenSchool={openSchoolDetail}
                 onToggleFavourite={toggleSchoolFavourite}
-                onOpenConsult={() => setChatView('conversations')}
-                onOpenNews={() => setActiveTab('news')}
+                onViewAllFeaturedSchools={() => setActiveTab('schools')}
+                onOpenConsult={() => setActiveTab('consult')}
+                onOpenNews={() => setNewsModalVisible(true)}
               />
             )}
-            {activeTab === 'news' && <NewsTabScreen />}
             {activeTab === 'account' && (
               <AccountTabScreen
                 profileData={profileData}
@@ -325,6 +401,7 @@ export default function HomeScreen() {
                   setProfileStudent(s);
                   setShowStudentProfile(true);
                 }}
+                onOpenFavourites={() => setFavouriteModalVisible(true)}
               />
             )}
             <View style={styles.bottomSpacer} />
@@ -354,6 +431,26 @@ export default function HomeScreen() {
       </View>
 
       <Modal
+        visible={newsModalVisible}
+        animationType="slide"
+        presentationStyle="fullScreen"
+        onRequestClose={() => setNewsModalVisible(false)}
+      >
+        <View style={styles.newsModalScreen}>
+          <View style={[styles.newsModalHeader, { paddingTop: HEADER_TOP_PADDING }]}>
+            <Pressable onPress={() => setNewsModalVisible(false)} hitSlop={12} style={styles.newsModalBack}>
+              <MaterialIcons name="arrow-back" size={24} color="#0f172a" />
+            </Pressable>
+            <Text style={styles.newsModalTitle}>Tin tức</Text>
+            <View style={styles.newsModalHeaderSpacer} />
+          </View>
+          <View style={styles.newsModalBody}>
+            <NewsTabScreen />
+          </View>
+        </View>
+      </Modal>
+
+      <Modal
         visible={searchVisible}
         animationType="slide"
         presentationStyle="fullScreen"
@@ -370,6 +467,27 @@ export default function HomeScreen() {
           onToggleFavourite={toggleSchoolFavourite}
           onClearRecent={() => setRecentSearches([])}
           onAddRecent={addRecent}
+        />
+      </Modal>
+
+      <Modal
+        visible={favouriteModalVisible}
+        animationType="slide"
+        presentationStyle="fullScreen"
+        onRequestClose={() => setFavouriteModalVisible(false)}
+      >
+        <FavouriteSchoolsScreen
+          visible={favouriteModalVisible}
+          onClose={() => setFavouriteModalVisible(false)}
+          onUnfavourited={handleUnfavouritedFromList}
+          onToggleSchoolFavourite={toggleSchoolFavourite}
+          getIsSchoolFavourite={(id) =>
+            schools.find((s) => s.id === id)?.isFavourite ?? false
+          }
+          onExploreSchools={() => {
+            setFavouriteModalVisible(false);
+            setActiveTab('schools');
+          }}
         />
       </Modal>
 
@@ -467,6 +585,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: sp.sm,
+    marginTop: sp.xs,
   },
   searchBarPlaceholder: {
     flex: 1,
@@ -533,5 +652,37 @@ const styles = StyleSheet.create({
   },
   tabLabelActive: {
     color: '#1976d2',
+  },
+  newsModalScreen: {
+    flex: 1,
+    backgroundColor: '#f8fafc',
+  },
+  newsModalHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: sp.lg,
+    paddingBottom: sp.md,
+    backgroundColor: '#fff',
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: '#e2e8f0',
+  },
+  newsModalBack: {
+    width: 40,
+    height: 40,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  newsModalTitle: {
+    flex: 1,
+    fontSize: 20,
+    fontWeight: '700',
+    color: '#0f172a',
+    textAlign: 'center',
+  },
+  newsModalHeaderSpacer: {
+    width: 40,
+  },
+  newsModalBody: {
+    flex: 1,
   },
 });

@@ -20,6 +20,7 @@ const PROFILE_MENU_ACTIVITIES: { id: string; label: string; icon: string }[] = [
 ];
 
 const PROFILE_MENU_QUICK: { id: string; label: string; icon: string }[] = [
+  { id: 'favourites', label: 'Trường yêu thích', icon: 'favorite' },
   { id: 'compare', label: 'So sánh trường', icon: 'compare-arrows' },
   { id: 'plans', label: 'Kế hoạch tuyển sinh', icon: 'calendar-today' },
   { id: 'notifications', label: 'Thông báo', icon: 'notifications-none' },
@@ -40,6 +41,7 @@ export type AccountTabScreenProps = {
   studentsLoading: boolean;
   onAddChild: () => void;
   onOpenChild: (s: ParentStudentProfile) => void;
+  onOpenFavourites: () => void;
 };
 
 export function AccountTabScreen({
@@ -49,6 +51,7 @@ export function AccountTabScreen({
   studentsLoading,
   onAddChild,
   onOpenChild,
+  onOpenFavourites,
 }: AccountTabScreenProps) {
   const { user, logout } = useAuth();
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
@@ -190,7 +193,9 @@ export function AccountTabScreen({
       <MenuCard
         title="Truy cập nhanh"
         items={PROFILE_MENU_QUICK}
-        onItemPress={() => {}}
+        onItemPress={(id) => {
+          if (id === 'favourites') onOpenFavourites();
+        }}
       />
 
       <MenuCard

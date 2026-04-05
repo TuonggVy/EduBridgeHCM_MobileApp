@@ -189,9 +189,9 @@ export function SchoolsTabScreen({
                 imageUrl={item.logoUrl}
                 rating={item.averageRating}
                 totalCampus={item.totalCampus}
-                representativeName={item.representativeName}
                 isFavourite={item.isFavourite}
                 onToggleFavourite={() => onToggleFavourite(item.id)}
+                showFooter={false}
                 onPress={() => onOpenSchool(item.id)}
               />
             </View>

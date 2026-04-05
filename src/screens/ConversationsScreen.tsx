@@ -18,6 +18,8 @@ type ConversationsScreenProps = {
   parentEmail: string;
   onBack: () => void;
   onOpenChat: (conversation: ParentConversationsItem) => void;
+  /** false khi nhúng trong bottom tab — header/back do màn shell hiển thị */
+  showNavigationHeader?: boolean;
 };
 
 function asString(v: unknown): string | null {
@@ -142,6 +144,7 @@ export default function ConversationsScreen({
   parentEmail,
   onBack,
   onOpenChat,
+  showNavigationHeader = true,
 }: ConversationsScreenProps) {
   const scheme = useColorScheme();
   const isDark = scheme === 'dark';
@@ -171,19 +174,21 @@ export default function ConversationsScreen({
 
   return (
     <View style={[styles.screen, isDark && styles.screenDark]}>
-      <View style={[styles.header, isDark && styles.headerDark]}>
-        <View style={styles.headerInner}>
-          <Pressable onPress={onBack} hitSlop={10} style={styles.backBtn}>
-            <Ionicons
-              name="chevron-back"
-              size={24}
-              color={isDark ? '#E5E7EB' : '#0f172a'}
-            />
-          </Pressable>
-          <Text style={[styles.title, isDark && styles.titleDark]}>Tin nhắn</Text>
-          <View style={styles.headerRight} />
+      {showNavigationHeader ? (
+        <View style={[styles.header, isDark && styles.headerDark]}>
+          <View style={styles.headerInner}>
+            <Pressable onPress={onBack} hitSlop={10} style={styles.backBtn}>
+              <Ionicons
+                name="chevron-back"
+                size={24}
+                color={isDark ? '#E5E7EB' : '#0f172a'}
+              />
+            </Pressable>
+            <Text style={[styles.title, isDark && styles.titleDark]}>Tin nhắn</Text>
+            <View style={styles.headerRight} />
+          </View>
         </View>
-      </View>
+      ) : null}
 
       {loading ? (
         <View style={styles.center}>

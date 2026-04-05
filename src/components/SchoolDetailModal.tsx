@@ -295,7 +295,7 @@ const styles = StyleSheet.create({
     maxWidth: 360,
     height: 48,
     borderRadius: 12,
-    backgroundColor: '#2563eb',
+    backgroundColor: '#1976d2',
     alignItems: 'center',
     justifyContent: 'center',
     flexDirection: 'row',
