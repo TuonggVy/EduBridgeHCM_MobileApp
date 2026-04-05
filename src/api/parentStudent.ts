@@ -1,6 +1,7 @@
 import { apiRequest } from './client';
 import type {
   CreateParentStudentPayload,
+  UpdateParentStudentPayload,
   ParentMajorsResponse,
   ParentPersonalityTypesResponse,
   ParentStudentMutationResponse,
@@ -47,6 +48,15 @@ export async function createParentStudent(
 ): Promise<ParentStudentMutationResponse> {
   return apiRequest<ParentStudentMutationResponse>('/api/v1/parent/student', {
     method: 'POST',
+    body: payload,
+  });
+}
+
+export async function updateParentStudent(
+  payload: UpdateParentStudentPayload
+): Promise<ParentStudentMutationResponse> {
+  return apiRequest<ParentStudentMutationResponse>('/api/v1/parent/student', {
+    method: 'PUT',
     body: payload,
   });
 }

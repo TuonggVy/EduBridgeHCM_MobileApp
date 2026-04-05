@@ -17,6 +17,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 const Ionicons = require('@expo/vector-icons').Ionicons;
 import {
   createParentStudent,
+  updateParentStudent,
   fetchParentMajors,
   fetchParentPersonalityTypes,
   fetchParentSubjects,
@@ -426,16 +427,39 @@ export default function StudentProfileFormScreen({ visible, initialStudent, onCl
       academicInfos.push({ gradeLevel: gl, subjectResults });
     }
 
+    const payloadBase = {
+      studentName: name,
+      gender,
+      personalityTypeCode: personalityCode.trim().toUpperCase(),
+      favouriteJob: favouriteJob.trim() || '—',
+      academicInfos,
+    };
+
+    const rawId = initialStudent?.id;
+    const studentIdForUpdate =
+      rawId === undefined || rawId === null
+        ? NaN
+        : typeof rawId === 'number'
+          ? rawId
+          : Number(String(rawId).trim());
+
+    if (initialStudent && !Number.isFinite(studentIdForUpdate)) {
+      showWarning('Thiếu mã học sinh, không thể cập nhật. Vui lòng tải lại danh sách.', 'Warning');
+      return;
+    }
+
     setSaving(true);
     try {
-      await createParentStudent({
-        studentName: name,
-        gender,
-        personalityTypeCode: personalityCode.trim().toUpperCase(),
-        favouriteJob: favouriteJob.trim() || '—',
-        academicInfos,
-      });
-      showSuccess('Student added successfully', 'Success');
+      if (initialStudent) {
+        await updateParentStudent({
+          studentId: studentIdForUpdate,
+          ...payloadBase,
+        });
+        showSuccess('Đã cập nhật hồ sơ con.', 'Success');
+      } else {
+        await createParentStudent(payloadBase);
+        showSuccess('Student added successfully', 'Success');
+      }
       onSaved();
       onClose();
     } catch (e) {

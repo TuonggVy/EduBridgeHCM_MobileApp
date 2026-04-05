@@ -40,6 +40,11 @@ export type CreateParentStudentPayload = {
   academicInfos: AcademicInfo[];
 };
 
+/** PUT /api/v1/parent/student */
+export type UpdateParentStudentPayload = CreateParentStudentPayload & {
+  studentId: number;
+};
+
 export type ParentStudentsResponse = {
   message: string;
   body: ParentStudentProfile[];
