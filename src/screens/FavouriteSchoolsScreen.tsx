@@ -12,7 +12,6 @@ import {
   ActivityIndicator,
 } from 'react-native';
 const MaterialIcons = require('@expo/vector-icons').MaterialIcons;
-import { useToast } from '../components/AppToast';
 import { FavouriteSchoolCard } from '../components/FavouriteSchoolCard';
 import { SchoolDetailModal } from '../components/SchoolDetailModal';
 import { fetchSchoolPublicDetail } from '../api/school';
@@ -53,8 +52,11 @@ export default function FavouriteSchoolsScreen({
   onToggleSchoolFavourite,
   getIsSchoolFavourite,
 }: FavouriteSchoolsScreenProps) {
-  const { showSuccess, showError } = useToast();
   const [items, setItems] = useState<FavouriteSchoolItem[]>([]);
+  const [localBanner, setLocalBanner] = useState<{
+    variant: 'success' | 'error';
+    message: string;
+  } | null>(null);
   const [detailVisible, setDetailVisible] = useState(false);
   const [detailLoading, setDetailLoading] = useState(false);
   const [detailSchool, setDetailSchool] = useState<SchoolDetail | null>(null);
@@ -99,6 +101,12 @@ export default function FavouriteSchoolsScreen({
       setDetailSchoolId(null);
     }
   }, [visible]);
+
+  useEffect(() => {
+    if (!localBanner) return;
+    const t = setTimeout(() => setLocalBanner(null), 2800);
+    return () => clearTimeout(t);
+  }, [localBanner]);
 
   const openSchoolDetailFromFavourites = useCallback(async (schoolId: number) => {
     setDetailVisible(true);
@@ -151,11 +159,11 @@ export default function FavouriteSchoolsScreen({
       setHasNext(body?.hasNext ?? false);
       setNextPage((p) => p + 1);
     } catch {
-      showError('Không tải thêm được');
+      setLocalBanner({ variant: 'error', message: 'Không tải thêm được' });
     } finally {
       setLoadingMore(false);
     }
-  }, [hasNext, loadingMore, loading, nextPage, showError]);
+  }, [hasNext, loadingMore, loading, nextPage]);
 
   const performRemove = useCallback(
     async (item: FavouriteSchoolItem) => {
@@ -163,12 +171,15 @@ export default function FavouriteSchoolsScreen({
         await removeFavouriteSchool(item.id);
         setItems((prev) => prev.filter((x) => x.id !== item.id));
         onUnfavourited(item.schoolId);
-        showSuccess('Đã gỡ khỏi yêu thích');
+        setLocalBanner({ variant: 'success', message: 'Đã gỡ khỏi yêu thích' });
       } catch (e) {
-        showError(e instanceof Error ? e.message : 'Không gỡ được yêu thích');
+        setLocalBanner({
+          variant: 'error',
+          message: e instanceof Error ? e.message : 'Không gỡ được yêu thích',
+        });
       }
     },
-    [onUnfavourited, showError, showSuccess]
+    [onUnfavourited]
   );
 
   const displayed = useMemo(() => {
@@ -264,7 +275,6 @@ export default function FavouriteSchoolsScreen({
           </Pressable>
           <View style={styles.headerTitles}>
             <Text style={styles.title}>Trường yêu thích</Text>
-            <Text style={styles.subtitle}>Truy cập nhanh các trường đã lưu</Text>
           </View>
         </View>
 
@@ -325,6 +335,36 @@ export default function FavouriteSchoolsScreen({
           showsVerticalScrollIndicator={false}
         />
       )}
+
+      {localBanner ? (
+        <Pressable
+          style={styles.snackbarWrap}
+          onPress={() => setLocalBanner(null)}
+          accessibilityRole="alert"
+        >
+          <View
+            style={[
+              styles.snackbar,
+              localBanner.variant === 'success' ? styles.snackbarSuccess : styles.snackbarError,
+            ]}
+          >
+            <MaterialIcons
+              name={localBanner.variant === 'success' ? 'check-circle' : 'error-outline'}
+              size={22}
+              color={localBanner.variant === 'success' ? '#16a34a' : '#dc2626'}
+            />
+            <Text
+              style={[
+                styles.snackbarText,
+                localBanner.variant === 'success' ? styles.snackbarTextSuccess : styles.snackbarTextError,
+              ]}
+              numberOfLines={2}
+            >
+              {localBanner.message}
+            </Text>
+          </View>
+        </Pressable>
+      ) : null}
     </View>
 
     <SchoolDetailModal
@@ -344,6 +384,48 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: '#f8fafc',
   },
+  snackbarWrap: {
+    position: 'absolute',
+    left: sp.lg,
+    right: sp.lg,
+    bottom: 28,
+    zIndex: 100,
+    elevation: 24,
+  },
+  snackbar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: sp.sm,
+    paddingVertical: 14,
+    paddingHorizontal: sp.md,
+    borderRadius: radius.lg,
+    borderWidth: 1,
+    shadowColor: '#0f172a',
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.12,
+    shadowRadius: 12,
+    elevation: 8,
+  },
+  snackbarSuccess: {
+    backgroundColor: '#ECFDF5',
+    borderColor: 'rgba(22, 163, 74, 0.25)',
+  },
+  snackbarError: {
+    backgroundColor: '#FEF2F2',
+    borderColor: 'rgba(220, 38, 38, 0.2)',
+  },
+  snackbarText: {
+    flex: 1,
+    fontSize: 14,
+    fontWeight: '600',
+    lineHeight: 19,
+  },
+  snackbarTextSuccess: {
+    color: '#166534',
+  },
+  snackbarTextError: {
+    color: '#991B1B',
+  },
   header: {
     paddingHorizontal: sp.lg,
     paddingBottom: sp.md,
@@ -353,21 +435,26 @@ const styles = StyleSheet.create({
   },
   headerRow: {
     flexDirection: 'row',
-    alignItems: 'flex-start',
+    alignItems: 'center',
     marginBottom: sp.md,
-    paddingTop: sp.xs,
   },
   backBtn: {
     marginRight: sp.sm,
+    width: 40,
+    height: 40,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   headerTitles: {
     flex: 1,
+    justifyContent: 'center',
   },
   title: {
     fontSize: 22,
     fontWeight: '700',
     color: '#0f172a',
     letterSpacing: -0.3,
+    lineHeight: 28,
   },
   subtitle: {
     marginTop: 4,
