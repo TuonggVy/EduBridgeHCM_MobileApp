@@ -199,6 +199,7 @@ export default function StudentProfileFormScreen({ visible, initialStudent, onCl
   const scrollRef = useRef<ScrollView>(null);
   const scrollContentRef = useRef<View>(null);
   const fieldRefs = useRef<Record<string, View | null>>({});
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
 
   const setFieldRef = useCallback((key: string) => (node: View | null) => {
     fieldRefs.current[key] = node;
@@ -225,12 +226,22 @@ export default function StudentProfileFormScreen({ visible, initialStudent, onCl
   }, []);
 
   const warnRequiredAt = useCallback(
-    (key: string) => {
+    (key: string, message = REQUIRED_FIELD_MESSAGE) => {
       scrollToFieldKey(key);
-      showWarning(REQUIRED_FIELD_MESSAGE, REQUIRED_FIELD_TITLE);
+      setFieldErrors({ [key]: message });
+      showWarning(message, REQUIRED_FIELD_TITLE);
     },
     [scrollToFieldKey, showWarning]
   );
+
+  const clearFieldError = useCallback((key: string) => {
+    setFieldErrors((prev) => {
+      if (!prev[key]) return prev;
+      const next = { ...prev };
+      delete next[key];
+      return next;
+    });
+  }, []);
 
   const [loadingRefs, setLoadingRefs] = useState(false);
   const [subjectGroups, setSubjectGroups] = useState<SubjectGroup[]>([]);
@@ -303,6 +314,7 @@ export default function StudentProfileFormScreen({ visible, initialStudent, onCl
 
   useEffect(() => {
     if (!visible) return;
+    setFieldErrors({});
     if (initialStudent) {
       setStudentName(initialStudent.studentName ?? '');
       setGender(initialStudent.gender ?? '');
@@ -348,6 +360,7 @@ export default function StudentProfileFormScreen({ visible, initialStudent, onCl
   const onSubjectPicked = (name: string) => {
     if (!pickTarget) return;
     const { bi, ri, type } = pickTarget;
+    clearFieldError(`row-${type === 'foreign_language' ? 'foreign' : 'regular'}-${bi}-${ri}`);
     setAcademics((prev) => {
       const next = prev.map((b, i) => {
         if (i !== bi) return b;
@@ -390,10 +403,12 @@ export default function StudentProfileFormScreen({ visible, initialStudent, onCl
   };
 
   const updateGrade = (bi: number, text: string) => {
+    clearFieldError(`grade-${bi}`);
     setAcademics((p) => p.map((b, i) => (i === bi ? { ...b, gradeLevel: text } : b)));
   };
 
   const updateRow = (bi: number, ri: number, patch: Partial<SubjectRow>, type: SubjectType) => {
+    clearFieldError(`row-${type === 'foreign_language' ? 'foreign' : 'regular'}-${bi}-${ri}`);
     setAcademics((p) =>
       p.map((b, i) => {
         if (i !== bi) return b;
@@ -408,6 +423,7 @@ export default function StudentProfileFormScreen({ visible, initialStudent, onCl
   };
 
   const handleSave = async () => {
+    setFieldErrors({});
     const name = studentName.trim();
     if (!name) {
       warnRequiredAt('name');
@@ -421,6 +437,11 @@ export default function StudentProfileFormScreen({ visible, initialStudent, onCl
       warnRequiredAt('personality');
       return;
     }
+    const favJob = favouriteJob.trim();
+    if (!favJob) {
+      warnRequiredAt('favouriteJob');
+      return;
+    }
 
     const academicInfos: AcademicInfo[] = [];
     for (let bi = 0; bi < academics.length; bi++) {
@@ -428,11 +449,11 @@ export default function StudentProfileFormScreen({ visible, initialStudent, onCl
       const block = normalizeAcademicBlock(rawBlock);
       const gl = normalizeGradeLevelInput(block.gradeLevel);
       if (!gl) {
-        warnRequiredAt(`grade-${bi}`);
+        warnRequiredAt(`grade-${bi}`, 'Vui lòng chọn khối/lớp');
         return;
       }
       if (!ALLOWED_GRADE_LEVELS.has(gl)) {
-        warnRequiredAt(`grade-${bi}`);
+        warnRequiredAt(`grade-${bi}`, 'Khối/lớp không hợp lệ');
         return;
       }
       const subjectResults: { subjectName: string; score: number }[] = [];
@@ -443,7 +464,7 @@ export default function StudentProfileFormScreen({ visible, initialStudent, onCl
         if (!sn) continue;
         const sc = parseFloat(row.score.replace(',', '.'));
         if (Number.isNaN(sc)) {
-          warnRequiredAt(`row-regular-${bi}-${ri}`);
+          warnRequiredAt(`row-regular-${bi}-${ri}`, 'Vui lòng nhập điểm hợp lệ');
           return;
         }
         subjectResults.push({ subjectName: sn, score: sc });
@@ -454,18 +475,18 @@ export default function StudentProfileFormScreen({ visible, initialStudent, onCl
         if (!sn) continue;
         const sc = parseFloat(row.score.replace(',', '.'));
         if (Number.isNaN(sc)) {
-          warnRequiredAt(`row-foreign-${bi}-${ri}`);
+          warnRequiredAt(`row-foreign-${bi}-${ri}`, 'Vui lòng nhập điểm hợp lệ');
           return;
         }
         validForeignLanguageCount += 1;
         subjectResults.push({ subjectName: sn, score: sc });
       }
       if (validForeignLanguageCount < 1) {
-        warnRequiredAt(`row-foreign-${bi}-0`);
+        warnRequiredAt(`row-foreign-${bi}-0`, 'Vui lòng chọn ít nhất 1 môn ngoại ngữ');
         return;
       }
       if (!subjectResults.length) {
-        warnRequiredAt(`row-regular-${bi}-0`);
+        warnRequiredAt(`row-regular-${bi}-0`, 'Vui lòng nhập ít nhất 1 môn học');
         return;
       }
       academicInfos.push({ gradeLevel: gl, subjectResults });
@@ -475,7 +496,7 @@ export default function StudentProfileFormScreen({ visible, initialStudent, onCl
       studentName: name,
       gender,
       personalityTypeCode: personalityCode.trim().toUpperCase(),
-      favouriteJob: favouriteJob.trim() || '—',
+      favouriteJob: favJob,
       academicInfos,
     };
 
@@ -527,7 +548,10 @@ export default function StudentProfileFormScreen({ visible, initialStudent, onCl
             return (
               <Pressable
                 key={p.id}
-                onPress={() => setPersonalityCode(p.code)}
+                onPress={() => {
+                  setPersonalityCode(p.code);
+                  clearFieldError('personality');
+                }}
                 style={({ pressed }) => [
                   styles.pCard,
                   { width: CARD_W },
@@ -581,10 +605,14 @@ export default function StudentProfileFormScreen({ visible, initialStudent, onCl
               <TextInput
                 style={styles.input}
                 value={studentName}
-                onChangeText={setStudentName}
+                onChangeText={(t) => {
+                  setStudentName(t);
+                  clearFieldError('name');
+                }}
                 placeholder="Ví dụ: Nguyễn Văn A"
                 placeholderTextColor="#94a3b8"
               />
+              {!!fieldErrors.name && <Text style={styles.fieldErrorText}>{fieldErrors.name}</Text>}
             </View>
 
             <View style={styles.field} ref={setFieldRef('gender')} collapsable={false}>
@@ -595,13 +623,17 @@ export default function StudentProfileFormScreen({ visible, initialStudent, onCl
                 {GENDERS.map((g) => (
                   <Pressable
                     key={g.value}
-                    onPress={() => setGender(g.value)}
+                    onPress={() => {
+                      setGender(g.value);
+                      clearFieldError('gender');
+                    }}
                     style={[styles.chip, gender === g.value && styles.chipOn]}
                   >
                     <Text style={[styles.chipTxt, gender === g.value && styles.chipTxtOn]}>{g.label}</Text>
                   </Pressable>
                 ))}
               </View>
+              {!!fieldErrors.gender && <Text style={styles.fieldErrorText}>{fieldErrors.gender}</Text>}
             </View>
 
             <View style={styles.field} ref={setFieldRef('personality')} collapsable={false}>
@@ -609,21 +641,26 @@ export default function StudentProfileFormScreen({ visible, initialStudent, onCl
                 Tính cách MBTI <Text style={styles.req}>*</Text>
               </Text>
               {renderPersonalityGrid()}
+              {!!fieldErrors.personality && <Text style={styles.fieldErrorText}>{fieldErrors.personality}</Text>}
             </View>
 
-            <View style={styles.field}>
-              <Text style={styles.label}>Nghề nghiệp yêu thích</Text>
+            <View style={styles.field} ref={setFieldRef('favouriteJob')} collapsable={false}>
+              <Text style={styles.label}>
+                Nghề nghiệp yêu thích <Text style={styles.req}>*</Text>
+              </Text>
               <TextInput
                 style={styles.input}
                 value={favouriteJob}
                 onChangeText={(t) => {
                   setFavouriteJob(t);
+                  clearFieldError('favouriteJob');
                   setJobSuggestOpen(true);
                 }}
                 onFocus={() => setJobSuggestOpen(true)}
                 placeholder="Gõ để gợi ý từ danh ngành đại học"
                 placeholderTextColor="#94a3b8"
               />
+              {!!fieldErrors.favouriteJob && <Text style={styles.fieldErrorText}>{fieldErrors.favouriteJob}</Text>}
               {jobSuggestOpen && filteredMajorGroups.length > 0 && (
                 <View style={styles.suggestBox}>
                   <ScrollView
@@ -711,6 +748,7 @@ export default function StudentProfileFormScreen({ visible, initialStudent, onCl
                     </Pressable>
                   ))}
                 </ScrollView>
+                {!!fieldErrors[`grade-${bi}`] && <Text style={styles.fieldErrorText}>{fieldErrors[`grade-${bi}`]}</Text>}
                 </View>
 
                 <Text style={styles.subjectSectionTitle}>Môn học chính</Text>
@@ -738,6 +776,9 @@ export default function StudentProfileFormScreen({ visible, initialStudent, onCl
                         </Pressable>
                       )}
                     </View>
+                    {!!fieldErrors[`row-regular-${bi}-${ri}`] && (
+                      <Text style={styles.fieldErrorText}>{fieldErrors[`row-regular-${bi}-${ri}`]}</Text>
+                    )}
                   </View>
                 ))}
                 <Pressable onPress={() => addSubjectRow(bi, 'regular')} style={styles.addRowBtn}>
@@ -773,6 +814,9 @@ export default function StudentProfileFormScreen({ visible, initialStudent, onCl
                         </Pressable>
                       )}
                     </View>
+                    {!!fieldErrors[`row-foreign-${bi}-${ri}`] && (
+                      <Text style={styles.fieldErrorText}>{fieldErrors[`row-foreign-${bi}-${ri}`]}</Text>
+                    )}
                   </View>
                 ))}
                 <Pressable onPress={() => addSubjectRow(bi, 'foreign_language')} style={styles.addRowBtn}>
@@ -846,6 +890,12 @@ const styles = StyleSheet.create({
   field: { marginBottom: sp.lg },
   label: { fontSize: 15, fontWeight: '600', color: '#334155', marginBottom: sp.xs },
   req: { color: '#ef4444' },
+  fieldErrorText: {
+    marginTop: 6,
+    fontSize: 13,
+    color: '#dc2626',
+    fontWeight: '600',
+  },
   input: {
     backgroundColor: '#fff',
     borderRadius: radius.lg,
