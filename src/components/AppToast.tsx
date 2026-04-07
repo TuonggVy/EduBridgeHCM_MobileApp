@@ -171,15 +171,15 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
   const value = useMemo<ToastContextValue>(
     () => ({
       showToast,
-      showSuccess: (message, title = 'Success') =>
+      showSuccess: (message, title = 'Thành công') =>
         showToast({ type: 'success', title, message }),
-      showError: (message, title = 'Something went wrong', actionLabel, onAction) =>
+      showError: (message, title = 'Có lỗi xảy ra', actionLabel, onAction) =>
         showToast({ type: 'error', title, message, actionLabel, onAction }),
-      showWarning: (message, title = 'Warning') =>
+      showWarning: (message, title = 'Cảnh báo') =>
         showToast({ type: 'warning', title, message }),
-      showInfo: (message, title = 'Info') =>
+      showInfo: (message, title = 'Thông tin') =>
         showToast({ type: 'info', title, message }),
-      showActionToast: (message, actionLabel, onAction, title = 'Info') =>
+      showActionToast: (message, actionLabel, onAction, title = 'Thông tin') =>
         showToast({ type: 'info', title, message, actionLabel, onAction, durationMs: ACTION_DURATION }),
       dismissToast,
     }),
@@ -259,16 +259,16 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
 
 export function useToast() {
   const ctx = useContext(ToastContext);
-  if (!ctx) throw new Error('useToast must be used within ToastProvider');
+  if (!ctx) throw new Error('useToast phải được dùng bên trong ToastProvider');
   return ctx;
 }
 
 export const TOAST_EXAMPLES = {
-  success: { title: 'Success', message: 'Student added successfully' },
-  error: { title: 'Something went wrong', message: 'Failed to save student', actionLabel: 'Retry' },
-  warning: { title: 'Warning', message: 'Some fields are missing' },
-  info: { title: 'Info', message: 'You can add multiple children' },
-  action: { title: 'Info', message: 'Student deleted', actionLabel: 'Undo' },
+  success: { title: 'Thành công', message: 'Đã thêm học sinh thành công' },
+  error: { title: 'Có lỗi xảy ra', message: 'Không lưu được học sinh', actionLabel: 'Thử lại' },
+  warning: { title: 'Cảnh báo', message: 'Một số trường chưa được điền' },
+  info: { title: 'Thông tin', message: 'Bạn có thể thêm nhiều con' },
+  action: { title: 'Thông tin', message: 'Đã xóa học sinh', actionLabel: 'Hoàn tác' },
 };
 
 const styles = StyleSheet.create({

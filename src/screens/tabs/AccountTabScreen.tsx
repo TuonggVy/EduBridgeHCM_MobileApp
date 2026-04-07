@@ -15,12 +15,11 @@ import { MaterialIcons, sp, radius } from './tabConstants';
 
 const PROFILE_MENU_ACTIVITIES: { id: string; label: string; icon: string }[] = [
   { id: 'consultation', label: 'Lịch sử tư vấn', icon: 'forum' },
-  { id: 'saved', label: 'Trường đã lưu', icon: 'bookmark-border' },
+  { id: 'favourites', label: 'Trường yêu thích', icon: 'favorite' },
   { id: 'application', label: 'Trạng thái hồ sơ', icon: 'description' },
 ];
 
 const PROFILE_MENU_QUICK: { id: string; label: string; icon: string }[] = [
-  { id: 'favourites', label: 'Trường yêu thích', icon: 'favorite' },
   { id: 'compare', label: 'So sánh trường', icon: 'compare-arrows' },
   { id: 'plans', label: 'Kế hoạch tuyển sinh', icon: 'calendar-today' },
   { id: 'notifications', label: 'Thông báo', icon: 'notifications-none' },
@@ -187,15 +186,15 @@ export function AccountTabScreen({
       <MenuCard
         title="Hoạt động của tôi"
         items={PROFILE_MENU_ACTIVITIES}
-        onItemPress={() => {}}
+        onItemPress={(id) => {
+          if (id === 'favourites') onOpenFavourites();
+        }}
       />
 
       <MenuCard
         title="Truy cập nhanh"
         items={PROFILE_MENU_QUICK}
-        onItemPress={(id) => {
-          if (id === 'favourites') onOpenFavourites();
-        }}
+        onItemPress={() => {}}
       />
 
       <MenuCard

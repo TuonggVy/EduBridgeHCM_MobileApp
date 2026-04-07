@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -12,6 +12,8 @@ import {
   Platform,
   Image,
   Dimensions,
+  findNodeHandle,
+  UIManager,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 const Ionicons = require('@expo/vector-icons').Ionicons;
@@ -56,6 +58,9 @@ const GRADE_OPTIONS = [
 ] as const;
 
 const ALLOWED_GRADE_LEVELS: Set<string> = new Set(GRADE_OPTIONS.map((g) => g.value));
+
+const REQUIRED_FIELD_TITLE = 'Required';
+const REQUIRED_FIELD_MESSAGE = 'Nhập thông tin';
 
 type SubjectRow = { subjectName: string; score: string };
 type SubjectType = 'regular' | 'foreign_language';
@@ -191,6 +196,42 @@ function normalizeGradeLevelInput(input: string): string {
 
 export default function StudentProfileFormScreen({ visible, initialStudent, onClose, onSaved }: Props) {
   const { showWarning, showError, showSuccess } = useToast();
+  const scrollRef = useRef<ScrollView>(null);
+  const scrollContentRef = useRef<View>(null);
+  const fieldRefs = useRef<Record<string, View | null>>({});
+
+  const setFieldRef = useCallback((key: string) => (node: View | null) => {
+    fieldRefs.current[key] = node;
+  }, []);
+
+  const scrollToFieldKey = useCallback((key: string) => {
+    requestAnimationFrame(() => {
+      const child = fieldRefs.current[key];
+      const content = scrollContentRef.current;
+      const scroll = scrollRef.current;
+      if (!child || !content || !scroll) return;
+      const contentNode = findNodeHandle(content);
+      const childNode = findNodeHandle(child);
+      if (contentNode == null || childNode == null) return;
+      UIManager.measureLayout(
+        childNode,
+        contentNode,
+        () => {},
+        (_x, y) => {
+          scroll.scrollTo({ y: Math.max(0, y - 20), animated: true });
+        }
+      );
+    });
+  }, []);
+
+  const warnRequiredAt = useCallback(
+    (key: string) => {
+      scrollToFieldKey(key);
+      showWarning(REQUIRED_FIELD_MESSAGE, REQUIRED_FIELD_TITLE);
+    },
+    [scrollToFieldKey, showWarning]
+  );
+
   const [loadingRefs, setLoadingRefs] = useState(false);
   const [subjectGroups, setSubjectGroups] = useState<SubjectGroup[]>([]);
   const [personalityGrouped, setPersonalityGrouped] = useState<PersonalityTypesGrouped | null>(null);
@@ -369,59 +410,62 @@ export default function StudentProfileFormScreen({ visible, initialStudent, onCl
   const handleSave = async () => {
     const name = studentName.trim();
     if (!name) {
-      showWarning('Vui lòng nhập tên học sinh.', 'Warning');
+      warnRequiredAt('name');
       return;
     }
     if (!gender) {
-      showWarning('Vui lòng chọn giới tính.', 'Warning');
+      warnRequiredAt('gender');
       return;
     }
     if (!personalityCode.trim()) {
-      showWarning('Vui lòng chọn loại tính cách MBTI.', 'Warning');
+      warnRequiredAt('personality');
       return;
     }
 
     const academicInfos: AcademicInfo[] = [];
-    for (const rawBlock of academics) {
+    for (let bi = 0; bi < academics.length; bi++) {
+      const rawBlock = academics[bi];
       const block = normalizeAcademicBlock(rawBlock);
       const gl = normalizeGradeLevelInput(block.gradeLevel);
       if (!gl) {
-        showWarning('Mỗi khối học cần có khối/lớp.', 'Warning');
+        warnRequiredAt(`grade-${bi}`);
         return;
       }
       if (!ALLOWED_GRADE_LEVELS.has(gl)) {
-        showWarning('Vui lòng chọn khối từ Lớp 6 đến Lớp 9 (GRADE_06 đến GRADE_09).', 'Warning');
+        warnRequiredAt(`grade-${bi}`);
         return;
       }
       const subjectResults: { subjectName: string; score: number }[] = [];
       let validForeignLanguageCount = 0;
-      for (const row of block.regularRows) {
+      for (let ri = 0; ri < block.regularRows.length; ri++) {
+        const row = block.regularRows[ri];
         const sn = row.subjectName.trim();
         if (!sn) continue;
         const sc = parseFloat(row.score.replace(',', '.'));
         if (Number.isNaN(sc)) {
-          showWarning(`Môn "${sn}": nhập điểm là số.`, 'Warning');
+          warnRequiredAt(`row-regular-${bi}-${ri}`);
           return;
         }
         subjectResults.push({ subjectName: sn, score: sc });
       }
-      for (const row of block.foreignRows) {
+      for (let ri = 0; ri < block.foreignRows.length; ri++) {
+        const row = block.foreignRows[ri];
         const sn = row.subjectName.trim();
         if (!sn) continue;
         const sc = parseFloat(row.score.replace(',', '.'));
         if (Number.isNaN(sc)) {
-          showWarning(`Môn "${sn}": nhập điểm là số.`, 'Warning');
+          warnRequiredAt(`row-foreign-${bi}-${ri}`);
           return;
         }
         validForeignLanguageCount += 1;
         subjectResults.push({ subjectName: sn, score: sc });
       }
       if (validForeignLanguageCount < 1) {
-        showWarning(`Khối "${gl}" cần ít nhất 1 môn Ngoại ngữ.`, 'Warning');
+        warnRequiredAt(`row-foreign-${bi}-0`);
         return;
       }
       if (!subjectResults.length) {
-        showWarning(`Khối "${gl}" cần ít nhất một môn và điểm.`, 'Warning');
+        warnRequiredAt(`row-regular-${bi}-0`);
         return;
       }
       academicInfos.push({ gradeLevel: gl, subjectResults });
@@ -522,16 +566,15 @@ export default function StudentProfileFormScreen({ visible, initialStudent, onCl
           </View>
         ) : (
           <ScrollView
+            ref={scrollRef}
             style={styles.scroll}
             contentContainerStyle={styles.scrollContent}
             keyboardShouldPersistTaps="handled"
             showsVerticalScrollIndicator={false}
           >
-            <Text style={styles.hint}>
-              API hiện hỗ trợ tạo mới (POST). Lưu sẽ gửi hồ sơ mới lên máy chủ.
-            </Text>
+            <View ref={scrollContentRef} collapsable={false}>
 
-            <View style={styles.field}>
+            <View style={styles.field} ref={setFieldRef('name')} collapsable={false}>
               <Text style={styles.label}>
                 Tên học sinh <Text style={styles.req}>*</Text>
               </Text>
@@ -544,7 +587,7 @@ export default function StudentProfileFormScreen({ visible, initialStudent, onCl
               />
             </View>
 
-            <View style={styles.field}>
+            <View style={styles.field} ref={setFieldRef('gender')} collapsable={false}>
               <Text style={styles.label}>
                 Giới tính <Text style={styles.req}>*</Text>
               </Text>
@@ -561,7 +604,7 @@ export default function StudentProfileFormScreen({ visible, initialStudent, onCl
               </View>
             </View>
 
-            <View style={styles.field}>
+            <View style={styles.field} ref={setFieldRef('personality')} collapsable={false}>
               <Text style={styles.label}>
                 Tính cách MBTI <Text style={styles.req}>*</Text>
               </Text>
@@ -653,6 +696,7 @@ export default function StudentProfileFormScreen({ visible, initialStudent, onCl
                     </Pressable>
                   )}
                 </View>
+                <View ref={setFieldRef(`grade-${bi}`)} collapsable={false}>
                 <TextInput
                   style={styles.input}
                   value={block.gradeLevel}
@@ -667,10 +711,11 @@ export default function StudentProfileFormScreen({ visible, initialStudent, onCl
                     </Pressable>
                   ))}
                 </ScrollView>
+                </View>
 
                 <Text style={styles.subjectSectionTitle}>Môn học chính</Text>
                 {block.regularRows.map((row, ri) => (
-                  <View key={ri} style={styles.rowBlock}>
+                  <View key={ri} style={styles.rowBlock} ref={setFieldRef(`row-regular-${bi}-${ri}`)} collapsable={false}>
                     <Text style={styles.rowLabel}>Môn & điểm</Text>
                     <View style={styles.rowInner}>
                       <Pressable style={styles.subjectPick} onPress={() => openSubjectPicker(bi, ri, 'regular')}>
@@ -702,7 +747,7 @@ export default function StudentProfileFormScreen({ visible, initialStudent, onCl
 
                 <Text style={styles.subjectSectionTitle}>Ngoại ngữ (bắt buộc ít nhất 1 môn)</Text>
                 {block.foreignRows.map((row, ri) => (
-                  <View key={ri} style={styles.rowBlock}>
+                  <View key={ri} style={styles.rowBlock} ref={setFieldRef(`row-foreign-${bi}-${ri}`)} collapsable={false}>
                     <Text style={styles.rowLabel}>Môn & điểm</Text>
                     <View style={styles.rowInner}>
                       <Pressable
@@ -753,6 +798,7 @@ export default function StudentProfileFormScreen({ visible, initialStudent, onCl
             </Pressable>
 
             <View style={{ height: 48 }} />
+            </View>
           </ScrollView>
         )}
 
