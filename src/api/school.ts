@@ -1,6 +1,6 @@
 import { apiRequest } from './client';
 import type {
-  NearbyCampus,
+  NearbyCampusSearchItem,
   NearbyCampusSearchResponse,
   SchoolDetail,
   SchoolDetailResponse,
@@ -45,48 +45,6 @@ function normalizeSchoolDetail(school: SchoolDetail): SchoolDetail {
   };
 }
 
-function pickNumber(value: unknown): number | null {
-  return typeof value === 'number' && Number.isFinite(value) ? value : null;
-}
-
-function pickString(value: unknown): string | null {
-  return typeof value === 'string' ? value : null;
-}
-
-function normalizeNearbyCampus(item: Record<string, unknown>): NearbyCampus | null {
-  const latitude = pickNumber(item.latitude);
-  const longitude = pickNumber(item.longitude);
-  if (latitude == null || longitude == null) return null;
-  const schoolIdCandidate = item.schoolId ?? item.id;
-  const schoolId =
-    typeof schoolIdCandidate === 'number' && Number.isFinite(schoolIdCandidate)
-      ? schoolIdCandidate
-      : null;
-  const name =
-    pickString(item.name) ??
-    pickString(item.campusName) ??
-    pickString(item.schoolName) ??
-    'Cơ sở trường';
-  const schoolName = pickString(item.schoolName);
-  return {
-    id:
-      typeof item.id === 'number' && Number.isFinite(item.id)
-        ? item.id
-        : Number(`${schoolId ?? 0}${Math.round(latitude * 1000)}${Math.round(longitude * 1000)}`),
-    schoolId,
-    schoolName,
-    name,
-    address: pickString(item.address),
-    district: pickString(item.district),
-    city: pickString(item.city),
-    latitude,
-    longitude,
-    distance: pickNumber(item.distance),
-    logoUrl: pickString(item.logoUrl),
-    averageRating: pickNumber(item.averageRating),
-  };
-}
-
 /**
  * GET /api/v1/school/public/list
  * BE không phân trang: trả về toàn bộ danh sách trong một response.
@@ -114,6 +72,47 @@ export async function fetchSchoolPublicDetail(
   };
 }
 
+function pickNumber(value: unknown): number | null {
+  return typeof value === 'number' && Number.isFinite(value) ? value : null;
+}
+
+function pickString(value: unknown): string | null {
+  return typeof value === 'string' ? value : null;
+}
+
+function normalizeNearbyCampusSearchItem(item: Record<string, unknown>): NearbyCampusSearchItem | null {
+  const id = pickNumber(item.id);
+  const distance = pickNumber(item.distance);
+  const latitude = pickNumber(item.latitude);
+  const longitude = pickNumber(item.longitude);
+  if (id == null || distance == null || latitude == null || longitude == null) return null;
+  const emails = Array.isArray(item.consultantEmails)
+    ? item.consultantEmails.filter((e): e is string => typeof e === 'string')
+    : [];
+  return {
+    id,
+    distance,
+    latitude,
+    longitude,
+    name: pickString(item.name) ?? 'Cơ sở',
+    address: pickString(item.address),
+    city: pickString(item.city),
+    district: pickString(item.district),
+    ward: pickString(item.ward),
+    imageJson: pickString(item.imageJson),
+    policyDetail: pickString(item.policyDetail),
+    consultantEmails: emails,
+    boardingType: pickString(item.boardingType),
+    phoneNumber: pickString(item.phoneNumber),
+    facility: pickString(item.facility),
+    status: pickString(item.status),
+  };
+}
+
+/**
+ * GET /api/v1/school/campus/search/nearby?lat=&lng=&radius=
+ * Trả về campus trong bán kính; client có thể lọc theo `id` campus của một trường (vd. trong SchoolDetailModal).
+ */
 export async function searchNearbyCampus(
   lat: number,
   lng: number,
@@ -127,10 +126,10 @@ export async function searchNearbyCampus(
   const rawBody = response.body;
   const body = Array.isArray(rawBody)
     ? rawBody
-        .map((item) =>
-          item && typeof item === 'object' ? normalizeNearbyCampus(item as Record<string, unknown>) : null
+        .map((row) =>
+          row && typeof row === 'object' ? normalizeNearbyCampusSearchItem(row as Record<string, unknown>) : null
         )
-        .filter((item): item is NearbyCampus => item != null)
+        .filter((row): row is NearbyCampusSearchItem => row != null)
     : [];
   return { message: response.message, body };
 }

@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   Modal,
   View,
@@ -12,8 +12,10 @@ import {
   StatusBar,
 } from 'react-native';
 import MapView, { Marker } from 'react-native-maps';
+import * as Location from 'expo-location';
 const MaterialIcons = require('@expo/vector-icons').MaterialIcons;
 import type { SchoolDetail } from '../types/school';
+import { searchNearbyCampus } from '../api/school';
 import {
   badgePillStyle,
   getCurriculumStatusBadgeColors,
@@ -25,6 +27,20 @@ import {
 } from '../utils/curriculumLabels';
 
 const HEADER_TOP = Platform.OS === 'ios' ? 50 : (StatusBar.currentHeight ?? 24) + 8;
+
+/** Bán kính gọi nearby đủ rộng để vẫn nhận được các cơ sở của trường (km). */
+const NEARBY_SEARCH_RADIUS_KM = 50;
+
+function formatKm(d: number): string {
+  return `${d.toFixed(d < 10 ? 1 : 0)} km`;
+}
+
+/** Mở Google Maps với lộ trình tới điểm đích (ô tô). Hoạt động trên iOS/Android khi có app hoặc trình duyệt. */
+function openGoogleMapsDirections(lat: number, lng: number) {
+  const dest = encodeURIComponent(`${lat},${lng}`);
+  const url = `https://www.google.com/maps/dir/?api=1&destination=${dest}&travelmode=driving`;
+  void Linking.openURL(url);
+}
 
 type Props = {
   visible: boolean;
@@ -46,9 +62,48 @@ export function SchoolDetailModal({
   const [expandedDescription, setExpandedDescription] = useState(false);
   const [expandedCurriculum, setExpandedCurriculum] = useState<Record<string, boolean>>({});
   const [expandedCampus, setExpandedCampus] = useState<Record<number, boolean>>({});
+  const [distancesKmByCampusId, setDistancesKmByCampusId] = useState<Record<number, number>>({});
 
   const curriculumList = useMemo(() => school?.curriculumList ?? [], [school?.curriculumList]);
   const campusList = useMemo(() => school?.campusList ?? [], [school?.campusList]);
+
+  useEffect(() => {
+    if (!visible) {
+      setDistancesKmByCampusId({});
+    }
+  }, [visible]);
+
+  useEffect(() => {
+    if (!visible || !school || loading) return;
+    let cancelled = false;
+    setDistancesKmByCampusId({});
+    (async () => {
+      try {
+        const perm = await Location.requestForegroundPermissionsAsync();
+        if (perm.status !== 'granted' || cancelled) return;
+        const pos = await Location.getCurrentPositionAsync({
+          accuracy: Location.Accuracy.Balanced,
+        });
+        const res = await searchNearbyCampus(
+          pos.coords.latitude,
+          pos.coords.longitude,
+          NEARBY_SEARCH_RADIUS_KM
+        );
+        if (cancelled) return;
+        const allowed = new Set(school.campusList.map((c) => c.id));
+        const next: Record<number, number> = {};
+        for (const row of res.body) {
+          if (allowed.has(row.id)) next[row.id] = row.distance;
+        }
+        setDistancesKmByCampusId(next);
+      } catch {
+        if (!cancelled) setDistancesKmByCampusId({});
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [visible, loading, school?.id]);
 
   return (
     <Modal visible={visible} animationType="slide" presentationStyle="fullScreen" onRequestClose={onClose}>
@@ -139,7 +194,14 @@ export function SchoolDetailModal({
                           }
                         >
                           <View style={styles.campusHeaderRow}>
-                            <Text style={styles.campusName}>{campus.name}</Text>
+                            <View style={styles.campusTitleCol}>
+                              <Text style={styles.campusName}>{campus.name}</Text>
+                              {distancesKmByCampusId[campus.id] != null ? (
+                                <Text style={styles.campusDistance}>
+                                  Cách bạn: {formatKm(distancesKmByCampusId[campus.id]!)}
+                                </Text>
+                              ) : null}
+                            </View>
                             <MaterialIcons
                               name={expanded ? 'expand-less' : 'expand-more'}
                               size={22}
@@ -167,7 +229,10 @@ export function SchoolDetailModal({
                             ) : null}
 
                             {typeof campus.latitude === 'number' && typeof campus.longitude === 'number' ? (
-                              <View style={styles.campusMiniMapWrap}>
+                              <Pressable
+                                onPress={() => openGoogleMapsDirections(campus.latitude!, campus.longitude!)}
+                                style={styles.campusMiniMapWrap}
+                              >
                                 <MapView
                                   style={styles.campusMiniMap}
                                   pointerEvents="none"
@@ -189,7 +254,11 @@ export function SchoolDetailModal({
                                     }}
                                   />
                                 </MapView>
-                              </View>
+                                <View style={styles.mapTapHint} pointerEvents="none">
+                                  <MaterialIcons name="directions" size={16} color="#fff" />
+                                  <Text style={styles.mapTapHintText}>Chạm để chỉ đường (Google Maps)</Text>
+                                </View>
+                              </Pressable>
                             ) : null}
 
                             {campus.phoneNumber ? (
@@ -363,6 +432,13 @@ const styles = StyleSheet.create({
     marginTop: 10,
   },
   campusName: { fontSize: 15, fontWeight: '700', color: '#0f172a' },
+  campusTitleCol: { flex: 1 },
+  campusDistance: {
+    marginTop: 4,
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#1976d2',
+  },
   campusHeaderRow: {
     flexDirection: 'row',
     alignItems: 'flex-start',
@@ -380,6 +456,20 @@ const styles = StyleSheet.create({
     height: 140,
     width: '100%',
   },
+  mapTapHint: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
+    paddingVertical: 8,
+    paddingHorizontal: 10,
+    backgroundColor: 'rgba(15, 23, 42, 0.55)',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+  },
+  mapTapHintText: { color: '#fff', fontSize: 12, fontWeight: '600' },
   curriculumCard: {
     borderWidth: 1,
     borderColor: '#e2e8f0',

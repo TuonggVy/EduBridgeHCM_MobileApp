@@ -64,24 +64,29 @@ export type SchoolDetailResponse = {
   body: SchoolDetail;
 };
 
-export type NearbyCampus = {
+/** Một dòng trong GET /api/v1/school/campus/search/nearby — dùng để lấy `distance` theo vị trí người dùng. */
+export type NearbyCampusSearchItem = {
   id: number;
-  schoolId: number | null;
-  schoolName: string | null;
-  name: string;
-  address: string | null;
-  district: string | null;
-  city: string | null;
+  distance: number;
   latitude: number;
   longitude: number;
-  distance: number | null;
-  logoUrl: string | null;
-  averageRating: number | null;
+  name: string;
+  address: string | null;
+  city: string | null;
+  district: string | null;
+  ward: string | null;
+  imageJson: string | null;
+  policyDetail: string | null;
+  consultantEmails: string[];
+  boardingType: string | null;
+  phoneNumber: string | null;
+  facility: string | null;
+  status: string | null;
 };
 
 export type NearbyCampusSearchResponse = {
   message: string;
-  body: NearbyCampus[];
+  body: NearbyCampusSearchItem[];
 };
 
 /** Một mục trong GET /api/v1/parent/favourite/school — `id` là id bản ghi yêu thích (dùng cho DELETE). */
