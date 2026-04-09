@@ -12,6 +12,23 @@ export type SchoolSummary = {
   logoUrl: string | null;
 };
 
+export type SchoolCampus = {
+  imageJson: string | null;
+  address: string | null;
+  city: string | null;
+  latitude: number | null;
+  policyDetail: string | null;
+  consultantEmails: string[];
+  boardingType: string | null;
+  phoneNumber: string | null;
+  district: string | null;
+  name: string;
+  id: number;
+  facility: string | null;
+  longitude: number | null;
+  status: string | null;
+};
+
 export type SubjectJsonb = {
   name: string;
   description: string | null;
@@ -31,7 +48,9 @@ export type Curriculum = {
 };
 
 export type SchoolDetail = SchoolSummary & {
-  campustList: unknown[];
+  campusList: SchoolCampus[];
+  /** @deprecated Field cũ bị typo, giữ lại để tương thích ngược tạm thời */
+  campustList?: SchoolCampus[];
   curriculumList: Curriculum[];
 };
 
@@ -43,6 +62,26 @@ export type SchoolListResponse = {
 export type SchoolDetailResponse = {
   message: string;
   body: SchoolDetail;
+};
+
+export type NearbyCampus = {
+  id: number;
+  schoolId: number | null;
+  schoolName: string | null;
+  name: string;
+  address: string | null;
+  district: string | null;
+  city: string | null;
+  latitude: number;
+  longitude: number;
+  distance: number | null;
+  logoUrl: string | null;
+  averageRating: number | null;
+};
+
+export type NearbyCampusSearchResponse = {
+  message: string;
+  body: NearbyCampus[];
 };
 
 /** Một mục trong GET /api/v1/parent/favourite/school — `id` là id bản ghi yêu thích (dùng cho DELETE). */

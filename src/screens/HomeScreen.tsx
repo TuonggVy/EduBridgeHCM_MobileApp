@@ -43,6 +43,7 @@ import type { SchoolDetail, SchoolSummary } from '../types/school';
 import { SchoolDetailModal } from '../components/SchoolDetailModal';
 import { useToast } from '../components/AppToast';
 import FavouriteSchoolsScreen from './FavouriteSchoolsScreen';
+import SchoolNearbyMapScreen from './SchoolNearbyMapScreen';
 
 const HEADER_TOP_PADDING =
   Platform.OS === 'ios' ? 50 : (StatusBar.currentHeight ?? 24) + 8;
@@ -93,6 +94,7 @@ export default function HomeScreen() {
   const [schoolDetailVisible, setSchoolDetailVisible] = useState(false);
   const [schoolsRefreshing, setSchoolsRefreshing] = useState(false);
   const [favouriteModalVisible, setFavouriteModalVisible] = useState(false);
+  const [nearbyMapVisible, setNearbyMapVisible] = useState(false);
   const [favouriteIdBySchoolId, setFavouriteIdBySchoolId] = useState<Record<number, number>>({});
 
   const refreshStudents = useCallback(async () => {
@@ -360,6 +362,7 @@ export default function HomeScreen() {
             onRetry={() => refreshSchools('initial')}
             onOpenSchool={openSchoolDetail}
             onToggleFavourite={toggleSchoolFavourite}
+            onOpenNearbyMap={() => setNearbyMapVisible(true)}
           />
         ) : activeTab === 'consult' ? (
           <ConversationsScreen
@@ -467,6 +470,21 @@ export default function HomeScreen() {
           onToggleFavourite={toggleSchoolFavourite}
           onClearRecent={() => setRecentSearches([])}
           onAddRecent={addRecent}
+        />
+      </Modal>
+
+      <Modal
+        visible={nearbyMapVisible}
+        animationType="slide"
+        presentationStyle="fullScreen"
+        onRequestClose={() => setNearbyMapVisible(false)}
+      >
+        <SchoolNearbyMapScreen
+          onClose={() => setNearbyMapVisible(false)}
+          onOpenSchoolDetail={(schoolId) => {
+            setNearbyMapVisible(false);
+            void openSchoolDetail(schoolId);
+          }}
         />
       </Modal>
 

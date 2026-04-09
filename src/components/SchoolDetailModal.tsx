@@ -11,6 +11,7 @@ import {
   Platform,
   StatusBar,
 } from 'react-native';
+import MapView, { Marker } from 'react-native-maps';
 const MaterialIcons = require('@expo/vector-icons').MaterialIcons;
 import type { SchoolDetail } from '../types/school';
 import {
@@ -44,8 +45,10 @@ export function SchoolDetailModal({
 }: Props) {
   const [expandedDescription, setExpandedDescription] = useState(false);
   const [expandedCurriculum, setExpandedCurriculum] = useState<Record<string, boolean>>({});
+  const [expandedCampus, setExpandedCampus] = useState<Record<number, boolean>>({});
 
   const curriculumList = useMemo(() => school?.curriculumList ?? [], [school?.curriculumList]);
+  const campusList = useMemo(() => school?.campusList ?? [], [school?.campusList]);
 
   return (
     <Modal visible={visible} animationType="slide" presentationStyle="fullScreen" onRequestClose={onClose}>
@@ -120,6 +123,104 @@ export function SchoolDetailModal({
                   </Pressable>
                 </View>
               ) : null}
+
+              <View style={styles.section}>
+                <Text style={styles.sectionTitle}>Danh sách cơ sở</Text>
+                {campusList.length === 0 ? (
+                  <Text style={styles.sectionText}>Nhà trường chưa cập nhật thông tin cơ sở.</Text>
+                ) : (
+                  campusList.map((campus) => {
+                    const expanded = !!expandedCampus[campus.id];
+                    return (
+                      <View key={campus.id} style={styles.campusCard}>
+                        <Pressable
+                          onPress={() =>
+                            setExpandedCampus((prev) => ({ ...prev, [campus.id]: !prev[campus.id] }))
+                          }
+                        >
+                          <View style={styles.campusHeaderRow}>
+                            <Text style={styles.campusName}>{campus.name}</Text>
+                            <MaterialIcons
+                              name={expanded ? 'expand-less' : 'expand-more'}
+                              size={22}
+                              color="#64748b"
+                            />
+                          </View>
+                        </Pressable>
+
+                        {expanded ? (
+                          <>
+                            {campus.address ? (
+                              <View style={styles.metaRow}>
+                                <MaterialIcons name="place" size={16} color="#64748b" />
+                                <Text style={styles.meta}>{campus.address}</Text>
+                              </View>
+                            ) : null}
+
+                            {(campus.district || campus.city) ? (
+                              <View style={styles.metaRow}>
+                                <MaterialIcons name="location-city" size={16} color="#64748b" />
+                                <Text style={styles.meta}>
+                                  {[campus.district, campus.city].filter(Boolean).join(', ')}
+                                </Text>
+                              </View>
+                            ) : null}
+
+                            {typeof campus.latitude === 'number' && typeof campus.longitude === 'number' ? (
+                              <View style={styles.campusMiniMapWrap}>
+                                <MapView
+                                  style={styles.campusMiniMap}
+                                  pointerEvents="none"
+                                  scrollEnabled={false}
+                                  rotateEnabled={false}
+                                  zoomEnabled={false}
+                                  pitchEnabled={false}
+                                  initialRegion={{
+                                    latitude: campus.latitude,
+                                    longitude: campus.longitude,
+                                    latitudeDelta: 0.01,
+                                    longitudeDelta: 0.01,
+                                  }}
+                                >
+                                  <Marker
+                                    coordinate={{
+                                      latitude: campus.latitude,
+                                      longitude: campus.longitude,
+                                    }}
+                                  />
+                                </MapView>
+                              </View>
+                            ) : null}
+
+                            {campus.phoneNumber ? (
+                              <Pressable
+                                onPress={() => Linking.openURL(`tel:${campus.phoneNumber}`)}
+                                style={styles.metaRow}
+                              >
+                                <MaterialIcons name="phone" size={16} color="#2563eb" />
+                                <Text style={styles.link}>{campus.phoneNumber}</Text>
+                              </Pressable>
+                            ) : null}
+
+                            {campus.consultantEmails.map((email) => (
+                              <Pressable
+                                key={`${campus.id}-${email}`}
+                                onPress={() => Linking.openURL(`mailto:${email}`)}
+                                style={styles.metaRow}
+                              >
+                                <MaterialIcons name="email" size={16} color="#2563eb" />
+                                <Text style={styles.link} numberOfLines={1}>
+                                  {email}
+                                </Text>
+                              </Pressable>
+                            ))}
+                          </>
+                        ) : null}
+                      </View>
+                    );
+                  })
+                )}
+              </View>
 
               <View style={styles.section}>
                 <Text style={styles.sectionTitle}>Chương trình đào tạo</Text>
@@ -254,6 +355,31 @@ const styles = StyleSheet.create({
   sectionTitle: { fontSize: 17, fontWeight: '700', color: '#0f172a', marginBottom: 8 },
   sectionText: { color: '#475569', fontSize: 14, lineHeight: 20 },
   expandText: { marginTop: 8, color: '#2563eb', fontSize: 14, fontWeight: '600' },
+  campusCard: {
+    borderWidth: 1,
+    borderColor: '#e2e8f0',
+    borderRadius: 12,
+    padding: 12,
+    marginTop: 10,
+  },
+  campusName: { fontSize: 15, fontWeight: '700', color: '#0f172a' },
+  campusHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+    gap: 8,
+  },
+  campusMiniMapWrap: {
+    marginTop: 10,
+    borderRadius: 10,
+    overflow: 'hidden',
+    borderWidth: 1,
+    borderColor: '#e2e8f0',
+  },
+  campusMiniMap: {
+    height: 140,
+    width: '100%',
+  },
   curriculumCard: {
     borderWidth: 1,
     borderColor: '#e2e8f0',

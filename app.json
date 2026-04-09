@@ -13,7 +13,10 @@
     },
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.edubridge.hcm"
+      "bundleIdentifier": "com.edubridge.hcm",
+      "infoPlist": {
+        "NSLocationWhenInUseUsageDescription": "EduBridge cần quyền vị trí để hiển thị các trường gần bạn."
+      }
     },
     "android": {
       "adaptiveIcon": {
@@ -23,7 +26,11 @@
         "monochromeImage": "./assets/android-icon-monochrome.png"
       },
       "predictiveBackGestureEnabled": false,
-      "package": "com.edubridge.hcm"
+      "package": "com.edubridge.hcm",
+      "permissions": [
+        "ACCESS_COARSE_LOCATION",
+        "ACCESS_FINE_LOCATION"
+      ]
     },
     "web": {
       "favicon": "./assets/favicon.png"
@@ -33,6 +40,12 @@
         "@react-native-google-signin/google-signin",
         {
           "iosUrlScheme": "com.googleusercontent.apps.655929399159-kt2nf9h0qjj3dcnm2ue6opjmtac3rl8l"
+        }
+      ],
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "EduBridge cần quyền vị trí để tìm trường gần bạn."
         }
       ]
     ]
