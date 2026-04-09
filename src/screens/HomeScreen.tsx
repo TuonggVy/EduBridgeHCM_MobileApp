@@ -300,6 +300,7 @@ export default function HomeScreen() {
     return (
       <ChatScreen
         conversationId={selectedConversation.conversationId}
+        campusId={selectedConversation.campusId!}
         studentProfileId={selectedConversation.studentProfileId!}
         parentEmail={resolvedParent}
         counsellorEmail={resolvedCounsellor}

@@ -54,10 +54,10 @@ function normalizeConversations(raw: unknown): ParentConversationsItem[] {
 
     const counsellorName =
       asString(it?.counsellorName) ??
+      asString(it?.schoolName) ??
       asString(it?.name) ??
       asString(it?.participantName) ??
       asString(it?.title) ??
-      asString(it?.schoolName) ??
       asString(it?.otherUser) ??
       null;
 
@@ -108,9 +108,30 @@ function normalizeConversations(raw: unknown): ParentConversationsItem[] {
           ? studentProfileIdRaw
           : undefined;
 
+    const campusIdRaw = it?.campusId;
+    const campusId =
+      typeof campusIdRaw === 'number'
+        ? campusIdRaw
+        : typeof campusIdRaw === 'string'
+          ? campusIdRaw
+          : undefined;
+
+    const schoolIdRaw = it?.schoolId;
+    const schoolId =
+      typeof schoolIdRaw === 'number'
+        ? schoolIdRaw
+        : typeof schoolIdRaw === 'string'
+          ? schoolIdRaw
+          : undefined;
+
     return {
       conversationId,
       studentProfileId,
+      campusId,
+      schoolId,
+      schoolName: asString(it?.schoolName) ?? null,
+      schoolLogoUrl: asString(it?.schoolLogoUrl) ?? null,
+      status: asString(it?.status) ?? null,
       counsellorEmail,
       counsellorName,
       studentName,
@@ -207,6 +228,8 @@ export default function ConversationsScreen({
             (it) =>
               !!it.conversationId &&
               !!it.counsellorEmail &&
+              it.campusId != null &&
+              String(it.campusId).trim() !== '' &&
               it.studentProfileId != null &&
               String(it.studentProfileId).trim() !== ''
           )}
