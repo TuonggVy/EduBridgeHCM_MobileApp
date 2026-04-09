@@ -2,7 +2,8 @@ import type { ParentConversationsItem } from '../types/chat';
 
 /**
  * Khớp logic web Header.jsx `resolveConversationEmails` — dùng đúng cặp email cho
- * GET /parent/messages/history/{parentEmail}/{counsellorEmail}/{studentProfileId}.
+ * WebSocket (receiverName) và PUT read. Lịch sử tin nhắn REST dùng
+ * GET /parent/messages/history/{parentEmail}/{campusId}/{studentProfileId}.
  */
 export function resolveParentChatEmails(
   conversation: ParentConversationsItem,

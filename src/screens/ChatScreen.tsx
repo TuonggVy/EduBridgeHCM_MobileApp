@@ -33,7 +33,8 @@ const INPUT_BAR_ICON_SIZE = 22;
 
 type ChatScreenProps = {
   conversationId: string;
-  /** Path GET /parent/messages/history/.../{studentProfileId} */
+  /** Path GET /parent/messages/history/{parentEmail}/{campusId}/{studentProfileId} */
+  campusId: string | number;
   studentProfileId: string | number;
   parentEmail: string;
   counsellorEmail: string;
@@ -258,6 +259,7 @@ function normalizeIncomingMessage(body: any, fallbackConversationId: string): Ch
 
 export default function ChatScreen({
   conversationId,
+  campusId,
   studentProfileId,
   parentEmail,
   counsellorEmail,
@@ -271,7 +273,7 @@ export default function ChatScreen({
 
   const listRef = useRef<FlatList<any> | null>(null);
   const markReadTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const chatContextRef = useRef({ parentEmail, counsellorEmail, conversationId, studentProfileId });
+  const chatContextRef = useRef({ parentEmail, counsellorEmail, conversationId, studentProfileId, campusId });
 
   const [connected, setConnected] = useState(false);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -284,8 +286,8 @@ export default function ChatScreen({
   const [inputText, setInputText] = useState('');
 
   useEffect(() => {
-    chatContextRef.current = { parentEmail, counsellorEmail, conversationId, studentProfileId };
-  }, [parentEmail, counsellorEmail, conversationId, studentProfileId]);
+    chatContextRef.current = { parentEmail, counsellorEmail, conversationId, studentProfileId, campusId };
+  }, [parentEmail, counsellorEmail, conversationId, studentProfileId, campusId]);
 
   const displayMessages = useMemo(() => {
     // For inverted FlatList: we want newest at bottom, so reverse data.
@@ -319,7 +321,7 @@ export default function ChatScreen({
     setLoadingMore(false);
     setHasMore(true);
     try {
-      const res = await fetchParentMessagesHistory(parentEmail, counsellorEmail, studentProfileId);
+      const res = await fetchParentMessagesHistory(parentEmail, campusId, studentProfileId);
       const resBody = res.body as Record<string, unknown>;
       const rawItems = historyMessagesFromBody(resBody);
       const nextCursor: string | undefined = asString(resBody.nextCursorId) ?? undefined;
@@ -355,7 +357,7 @@ export default function ChatScreen({
       setLoadingLatest(false);
     }
   }, [
-    counsellorEmail,
+    campusId,
     conversationId,
     handleMarkRead,
     initialLastMessageAt,
@@ -369,7 +371,7 @@ export default function ChatScreen({
     if (!cursorId) return;
     setLoadingMore(true);
     try {
-      const res = await fetchParentMessagesHistory(parentEmail, counsellorEmail, studentProfileId, cursorId);
+      const res = await fetchParentMessagesHistory(parentEmail, campusId, studentProfileId, cursorId);
       const resBody = res.body as Record<string, unknown>;
       const rawItems = historyMessagesFromBody(resBody);
       const nextCursor: string | undefined = asString(resBody.nextCursorId) ?? undefined;
@@ -400,7 +402,7 @@ export default function ChatScreen({
       setLoadingMore(false);
     }
   }, [
-    counsellorEmail,
+    campusId,
     cursorId,
     conversationId,
     hasMore,
@@ -476,17 +478,18 @@ export default function ChatScreen({
     return () => {
       disconnect();
     };
-  }, [counsellorEmail, conversationId, handleMarkRead, loadLatest, parentEmail, studentProfileId]);
+  }, [campusId, conversationId, handleMarkRead, loadLatest, parentEmail, studentProfileId]);
 
   /** WS trễ / lỡ — đồng bộ REST định kỳ khi màn hình đang active (giống web ~3.5s). */
   useEffect(() => {
     const tick = async () => {
       if (AppState.currentState !== 'active') return;
-      const { parentEmail: pe, counsellorEmail: ce, conversationId: cid, studentProfileId: sid } =
+      const { parentEmail: pe, conversationId: cid, studentProfileId: sid, campusId: cps } =
         chatContextRef.current;
-      if (!pe?.trim() || !ce?.trim() || !cid || sid == null || String(sid).trim() === '') return;
+      if (!pe?.trim() || !cid || sid == null || String(sid).trim() === '' || cps == null || String(cps).trim() === '')
+        return;
       try {
-        const res = await fetchParentMessagesHistory(pe, ce, sid);
+        const res = await fetchParentMessagesHistory(pe, cps, sid);
         const resBody = res.body as Record<string, unknown>;
         const rawItems = historyMessagesFromBody(resBody);
         const normalized = (rawItems ?? [])

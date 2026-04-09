@@ -8,7 +8,7 @@ import type {
 /**
  * Khớp OpenAPI:
  * - GET  /api/v1/parent/conversations?cursorId=
- * - GET  /api/v1/parent/messages/history/{parentEmail}/{counsellorEmail}/{studentProfileId}?cursorId=
+ * - GET  /api/v1/parent/messages/history/{parentEmail}/{campusId}/{studentProfileId}?cursorId=
  * - PUT  /api/v1/parent/messages/read/{conversationId}/{username}
  */
 
@@ -26,7 +26,7 @@ export async function fetchParentConversations(
 
 export async function fetchParentMessagesHistory(
   parentEmail: string,
-  counsellorEmail: string,
+  campusId: string | number,
   studentProfileId: string | number,
   cursorId?: string | number | null
 ): Promise<ParentMessagesHistoryResponse> {
@@ -35,7 +35,7 @@ export async function fetchParentMessagesHistory(
       ? ''
       : `?cursorId=${encodeURIComponent(String(cursorId))}`;
   return apiRequest<ParentMessagesHistoryResponse>(
-    `/api/v1/parent/messages/history/${encodeURIComponent(parentEmail)}/${encodeURIComponent(counsellorEmail)}/${encodeURIComponent(String(studentProfileId))}${query}`,
+    `/api/v1/parent/messages/history/${encodeURIComponent(parentEmail)}/${encodeURIComponent(String(campusId))}/${encodeURIComponent(String(studentProfileId))}${query}`,
     { method: 'GET' }
   );
 }

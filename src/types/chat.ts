@@ -14,6 +14,12 @@ export type ParentConversationsItem = {
   conversationId: string;
   /** GET /parent/conversations — `studentId`, dùng cho path /messages/history/.../{studentProfileId} */
   studentProfileId?: number | string;
+  /** GET /parent/messages/history/{parentEmail}/{campusId}/{studentProfileId} */
+  campusId?: number | string;
+  schoolId?: number | string;
+  schoolName?: string | null;
+  schoolLogoUrl?: string | null;
+  /** Email tư vấn viên (BE: `otherUser`) — dùng cho WebSocket receiverName */
   counsellorEmail: string;
   counsellorName?: string | null;
   studentName?: string | null;
@@ -23,6 +29,8 @@ export type ParentConversationsItem = {
   unreadCount?: number;
   lastMessageContent?: string | null;
   lastMessageAt?: string | null;
+  /** BE: CONVERSATION_ACTIVE, … */
+  status?: string | null;
 };
 
 /** REST envelope: PUT /api/v1/parent/messages/read/... */
@@ -30,6 +38,7 @@ export type ParentMessageReadItem = {
   id: number;
   senderName: string;
   receiverName: string;
+  campusId?: number;
   message: string;
   conversationId: number;
   timestamp: string;
@@ -47,7 +56,7 @@ export type ParentMessagesHistoryTrait = {
 };
 
 export type ParentMessagesHistorySubjectResult = {
-  score: number;
+  score: number | null;
   subjectName: string;
 };
 
@@ -60,6 +69,7 @@ export type ParentMessagesHistoryGradeBlock = {
 export type ParentMessagesHistoryBody = {
   nextCursorId: number | null;
   conversationId: number;
+  campusId?: number;
   hasMore: boolean;
   messages?: unknown[];
   /** Một số bản BE dùng `items` thay cho `messages`. */
