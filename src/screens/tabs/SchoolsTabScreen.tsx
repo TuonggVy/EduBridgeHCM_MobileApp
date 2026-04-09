@@ -38,7 +38,6 @@ export type SchoolsTabScreenProps = {
   onRetry: () => void;
   onOpenSchool: (schoolId: number) => void;
   onToggleFavourite: (schoolId: number) => void;
-  onOpenNearbyMap: () => void;
 };
 
 export function SchoolsTabScreen({
@@ -50,7 +49,6 @@ export function SchoolsTabScreen({
   onRetry,
   onOpenSchool,
   onToggleFavourite,
-  onOpenNearbyMap,
 }: SchoolsTabScreenProps) {
   const [activeFilter, setActiveFilter] = useState<SchoolFilter>('all');
   const [query, setQuery] = useState('');
@@ -160,26 +158,20 @@ export function SchoolsTabScreen({
             </Pressable>
           ))}
         </ScrollView>
-        <View style={styles.searchRow}>
-          <View style={styles.inlineSearchWrap}>
-            <MaterialIcons name="search" size={20} color="#94a3b8" />
-            <TextInput
-              style={styles.inlineSearchInputText}
-              placeholder="Tìm trường theo tên..."
-              placeholderTextColor="#94a3b8"
-              value={query}
-              onChangeText={setQuery}
-            />
-            {query.length > 0 ? (
-              <Pressable onPress={() => setQuery('')} hitSlop={8} style={styles.searchClearBtn}>
-                <MaterialIcons name="close" size={20} color="#94a3b8" />
-              </Pressable>
-            ) : null}
-          </View>
-          <Pressable style={styles.mapBtn} onPress={onOpenNearbyMap}>
-            <MaterialIcons name="map" size={18} color="#0f172a" />
-            <Text style={styles.mapBtnText}>Gần bạn</Text>
-          </Pressable>
+        <View style={styles.inlineSearchWrap}>
+          <MaterialIcons name="search" size={20} color="#94a3b8" />
+          <TextInput
+            style={styles.inlineSearchInputText}
+            placeholder="Tìm trường theo tên..."
+            placeholderTextColor="#94a3b8"
+            value={query}
+            onChangeText={setQuery}
+          />
+          {query.length > 0 ? (
+            <Pressable onPress={() => setQuery('')} hitSlop={8} style={styles.searchClearBtn}>
+              <MaterialIcons name="close" size={20} color="#94a3b8" />
+            </Pressable>
+          ) : null}
         </View>
       </View>
 
@@ -292,7 +284,7 @@ const styles = StyleSheet.create({
     gap: sp.xs,
   },
   inlineSearchWrap: {
-    flex: 1,
+    marginBottom: 0,
     backgroundColor: '#fff',
     borderRadius: radius.full,
     borderWidth: 1,
@@ -302,27 +294,6 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: sp.sm,
-  },
-  searchRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: sp.xs,
-  },
-  mapBtn: {
-    minHeight: 44,
-    borderRadius: radius.full,
-    borderWidth: 1,
-    borderColor: '#e2e8f0',
-    backgroundColor: '#fff',
-    paddingHorizontal: sp.md,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: sp.xxs,
-  },
-  mapBtnText: {
-    fontSize: 13,
-    fontWeight: '700',
-    color: '#0f172a',
   },
   inlineSearchInputText: {
     flex: 1,
