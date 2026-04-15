@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Modal,
   View,
@@ -10,6 +10,10 @@ import {
   Linking,
   Platform,
   StatusBar,
+  ActivityIndicator,
+  Animated,
+  FlatList,
+  Dimensions,
 } from 'react-native';
 import MapView, { Marker } from 'react-native-maps';
 import * as Location from 'expo-location';
@@ -27,12 +31,27 @@ import {
 } from '../utils/curriculumLabels';
 
 const HEADER_TOP = Platform.OS === 'ios' ? 50 : (StatusBar.currentHeight ?? 24) + 8;
+const SCREEN_WIDTH = Dimensions.get('window').width;
 
 /** Bán kính gọi nearby đủ rộng để vẫn nhận được các cơ sở của trường (km). */
 const NEARBY_SEARCH_RADIUS_KM = 50;
 
 function formatKm(d: number): string {
   return `${d.toFixed(d < 10 ? 1 : 0)} km`;
+}
+
+function formatFacilityValue(value?: number | null, unit?: string | null): string | null {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return null;
+  return unit ? `${value} ${unit}` : String(value);
+}
+
+function hasFacilityData(facility: SchoolDetail['campusList'][number]['facility']): boolean {
+  if (!facility) return false;
+  const hasItems = Array.isArray(facility.itemList) && facility.itemList.length > 0;
+  const hasCover = typeof facility.imageData?.coverUrl === 'string' && facility.imageData.coverUrl.length > 0;
+  const hasGallery =
+    Array.isArray(facility.imageData?.imageList) && facility.imageData.imageList.some((img) => !!img?.url);
+  return hasItems || hasCover || hasGallery;
 }
 
 /** Mở Google Maps với lộ trình tới điểm đích (ô tô). Hoạt động trên iOS/Android khi có app hoặc trình duyệt. */
@@ -51,6 +70,134 @@ type Props = {
   onToggleFavourite: () => void;
 };
 
+type FacilityItem = NonNullable<NonNullable<SchoolDetail['campusList'][number]['facility']>['itemList']>[number];
+type FacilityImage = NonNullable<
+  NonNullable<NonNullable<SchoolDetail['campusList'][number]['facility']>['imageData']>['imageList']
+>[number];
+
+function normalizeFacilityText(value?: string | null): string {
+  return (value ?? '')
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function matchFacilityImageByItem(
+  item: FacilityItem,
+  imageList: FacilityImage[],
+  usedImageIndexes: Set<number>,
+  fallbackIndex: number
+): FacilityImage | undefined {
+  const codeKey = normalizeFacilityText(item.facilityCode);
+  const nameKey = normalizeFacilityText(item.name);
+
+  const findUnusedIndex = (predicate: (image: FacilityImage) => boolean) =>
+    imageList.findIndex((image, idx) => !usedImageIndexes.has(idx) && predicate(image));
+
+  // 1) Match theo facilityCode trước để giảm sai lệch.
+  if (codeKey) {
+    const matchedByCode = findUnusedIndex((image) => {
+      const imageName = normalizeFacilityText(image.name);
+      const imageAltName = normalizeFacilityText(image.altName);
+      return imageName === codeKey || imageAltName === codeKey;
+    });
+    if (matchedByCode >= 0) {
+      usedImageIndexes.add(matchedByCode);
+      return imageList[matchedByCode];
+    }
+  }
+
+  // 2) Fallback match theo name/altName.
+  if (nameKey) {
+    const matchedByName = findUnusedIndex((image) => {
+      const imageName = normalizeFacilityText(image.name);
+      const imageAltName = normalizeFacilityText(image.altName);
+      return (
+        imageName === nameKey ||
+        imageAltName === nameKey ||
+        (!!imageName && nameKey.includes(imageName)) ||
+        (!!imageAltName && nameKey.includes(imageAltName))
+      );
+    });
+    if (matchedByName >= 0) {
+      usedImageIndexes.add(matchedByName);
+      return imageList[matchedByName];
+    }
+  }
+
+  // 3) Cuối cùng fallback theo index để vẫn có ảnh nếu dữ liệu thiếu key.
+  if (!usedImageIndexes.has(fallbackIndex) && imageList[fallbackIndex]) {
+    usedImageIndexes.add(fallbackIndex);
+    return imageList[fallbackIndex];
+  }
+
+  return undefined;
+}
+
+function getFacilityItemValueLabel(item: FacilityItem): string | null {
+  return formatFacilityValue(item.value, item.unit);
+}
+
+function getFacilityItemIcon(item: FacilityItem): string {
+  const source = `${item.category ?? ''} ${item.name ?? ''}`.toLowerCase();
+  if (source.includes('thư viện')) return 'menu-book';
+  if (source.includes('thể thao') || source.includes('sân')) return 'sports-soccer';
+  if (source.includes('lab') || source.includes('thí nghiệm')) return 'science';
+  if (source.includes('máy tính') || source.includes('computer')) return 'computer';
+  return 'meeting-room';
+}
+
+function FacilityImageBlock({ imageUrl, height }: { imageUrl?: string | null; height: number }) {
+  const [loadingImage, setLoadingImage] = useState(Boolean(imageUrl));
+  const imageOpacity = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    imageOpacity.setValue(0);
+    setLoadingImage(Boolean(imageUrl));
+  }, [imageUrl, imageOpacity]);
+
+  const handleImageLoaded = () => {
+    setLoadingImage(false);
+    Animated.timing(imageOpacity, {
+      toValue: 1,
+      duration: 220,
+      useNativeDriver: true,
+    }).start();
+  };
+
+  return (
+    <View style={[styles.facilityImageSkeletonWrap, { height }]}>
+      {imageUrl ? (
+        <>
+          {loadingImage ? (
+            <View style={styles.facilityImageSkeleton}>
+              <ActivityIndicator size="small" color="#94a3b8" />
+            </View>
+          ) : null}
+          <Animated.Image
+            source={{ uri: imageUrl }}
+            style={[styles.facilityImage, { opacity: imageOpacity }]}
+            resizeMode="cover"
+            onLoadStart={() => setLoadingImage(true)}
+            onLoadEnd={handleImageLoaded}
+          />
+        </>
+      ) : (
+        <View style={styles.facilityItemImageFallback}>
+          <MaterialIcons name="image-not-supported" size={18} color="#94a3b8" />
+          <Text style={styles.facilityItemImageFallbackText}>Chưa có ảnh</Text>
+        </View>
+      )}
+    </View>
+  );
+}
+
+function getFacilityImageLabel(image: FacilityImage, index: number): string {
+  return image.name?.trim() || image.altName?.trim() || `Ảnh ${index + 1}`;
+}
+
 export function SchoolDetailModal({
   visible,
   loading,
@@ -63,6 +210,10 @@ export function SchoolDetailModal({
   const [expandedCurriculum, setExpandedCurriculum] = useState<Record<string, boolean>>({});
   const [expandedCampus, setExpandedCampus] = useState<Record<number, boolean>>({});
   const [distancesKmByCampusId, setDistancesKmByCampusId] = useState<Record<number, number>>({});
+  const [facilityViewerVisible, setFacilityViewerVisible] = useState(false);
+  const [facilityViewerImages, setFacilityViewerImages] = useState<FacilityImage[]>([]);
+  const [facilityViewerIndex, setFacilityViewerIndex] = useState(0);
+  const facilityViewerListRef = useRef<FlatList<FacilityImage> | null>(null);
 
   const curriculumList = useMemo(() => school?.curriculumList ?? [], [school?.curriculumList]);
   const campusList = useMemo(() => school?.campusList ?? [], [school?.campusList]);
@@ -72,6 +223,30 @@ export function SchoolDetailModal({
       setDistancesKmByCampusId({});
     }
   }, [visible]);
+
+  const openFacilityGallery = (images: FacilityImage[], startIndex = 0) => {
+    if (images.length === 0) return;
+    setFacilityViewerImages(images);
+    setFacilityViewerIndex(Math.min(Math.max(startIndex, 0), images.length - 1));
+    setFacilityViewerVisible(true);
+  };
+
+  const closeFacilityGallery = () => {
+    setFacilityViewerVisible(false);
+  };
+
+  const activeFacilityImage = facilityViewerImages[facilityViewerIndex];
+
+  useEffect(() => {
+    if (!facilityViewerVisible || facilityViewerImages.length === 0) return;
+    const timeout = setTimeout(() => {
+      facilityViewerListRef.current?.scrollToIndex({
+        index: facilityViewerIndex,
+        animated: false,
+      });
+    }, 0);
+    return () => clearTimeout(timeout);
+  }, [facilityViewerVisible, facilityViewerImages.length, facilityViewerIndex]);
 
   useEffect(() => {
     if (!visible || !school || loading) return;
@@ -106,7 +281,8 @@ export function SchoolDetailModal({
   }, [visible, loading, school?.id]);
 
   return (
-    <Modal visible={visible} animationType="slide" presentationStyle="fullScreen" onRequestClose={onClose}>
+    <>
+      <Modal visible={visible} animationType="slide" presentationStyle="fullScreen" onRequestClose={onClose}>
       <View style={styles.screen}>
         <ScrollView showsVerticalScrollIndicator={false}>
           <View style={styles.banner}>
@@ -149,6 +325,14 @@ export function SchoolDetailModal({
                   <Pressable onPress={() => Linking.openURL(`tel:${school.hotline}`)} style={styles.metaRow}>
                     <MaterialIcons name="phone" size={16} color="#2563eb" />
                     <Text style={styles.link}>{school.hotline}</Text>
+                  </Pressable>
+                ) : null}
+                {school.emailSupport ? (
+                  <Pressable onPress={() => Linking.openURL(`mailto:${school.emailSupport}`)} style={styles.metaRow}>
+                    <MaterialIcons name="email" size={16} color="#2563eb" />
+                    <Text style={styles.link} numberOfLines={1}>
+                      {school.emailSupport}
+                    </Text>
                   </Pressable>
                 ) : null}
                 {school.websiteUrl ? (
@@ -283,6 +467,138 @@ export function SchoolDetailModal({
                                 </Text>
                               </Pressable>
                             ))}
+
+                            {hasFacilityData(campus.facility) ? (
+                              <View style={styles.facilityWrap}>
+                                <View style={styles.facilityHeaderRow}>
+                                  <View style={styles.facilityHeaderTitleRow}>
+                                    <MaterialIcons name="apartment" size={18} color="#1976d2" />
+                                    <Text style={styles.facilityTitle}>Cơ sở vật chất</Text>
+                                  </View>
+                                </View>
+
+                                {(() => {
+                                  const galleryImages = Array.isArray(campus.facility?.imageData?.imageList)
+                                    ? campus.facility.imageData.imageList.filter(
+                                        (img): img is FacilityImage => typeof img?.url === 'string' && img.url.length > 0
+                                      )
+                                    : [];
+                                  const totalImages = galleryImages.length;
+                                  const overflowCount = Math.max(0, totalImages - 2);
+                                  const previewImages = galleryImages.slice(0, 4);
+
+                                  if (totalImages === 0) return null;
+
+                                  if (totalImages === 1) {
+                                    return (
+                                      <Pressable
+                                        onPress={() => openFacilityGallery(galleryImages, 0)}
+                                        style={({ pressed }) => [styles.facilityGallerySingle, pressed && styles.facilityCardPressed]}
+                                      >
+                                        <FacilityImageBlock imageUrl={galleryImages[0].url} height={210} />
+                                        <View style={styles.facilityImageNameOverlay}>
+                                          <Text numberOfLines={1} style={styles.facilityImageNameText}>
+                                            {getFacilityImageLabel(galleryImages[0], 0)}
+                                          </Text>
+                                        </View>
+                                        <View style={styles.facilityImageBadge}>
+                                          <MaterialIcons name="photo-library" size={14} color="#fff" />
+                                          <Text style={styles.facilityImageBadgeText}>{`${totalImages} ảnh`}</Text>
+                                        </View>
+                                      </Pressable>
+                                    );
+                                  }
+
+                                  if (totalImages === 2) {
+                                    return (
+                                      <View style={styles.facilityGalleryGridTwo}>
+                                        {galleryImages.map((image, idx) => (
+                                          <Pressable
+                                            key={`${campus.id}-gallery-${image.url ?? idx}`}
+                                            onPress={() => openFacilityGallery(galleryImages, idx)}
+                                            style={({ pressed }) => [
+                                              styles.facilityGalleryGridTwoItem,
+                                              pressed && styles.facilityCardPressed,
+                                            ]}
+                                          >
+                                            <FacilityImageBlock imageUrl={image.url} height={132} />
+                                            <View style={styles.facilityImageNameOverlay}>
+                                              <Text numberOfLines={1} style={styles.facilityImageNameText}>
+                                                {getFacilityImageLabel(image, idx)}
+                                              </Text>
+                                            </View>
+                                            {idx === 0 ? (
+                                              <View style={styles.facilityImageBadge}>
+                                                <MaterialIcons name="photo-library" size={14} color="#fff" />
+                                                <Text style={styles.facilityImageBadgeText}>{`${totalImages} ảnh`}</Text>
+                                              </View>
+                                            ) : null}
+                                          </Pressable>
+                                        ))}
+                                      </View>
+                                    );
+                                  }
+
+                                  return (
+                                    <View style={styles.facilityGalleryGridFour}>
+                                      {previewImages.map((image, idx) => {
+                                        const isOverflowTile = overflowCount > 0 && idx === previewImages.length - 1;
+                                        return (
+                                          <Pressable
+                                            key={`${campus.id}-gallery-${image.url ?? idx}`}
+                                            onPress={() => openFacilityGallery(galleryImages, idx)}
+                                            style={({ pressed }) => [
+                                              styles.facilityGalleryGridFourItem,
+                                              pressed && styles.facilityCardPressed,
+                                            ]}
+                                          >
+                                            <FacilityImageBlock imageUrl={image.url} height={110} />
+                                            <View style={styles.facilityImageNameOverlay}>
+                                              <Text numberOfLines={1} style={styles.facilityImageNameText}>
+                                                {getFacilityImageLabel(image, idx)}
+                                              </Text>
+                                            </View>
+                                            {idx === 0 ? (
+                                              <View style={styles.facilityImageBadge}>
+                                                <MaterialIcons name="photo-library" size={14} color="#fff" />
+                                                <Text style={styles.facilityImageBadgeText}>{`${totalImages} ảnh`}</Text>
+                                              </View>
+                                            ) : null}
+                                            {isOverflowTile ? (
+                                              <View style={styles.facilityImageOverflowOverlay}>
+                                                <MaterialIcons name="photo-library" size={16} color="#fff" />
+                                                <Text style={styles.facilityImageOverflowText}>{`+${overflowCount}`}</Text>
+                                              </View>
+                                            ) : null}
+                                          </Pressable>
+                                        );
+                                      })}
+                                    </View>
+                                  );
+                                })()}
+                                {Array.isArray(campus.facility?.imageData?.imageList) &&
+                                campus.facility.imageData.imageList.length === 0 &&
+                                campus.facility?.imageData?.coverUrl ? (
+                                  <Pressable
+                                    onPress={() =>
+                                      openFacilityGallery([{ url: campus.facility!.imageData!.coverUrl!, name: 'Ảnh cơ sở' }])
+                                    }
+                                    style={({ pressed }) => [styles.facilityGallerySingle, pressed && styles.facilityCardPressed]}
+                                  >
+                                    <FacilityImageBlock imageUrl={campus.facility.imageData.coverUrl} height={210} />
+                                    <View style={styles.facilityImageNameOverlay}>
+                                      <Text numberOfLines={1} style={styles.facilityImageNameText}>
+                                        Ảnh cơ sở
+                                      </Text>
+                                    </View>
+                                    <View style={styles.facilityImageBadge}>
+                                      <MaterialIcons name="photo" size={14} color="#fff" />
+                                      <Text style={styles.facilityImageBadgeText}>Ảnh cơ sở</Text>
+                                    </View>
+                                  </Pressable>
+                                ) : null}
+                              </View>
+                            ) : null}
                           </>
                         ) : null}
                       </View>
@@ -380,8 +696,51 @@ export function SchoolDetailModal({
             <Text style={styles.bottomCtaText}>Liên hệ tư vấn</Text>
           </Pressable>
         </View>
+        {facilityViewerVisible ? (
+          <View style={styles.facilityViewerBackdrop}>
+            <Pressable style={styles.facilityViewerCloseBtn} onPress={closeFacilityGallery}>
+              <MaterialIcons name="close" size={24} color="#fff" />
+            </Pressable>
+            <View style={styles.facilityViewerImageWrap}>
+              <FlatList
+                ref={facilityViewerListRef}
+                data={facilityViewerImages}
+                horizontal
+                pagingEnabled
+                showsHorizontalScrollIndicator={false}
+                keyExtractor={(item, index) => `${item.url ?? 'image'}-${index}`}
+                getItemLayout={(_, index) => ({
+                  length: SCREEN_WIDTH,
+                  offset: SCREEN_WIDTH * index,
+                  index,
+                })}
+                initialScrollIndex={facilityViewerIndex}
+                onMomentumScrollEnd={(event) => {
+                  const nextIndex = Math.round(event.nativeEvent.contentOffset.x / SCREEN_WIDTH);
+                  if (nextIndex !== facilityViewerIndex) setFacilityViewerIndex(nextIndex);
+                }}
+                renderItem={({ item }) => (
+                  <View style={styles.facilityViewerPage}>
+                    {item.url ? (
+                      <Image source={{ uri: item.url }} style={styles.facilityViewerImage} resizeMode="contain" />
+                    ) : null}
+                  </View>
+                )}
+              />
+            </View>
+            <View style={styles.facilityViewerFooter}>
+              <Text numberOfLines={1} style={styles.facilityViewerTitle}>
+                {activeFacilityImage ? getFacilityImageLabel(activeFacilityImage, facilityViewerIndex) : ''}
+              </Text>
+              <Text style={styles.facilityViewerIndex}>
+                {facilityViewerImages.length > 0 ? `${facilityViewerIndex + 1}/${facilityViewerImages.length}` : ''}
+              </Text>
+            </View>
+          </View>
+        ) : null}
       </View>
-    </Modal>
+      </Modal>
+    </>
   );
 }
 
@@ -470,6 +829,253 @@ const styles = StyleSheet.create({
     gap: 6,
   },
   mapTapHintText: { color: '#fff', fontSize: 12, fontWeight: '600' },
+  facilityWrap: {
+    marginTop: 10,
+    padding: 12,
+    borderRadius: 18,
+    backgroundColor: '#f8fafc',
+    shadowColor: '#0f172a',
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.06,
+    shadowRadius: 12,
+    elevation: 2,
+    gap: 10,
+  },
+  facilityHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  facilityHeaderTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  facilityTitle: { fontSize: 14, fontWeight: '700', color: '#0f172a' },
+  facilityViewAll: { fontSize: 12, fontWeight: '700', color: '#1976d2' },
+  facilityGallerySingle: {
+    borderRadius: 16,
+    overflow: 'hidden',
+  },
+  facilityGalleryGridTwo: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  facilityGalleryGridTwoItem: {
+    flex: 1,
+    borderRadius: 14,
+    overflow: 'hidden',
+  },
+  facilityGalleryGridFour: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'space-between',
+    rowGap: 8,
+  },
+  facilityGalleryGridFourItem: {
+    width: '49%',
+    borderRadius: 14,
+    overflow: 'hidden',
+  },
+  facilityImageSkeletonWrap: {
+    borderRadius: 14,
+    overflow: 'hidden',
+    backgroundColor: '#e2e8f0',
+  },
+  facilityImageSkeleton: {
+    ...StyleSheet.absoluteFillObject,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#e2e8f0',
+    zIndex: 2,
+  },
+  facilityImage: {
+    width: '100%',
+    height: '100%',
+    backgroundColor: '#e2e8f0',
+  },
+  facilityImageNameOverlay: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
+    paddingHorizontal: 10,
+    paddingVertical: 7,
+    backgroundColor: 'rgba(15, 23, 42, 0.55)',
+  },
+  facilityImageNameText: {
+    color: '#fff',
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  facilityImageBadge: {
+    position: 'absolute',
+    right: 8,
+    bottom: 8,
+    borderRadius: 999,
+    paddingVertical: 4,
+    paddingHorizontal: 8,
+    backgroundColor: 'rgba(15, 23, 42, 0.65)',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  facilityImageBadgeText: { color: '#fff', fontSize: 11, fontWeight: '700' },
+  facilityImageOverflowOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 4,
+  },
+  facilityImageOverflowText: {
+    color: '#fff',
+    fontSize: 24,
+    fontWeight: '800',
+  },
+  facilityViewerBackdrop: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(2, 6, 23, 0.96)',
+    justifyContent: 'center',
+    zIndex: 30,
+  },
+  facilityViewerCloseBtn: {
+    position: 'absolute',
+    top: HEADER_TOP,
+    right: 16,
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(15, 23, 42, 0.6)',
+    zIndex: 2,
+  },
+  facilityViewerImageWrap: {
+    width: '100%',
+    alignItems: 'stretch',
+    justifyContent: 'center',
+    paddingBottom: 56,
+  },
+  facilityViewerPage: {
+    width: SCREEN_WIDTH,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 12,
+  },
+  facilityViewerImage: {
+    width: '100%',
+    height: 420,
+  },
+  facilityViewerFooter: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 22,
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 16,
+  },
+  facilityViewerTitle: {
+    color: '#fff',
+    fontSize: 15,
+    fontWeight: '700',
+  },
+  facilityViewerIndex: {
+    color: '#cbd5e1',
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  facilityViewAllPhotosBtn: {
+    alignSelf: 'flex-start',
+    marginTop: 2,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 999,
+    backgroundColor: '#eff6ff',
+    borderWidth: 1,
+    borderColor: '#dbeafe',
+  },
+  facilityViewAllPhotosText: {
+    color: '#1976d2',
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  facilityGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'space-between',
+    rowGap: 10,
+  },
+  facilityItemCard: {
+    width: '48.5%',
+    borderWidth: 1,
+    borderColor: '#e2e8f0',
+    borderRadius: 14,
+    overflow: 'hidden',
+    backgroundColor: '#fff',
+    shadowColor: '#0f172a',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.05,
+    shadowRadius: 10,
+    elevation: 1,
+  },
+  facilityCardPressed: {
+    transform: [{ scale: 0.97 }],
+    opacity: 0.9,
+  },
+  facilityItemBody: {
+    padding: 9,
+    gap: 4,
+  },
+  facilityItemTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  facilityItemTitle: { flex: 1, fontSize: 13, fontWeight: '700', color: '#0f172a' },
+  facilityItemValue: { fontSize: 12, color: '#64748b', fontWeight: '600' },
+  facilityHighlightBadge: {
+    marginTop: 2,
+    alignSelf: 'flex-start',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 999,
+    backgroundColor: '#dbeafe',
+  },
+  facilityHighlightBadgeText: { fontSize: 10, color: '#1d4ed8', fontWeight: '700' },
+  facilityItemImageFallback: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 4,
+  },
+  facilityItemImageFallbackText: {
+    color: '#94a3b8',
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  facilityEmptyState: {
+    marginTop: 8,
+    minHeight: 92,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: '#e2e8f0',
+    backgroundColor: '#fff',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    paddingHorizontal: 12,
+  },
+  facilityEmptyText: {
+    fontSize: 13,
+    color: '#64748b',
+    fontWeight: '600',
+    textAlign: 'center',
+  },
   curriculumCard: {
     borderWidth: 1,
     borderColor: '#e2e8f0',

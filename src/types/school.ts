@@ -2,6 +2,7 @@ export type SchoolSummary = {
   foundingDate: string | null;
   websiteUrl: string | null;
   hotline: string | null;
+  emailSupport: string | null;
   averageRating: number | null;
   name: string;
   description: string | null;
@@ -24,7 +25,26 @@ export type SchoolCampus = {
   district: string | null;
   name: string;
   id: number;
-  facility: string | null;
+  facility: {
+    itemList?: Array<{
+      name?: string | null;
+      unit?: string | null;
+      value?: number | null;
+      isUsage?: boolean | null;
+      category?: string | null;
+      isCustom?: boolean | null;
+      facilityCode?: string | null;
+    }>;
+    imageData?: {
+      coverUrl?: string | null;
+      imageList?: Array<{
+        url?: string | null;
+        name?: string | null;
+        altName?: string | null;
+        isUsage?: boolean | null;
+      }>;
+    };
+  } | null;
   longitude: number | null;
   status: string | null;
 };
