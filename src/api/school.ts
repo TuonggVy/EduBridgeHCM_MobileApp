@@ -15,6 +15,7 @@ function normalizeSchoolSummary(school: SchoolSummary): SchoolSummary {
     averageRating: school.averageRating ?? null,
     websiteUrl: school.websiteUrl ?? null,
     hotline: school.hotline ?? null,
+    emailSupport: school.emailSupport ?? null,
     representativeName: school.representativeName ?? null,
     logoUrl: school.logoUrl ?? null,
     foundingDate: school.foundingDate ?? null,
@@ -23,12 +24,24 @@ function normalizeSchoolSummary(school: SchoolSummary): SchoolSummary {
   };
 }
 
-function normalizeSchoolDetail(school: SchoolDetail): SchoolDetail {
+function normalizeCampusList(school: SchoolDetail): SchoolDetail['campusList'] {
   const campusList = Array.isArray(school.campusList)
     ? school.campusList
     : Array.isArray(school.campustList)
       ? school.campustList
       : [];
+
+  return campusList.map((campus) => ({
+    ...campus,
+    consultantEmails: Array.isArray(campus.consultantEmails)
+      ? campus.consultantEmails.filter((email): email is string => typeof email === 'string')
+      : [],
+    facility: campus.facility && typeof campus.facility === 'object' ? campus.facility : null,
+  }));
+}
+
+function normalizeSchoolDetail(school: SchoolDetail): SchoolDetail {
+  const campusList = normalizeCampusList(school);
   const curriculumList = Array.isArray(school.curriculumList)
     ? school.curriculumList.map((curriculum) => ({
         ...curriculum,
