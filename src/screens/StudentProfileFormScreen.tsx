@@ -77,11 +77,13 @@ type Props = {
 function SubjectPickerModal({
   visible,
   groups,
+  disabledNames,
   onClose,
   onPick,
 }: {
   visible: boolean;
   groups: SubjectGroup[];
+  disabledNames: Set<string>;
   onClose: () => void;
   onPick: (name: string) => void;
 }) {
@@ -121,18 +123,28 @@ function SubjectPickerModal({
                 </Pressable>
                 {open && (
                   <View style={subPickerStyles.chips}>
-                    {g.subjects.map((s) => (
-                      <Pressable
-                        key={s.id}
-                        onPress={() => {
-                          onPick(s.name);
-                          onClose();
-                        }}
-                        style={({ pressed }) => [subPickerStyles.chip, pressed && { opacity: 0.85 }]}
-                      >
-                        <Text style={subPickerStyles.chipText}>{s.name}</Text>
-                      </Pressable>
-                    ))}
+                    {g.subjects.map((s) => {
+                      const disabled = disabledNames.has(s.name);
+                      return (
+                        <Pressable
+                          key={s.id}
+                          disabled={disabled}
+                          onPress={() => {
+                            onPick(s.name);
+                            onClose();
+                          }}
+                          style={({ pressed }) => [
+                            subPickerStyles.chip,
+                            disabled && subPickerStyles.chipDisabled,
+                            pressed && !disabled && { opacity: 0.85 },
+                          ]}
+                        >
+                          <Text style={[subPickerStyles.chipText, disabled && subPickerStyles.chipTextDisabled]}>
+                            {s.name}
+                          </Text>
+                        </Pressable>
+                      );
+                    })}
                   </View>
                 )}
               </View>
@@ -192,6 +204,13 @@ function normalizeGradeLevelInput(input: string): string {
   const n = m[1].padStart(2, '0');
   const enumValue = `GRADE_${n}`;
   return ALLOWED_GRADE_LEVELS.has(enumValue) ? enumValue : raw;
+}
+
+function gradeLevelDisplayValue(input: string): string {
+  const normalized = normalizeGradeLevelInput(input);
+  const byValue = GRADE_OPTIONS.find((g) => g.value === normalized);
+  if (byValue) return byValue.label;
+  return input;
 }
 
 export default function StudentProfileFormScreen({ visible, initialStudent, onClose, onSaved }: Props) {
@@ -372,6 +391,21 @@ export default function StudentProfileFormScreen({ visible, initialStudent, onCl
     });
     setPickTarget(null);
   };
+
+  const disabledSubjectNamesForPicker = useMemo(() => {
+    if (!pickTarget) return new Set<string>();
+    const block = academics[pickTarget.bi];
+    if (!block) return new Set<string>();
+    const normalized = normalizeAcademicBlock(block);
+    const key = pickTarget.type === 'foreign_language' ? 'foreignRows' : 'regularRows';
+
+    return new Set(
+      normalized[key]
+        .filter((_, index) => index !== pickTarget.ri)
+        .map((row) => row.subjectName.trim())
+        .filter(Boolean)
+    );
+  }, [academics, pickTarget]);
 
   const addAcademicBlock = () => setAcademics((p) => [...p, emptyAcademic()]);
   const removeAcademicBlock = (bi: number) => {
@@ -736,9 +770,9 @@ export default function StudentProfileFormScreen({ visible, initialStudent, onCl
                 <View ref={setFieldRef(`grade-${bi}`)} collapsable={false}>
                 <TextInput
                   style={styles.input}
-                  value={block.gradeLevel}
+                  value={gradeLevelDisplayValue(block.gradeLevel)}
                   onChangeText={(t) => updateGrade(bi, t)}
-                  placeholder="Ví dụ: GRADE_09"
+                  placeholder="Ví dụ: Lớp 9"
                   placeholderTextColor="#94a3b8"
                 />
                 <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.gradeScroll}>
@@ -851,6 +885,7 @@ export default function StudentProfileFormScreen({ visible, initialStudent, onCl
           groups={subjectGroups.filter((g) =>
             pickTarget?.type === 'foreign_language' ? g.type === 'foreign_language' : g.type === 'regular'
           )}
+          disabledNames={disabledSubjectNamesForPicker}
           onClose={() => {
             setSubjectPickerOpen(false);
             setPickTarget(null);
@@ -1068,5 +1103,9 @@ const subPickerStyles = StyleSheet.create({
     borderRadius: radius.full,
     backgroundColor: '#e3f2fd',
   },
+  chipDisabled: {
+    backgroundColor: '#f1f5f9',
+  },
   chipText: { fontSize: 14, fontWeight: '600', color: '#1565c0' },
+  chipTextDisabled: { color: '#94a3b8' },
 });
