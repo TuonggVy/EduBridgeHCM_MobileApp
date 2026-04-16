@@ -66,8 +66,10 @@ type Props = {
   loading: boolean;
   school: SchoolDetail | null;
   isFavourite: boolean;
+  consultLoading?: boolean;
   onClose: () => void;
   onToggleFavourite: () => void;
+  onContactConsult?: () => void;
 };
 
 type FacilityItem = NonNullable<NonNullable<SchoolDetail['campusList'][number]['facility']>['itemList']>[number];
@@ -203,8 +205,10 @@ export function SchoolDetailModal({
   loading,
   school,
   isFavourite,
+  consultLoading = false,
   onClose,
   onToggleFavourite,
+  onContactConsult,
 }: Props) {
   const [expandedDescription, setExpandedDescription] = useState(false);
   const [expandedCurriculum, setExpandedCurriculum] = useState<Record<string, boolean>>({});
@@ -686,14 +690,25 @@ export function SchoolDetailModal({
         <View style={styles.bottomCtaWrap}>
           <Pressable
             onPress={() => {
+              if (onContactConsult) {
+                onContactConsult();
+                return;
+              }
               if (school?.hotline) {
-                Linking.openURL(`tel:${school.hotline}`);
+                void Linking.openURL(`tel:${school.hotline}`);
               }
             }}
-            style={styles.bottomCta}
+            disabled={consultLoading}
+            style={[styles.bottomCta, consultLoading && styles.bottomCtaDisabled]}
           >
-            <MaterialIcons name="phone-in-talk" size={20} color="#fff" style={styles.bottomCtaIcon} />
-            <Text style={styles.bottomCtaText}>Liên hệ tư vấn</Text>
+            {consultLoading ? (
+              <ActivityIndicator size="small" color="#fff" />
+            ) : (
+              <MaterialIcons name="phone-in-talk" size={20} color="#fff" style={styles.bottomCtaIcon} />
+            )}
+            <Text style={styles.bottomCtaText}>
+              {consultLoading ? 'Đang kết nối tư vấn...' : 'Liên hệ tư vấn'}
+            </Text>
           </Pressable>
         </View>
         {facilityViewerVisible ? (
@@ -1122,6 +1137,9 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     flexDirection: 'row',
     gap: 8,
+  },
+  bottomCtaDisabled: {
+    opacity: 0.85,
   },
   bottomCtaIcon: { marginRight: 2 },
   bottomCtaText: { color: '#fff', fontSize: 16, fontWeight: '700' },

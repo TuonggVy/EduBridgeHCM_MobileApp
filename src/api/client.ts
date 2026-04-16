@@ -15,6 +15,20 @@ const MOBILE_HEADERS: HeadersInit = {
 
 type ApiOptions = Omit<RequestInit, 'body'> & { body?: object };
 
+export class ApiError extends Error {
+  status: number;
+  url: string;
+  data: unknown;
+
+  constructor(message: string, status: number, url: string, data: unknown) {
+    super(message);
+    this.name = 'ApiError';
+    this.status = status;
+    this.url = url;
+    this.data = data;
+  }
+}
+
 /**
  * Gọi POST /auth/refresh để lấy accessToken mới. Trả về true nếu thành công.
  */
@@ -51,10 +65,17 @@ async function doRequest<T>(
     },
     body: body ? JSON.stringify(body) : undefined,
   });
-  const data = await res.json().catch((parseError) => {
-    console.error('[API] Không parse được JSON response:', parseError);
-    return {};
-  });
+  const rawText = await res.text();
+  const data = rawText
+    ? (() => {
+        try {
+          return JSON.parse(rawText) as unknown;
+        } catch (parseError) {
+          console.error('[API] Không parse được JSON response:', parseError);
+          return {};
+        }
+      })()
+    : {};
 
   if (res.status === 401 && retryAfterRefresh) {
     const refreshed = await refreshAuthToken();
@@ -64,7 +85,7 @@ async function doRequest<T>(
   if (!res.ok) {
     const msg = (data as { message?: string }).message || 'Request failed';
     console.error('[API] Request thất bại:', { url, status: res.status, statusText: res.statusText, data });
-    throw new Error(msg);
+    throw new ApiError(msg, res.status, url, data);
   }
   return data as T;
 }

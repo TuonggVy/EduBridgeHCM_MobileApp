@@ -50,6 +50,17 @@ export type ParentMessagesReadResponse = {
   body: ParentMessageReadItem[];
 };
 
+export type ParentCreateConversationRequest = {
+  parentEmail: string;
+  campusId: number;
+  studentProfileId: number;
+};
+
+export type ParentCreateConversationResponse = {
+  message: string;
+  body: number;
+};
+
 export type ParentMessagesHistoryTrait = {
   name: string;
   description: string;
