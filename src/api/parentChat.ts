@@ -1,5 +1,7 @@
 import { apiRequest } from './client';
 import type {
+  ParentCreateConversationRequest,
+  ParentCreateConversationResponse,
   ParentConversationsResponse,
   ParentMessagesHistoryResponse,
   ParentMessagesReadResponse,
@@ -7,10 +9,20 @@ import type {
 
 /**
  * Khớp OpenAPI:
+ * - POST /api/v1/parent/conversation
  * - GET  /api/v1/parent/conversations?cursorId=
  * - GET  /api/v1/parent/messages/history/{parentEmail}/{campusId}/{studentProfileId}?cursorId=
  * - PUT  /api/v1/parent/messages/read/{conversationId}/{username}
  */
+
+export async function createParentConversation(
+  payload: ParentCreateConversationRequest
+): Promise<ParentCreateConversationResponse> {
+  return apiRequest<ParentCreateConversationResponse>('/api/v1/parent/conversation', {
+    method: 'POST',
+    body: payload,
+  });
+}
 
 export async function fetchParentConversations(
   cursorId?: string | number | null

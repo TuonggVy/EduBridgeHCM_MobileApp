@@ -26,6 +26,7 @@ import {
   fetchParentMessagesHistory,
   markConversationMessagesRead,
 } from '../api/parentChat';
+import { ApiError } from '../api/client';
 import type { ChatMessage } from '../types/chat';
 
 /** Kích thước icon attach / gửi — dùng chung để đồng nhất */
@@ -284,6 +285,7 @@ export default function ChatScreen({
   const [cursorId, setCursorId] = useState<string>(''); // cursor for the "next older" page
 
   const [inputText, setInputText] = useState('');
+  const [chatError, setChatError] = useState<string | null>(null);
 
   useEffect(() => {
     chatContextRef.current = { parentEmail, counsellorEmail, conversationId, studentProfileId, campusId };
@@ -303,10 +305,17 @@ export default function ChatScreen({
       if (markReadTimerRef.current) clearTimeout(markReadTimerRef.current);
       markReadTimerRef.current = setTimeout(async () => {
         try {
-          await markConversationMessagesRead(conversationId, parentEmail);
-          setMessages((prev) =>
-            prev.map((m) => (emailsEqual(m.senderEmail, parentEmail) ? { ...m, status: 'seen' } : m))
+          const res = await markConversationMessagesRead(conversationId, parentEmail);
+          const readIdSet = new Set(
+            Array.isArray(res?.body) ? res.body.map((item) => String(item.id)) : []
           );
+          if (readIdSet.size > 0) {
+            setMessages((prev) =>
+              prev.map((m) =>
+                readIdSet.has(String(m.id)) ? { ...m, status: pickBetterStatus(m.status, 'seen') } : m
+              )
+            );
+          }
         } catch (e) {
           // Silence; marking read is best-effort
           void reason;
@@ -320,7 +329,16 @@ export default function ChatScreen({
     setLoadingLatest(true);
     setLoadingMore(false);
     setHasMore(true);
+    setChatError(null);
     try {
+      if (__DEV__) {
+        console.log('[ChatScreen] fetch history latest', {
+          parentEmail,
+          campusId: String(campusId),
+          studentProfileId: String(studentProfileId),
+          conversationId: String(conversationId),
+        });
+      }
       const res = await fetchParentMessagesHistory(parentEmail, campusId, studentProfileId);
       const resBody = res.body as Record<string, unknown>;
       const rawItems = historyMessagesFromBody(resBody);
@@ -353,6 +371,13 @@ export default function ChatScreen({
       requestAnimationFrame(() => listRef.current?.scrollToOffset({ offset: 0, animated: false }));
 
       handleMarkRead('open');
+    } catch (e) {
+      if (e instanceof ApiError && e.status === 403) {
+        setChatError('Bạn không có quyền xem lịch sử hội thoại này. Vui lòng liên hệ quản trị viên.');
+      } else {
+        setChatError(e instanceof Error ? e.message : 'Không tải được lịch sử tin nhắn');
+      }
+      setMessages([]);
     } finally {
       setLoadingLatest(false);
     }
@@ -371,6 +396,15 @@ export default function ChatScreen({
     if (!cursorId) return;
     setLoadingMore(true);
     try {
+      if (__DEV__) {
+        console.log('[ChatScreen] fetch history older', {
+          parentEmail,
+          campusId: String(campusId),
+          studentProfileId: String(studentProfileId),
+          conversationId: String(conversationId),
+          cursorId: String(cursorId),
+        });
+      }
       const res = await fetchParentMessagesHistory(parentEmail, campusId, studentProfileId, cursorId);
       const resBody = res.body as Record<string, unknown>;
       const rawItems = historyMessagesFromBody(resBody);
@@ -398,6 +432,17 @@ export default function ChatScreen({
 
       setHasMore(pageHasMore);
       setCursorId(nextCursor ?? '');
+    } catch (e) {
+      if (__DEV__) {
+        console.log('[ChatScreen] fetch history older failed', {
+          parentEmail,
+          campusId: String(campusId),
+          studentProfileId: String(studentProfileId),
+          conversationId: String(conversationId),
+          cursorId: String(cursorId),
+          error: e instanceof Error ? e.message : String(e),
+        });
+      }
     } finally {
       setLoadingMore(false);
     }
@@ -489,6 +534,14 @@ export default function ChatScreen({
       if (!pe?.trim() || !cid || sid == null || String(sid).trim() === '' || cps == null || String(cps).trim() === '')
         return;
       try {
+        if (__DEV__) {
+          console.log('[ChatScreen] poll history', {
+            parentEmail: pe,
+            campusId: String(cps),
+            studentProfileId: String(sid),
+            conversationId: String(cid),
+          });
+        }
         const res = await fetchParentMessagesHistory(pe, cps, sid);
         const resBody = res.body as Record<string, unknown>;
         const rawItems = historyMessagesFromBody(resBody);
@@ -504,8 +557,16 @@ export default function ChatScreen({
         });
         setHasMore(typeof resBody.hasMore === 'boolean' ? resBody.hasMore : Boolean(resBody?.hasMore));
         setCursorId(asString(resBody.nextCursorId) ?? '');
-      } catch {
-        /* im lặng */
+      } catch (e) {
+        if (__DEV__) {
+          console.log('[ChatScreen] poll history failed', {
+            parentEmail: pe,
+            campusId: String(cps),
+            studentProfileId: String(sid),
+            conversationId: String(cid),
+            error: e instanceof Error ? e.message : String(e),
+          });
+        }
       }
     };
     const intervalId = setInterval(() => {
@@ -652,6 +713,11 @@ export default function ChatScreen({
         <View style={styles.center}>
           <ActivityIndicator size="large" color="#1976d2" />
         </View>
+      ) : chatError ? (
+        <View style={styles.center}>
+          <Ionicons name="warning-outline" size={36} color={isDark ? '#fbbf24' : '#b45309'} />
+          <Text style={[styles.errorText, isDark && styles.errorTextDark]}>{chatError}</Text>
+        </View>
       ) : messages.length === 0 ? (
         <View style={styles.empty}>
           <Ionicons name="chatbubble-ellipses-outline" size={56} color={isDark ? '#475569' : '#94a3b8'} />
@@ -772,6 +838,16 @@ const styles = StyleSheet.create({
   iconBtn: { width: 34, height: 34, borderRadius: 17, backgroundColor: 'rgba(25,118,210,0.08)', alignItems: 'center', justifyContent: 'center' },
 
   center: { flex: 1, alignItems: 'center', justifyContent: 'center' },
+  errorText: {
+    marginTop: 10,
+    paddingHorizontal: 20,
+    textAlign: 'center',
+    color: '#92400e',
+    fontSize: 14,
+    fontWeight: '700',
+    lineHeight: 20,
+  },
+  errorTextDark: { color: '#fbbf24' },
   empty: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 30, gap: 12 },
   emptyTitle: { fontSize: 15, fontWeight: '700', color: '#64748b', textAlign: 'center' },
   emptyTitleDark: { color: '#94a3b8' },
