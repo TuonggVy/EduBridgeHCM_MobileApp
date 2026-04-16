@@ -1,12 +1,16 @@
 import { Platform } from 'react-native';
 import { getAccessToken, getRefreshToken, setAccessToken } from '../services/TokenStorage';
 
+const envApiBase = process.env.EXPO_PUBLIC_API_BASE?.trim();
+
 export const API_BASE =
-  typeof __DEV__ !== 'undefined' && __DEV__
+  envApiBase
+    ? envApiBase
+    : typeof __DEV__ !== 'undefined' && __DEV__
     ? Platform.OS === 'android'
       ? 'http://10.0.2.2:8080'
       : 'http://localhost:8080'
-    : 'https://your-production-api.com';
+    : 'https://edubridgehcm.onrender.com';
 
 const MOBILE_HEADERS: HeadersInit = {
   'Content-Type': 'application/json',
