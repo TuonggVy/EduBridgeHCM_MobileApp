@@ -44,6 +44,7 @@ import type { SchoolDetail, SchoolSummary } from '../types/school';
 import { SchoolDetailModal } from '../components/SchoolDetailModal';
 import { useToast } from '../components/AppToast';
 import FavouriteSchoolsScreen from './FavouriteSchoolsScreen';
+import PostFeedScreen from './PostFeedScreen';
 
 const HEADER_TOP_PADDING =
   Platform.OS === 'ios' ? 50 : (StatusBar.currentHeight ?? 24) + 8;
@@ -82,6 +83,7 @@ export default function HomeScreen() {
   const [showProfileForm, setShowProfileForm] = useState(false);
   const [chatView, setChatView] = useState<'app' | 'chat'>('app');
   const [newsModalVisible, setNewsModalVisible] = useState(false);
+  const [postFeedVisible, setPostFeedVisible] = useState(false);
   const [selectedConversation, setSelectedConversation] = useState<ParentConversationsItem | null>(null);
 
   const [students, setStudents] = useState<ParentStudentProfile[]>([]);
@@ -493,6 +495,7 @@ export default function HomeScreen() {
                 onViewAllFeaturedSchools={() => setActiveTab('schools')}
                 onOpenConsult={() => setActiveTab('consult')}
                 onOpenNews={() => setNewsModalVisible(true)}
+                onOpenPosts={() => setPostFeedVisible(true)}
               />
             )}
             {activeTab === 'account' && (
@@ -537,6 +540,15 @@ export default function HomeScreen() {
           </Pressable>
         ))}
       </View>
+
+      <Modal
+        visible={postFeedVisible}
+        animationType="slide"
+        presentationStyle="fullScreen"
+        onRequestClose={() => setPostFeedVisible(false)}
+      >
+        <PostFeedScreen onClose={() => setPostFeedVisible(false)} />
+      </Modal>
 
       <Modal
         visible={newsModalVisible}
