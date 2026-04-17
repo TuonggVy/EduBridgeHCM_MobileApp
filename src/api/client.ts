@@ -1,16 +1,33 @@
 import { Platform } from 'react-native';
 import { getAccessToken, getRefreshToken, setAccessToken } from '../services/TokenStorage';
 
-const envApiBase = process.env.EXPO_PUBLIC_API_BASE?.trim();
+const DEFAULT_DEPLOY_BASE = 'https://edubridgehcm.onrender.com';
 
-export const API_BASE =
-  envApiBase
-    ? envApiBase
-    : typeof __DEV__ !== 'undefined' && __DEV__
-    ? Platform.OS === 'android'
-      ? 'http://10.0.2.2:8080'
-      : 'http://localhost:8080'
-    : 'https://edubridgehcm.onrender.com';
+/**
+ * Priority:
+ * 1) EXPO_PUBLIC_API_BASE - explicit override
+ * 2) Release build - EXPO_PUBLIC_API_SERVER or default deploy URL
+ * 3) Dev + EXPO_PUBLIC_API_ENV=deploy - use deploy URL
+ * 4) Dev local - EXPO_PUBLIC_API_LOCAL or platform defaults
+ */
+function resolveApiBase(): string {
+  const explicit = process.env.EXPO_PUBLIC_API_BASE?.trim();
+  if (explicit) return explicit.replace(/\/+$/, '');
+
+  const server = process.env.EXPO_PUBLIC_API_SERVER?.trim().replace(/\/+$/, '') || DEFAULT_DEPLOY_BASE;
+  const isDev = typeof __DEV__ !== 'undefined' && __DEV__;
+  if (!isDev) return server;
+
+  const mode = process.env.EXPO_PUBLIC_API_ENV?.trim().toLowerCase();
+  if (mode === 'deploy') return server;
+
+  const localOverride = process.env.EXPO_PUBLIC_API_LOCAL?.trim().replace(/\/+$/, '');
+  if (localOverride) return localOverride;
+
+  return Platform.OS === 'android' ? 'http://10.0.2.2:8080' : 'http://localhost:8080';
+}
+
+export const API_BASE = resolveApiBase();
 
 const MOBILE_HEADERS: HeadersInit = {
   'Content-Type': 'application/json',
