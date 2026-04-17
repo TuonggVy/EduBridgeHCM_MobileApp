@@ -554,10 +554,10 @@ export default function StudentProfileFormScreen({ visible, initialStudent, onCl
           studentId: studentIdForUpdate,
           ...payloadBase,
         });
-        showSuccess('Đã cập nhật hồ sơ con.', 'Success');
+        showSuccess('Đã cập nhật hồ sơ học sinh.', 'Thành công');
       } else {
         await createParentStudent(payloadBase);
-        showSuccess('Student added successfully', 'Success');
+        showSuccess('Đã thêm hồ sơ học sinh.', 'Thành công');
       }
       onSaved();
       onClose();

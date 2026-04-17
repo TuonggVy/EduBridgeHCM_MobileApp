@@ -115,7 +115,7 @@ export default function ParentProfileFormScreen({
         currentAddress: currentAddress || undefined,
       };
       await updateProfile({ parentData });
-      showSuccess('Profile updated', 'Success');
+      showSuccess('Hồ sơ phụ huynh đã được cập nhật.', 'Thành công');
       onSaved();
     } catch (e) {
       const msg = e instanceof Error ? e.message : 'Không lưu được hồ sơ';

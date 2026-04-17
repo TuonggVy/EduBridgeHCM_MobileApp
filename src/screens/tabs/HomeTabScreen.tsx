@@ -17,7 +17,7 @@ const QUICK_ACTIONS: { id: string; label: string; icon: string }[] = [
   { id: 'posts', label: 'Bài đăng', icon: 'dynamic-feed' },
   { id: 'consult', label: 'Tư vấn', icon: 'chat-bubble-outline' },
   { id: 'news', label: 'Tin tức', icon: 'article' },
-  { id: 'contact', label: 'Liên hệ', icon: 'call' },
+  { id: 'ai', label: 'Trợ lý AI', icon: 'psychology' },
 ];
 
 export type HomeTabScreenProps = {
@@ -28,6 +28,7 @@ export type HomeTabScreenProps = {
   onOpenConsult: () => void;
   onOpenNews: () => void;
   onOpenPosts: () => void;
+  onOpenAiAssistant: () => void;
 };
 
 export function HomeTabScreen({
@@ -38,6 +39,7 @@ export function HomeTabScreen({
   onOpenConsult,
   onOpenNews,
   onOpenPosts,
+  onOpenAiAssistant,
 }: HomeTabScreenProps) {
   const featuredSchools = schools.slice(0, 3);
 
@@ -55,6 +57,7 @@ export function HomeTabScreen({
               if (action.id === 'posts') onOpenPosts();
               if (action.id === 'consult') onOpenConsult();
               if (action.id === 'news') onOpenNews();
+              if (action.id === 'ai') onOpenAiAssistant();
             }}
             style={({ pressed }) => [
               styles.quickActionItem,
@@ -64,7 +67,9 @@ export function HomeTabScreen({
             <View style={styles.quickActionIconWrap}>
               <MaterialIcons name={action.icon as any} size={24} color="#1976d2" />
             </View>
-            <Text style={styles.quickActionLabel}>{action.label}</Text>
+            <Text style={styles.quickActionLabel} numberOfLines={2}>
+              {action.label}
+            </Text>
           </Pressable>
         ))}
       </View>
@@ -153,10 +158,13 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     marginBottom: sp.xl,
+    gap: 4,
   },
   quickActionItem: {
     alignItems: 'center',
     flex: 1,
+    minWidth: 0,
+    paddingHorizontal: 2,
   },
   quickActionPressed: {
     opacity: 0.7,
