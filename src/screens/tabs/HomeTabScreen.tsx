@@ -14,7 +14,7 @@ import { FEATURED_CARD_WIDTH, MaterialIcons, sp, radius } from './tabConstants';
 const BANNER_IMAGE = require('../../../assets/Banner.png');
 
 const QUICK_ACTIONS: { id: string; label: string; icon: string }[] = [
-  { id: 'profile', label: 'Hồ sơ', icon: 'description' },
+  { id: 'posts', label: 'Bài đăng', icon: 'dynamic-feed' },
   { id: 'consult', label: 'Tư vấn', icon: 'chat-bubble-outline' },
   { id: 'news', label: 'Tin tức', icon: 'article' },
   { id: 'contact', label: 'Liên hệ', icon: 'call' },
@@ -27,6 +27,7 @@ export type HomeTabScreenProps = {
   onViewAllFeaturedSchools: () => void;
   onOpenConsult: () => void;
   onOpenNews: () => void;
+  onOpenPosts: () => void;
 };
 
 export function HomeTabScreen({
@@ -36,6 +37,7 @@ export function HomeTabScreen({
   onViewAllFeaturedSchools,
   onOpenConsult,
   onOpenNews,
+  onOpenPosts,
 }: HomeTabScreenProps) {
   const featuredSchools = schools.slice(0, 3);
 
@@ -50,6 +52,7 @@ export function HomeTabScreen({
           <Pressable
             key={action.id}
             onPress={() => {
+              if (action.id === 'posts') onOpenPosts();
               if (action.id === 'consult') onOpenConsult();
               if (action.id === 'news') onOpenNews();
             }}
