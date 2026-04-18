@@ -17,6 +17,7 @@ export type SchoolCampus = {
   imageJson: string | null;
   address: string | null;
   city: string | null;
+  ward: string | null;
   latitude: number | null;
   policyDetail: string | null;
   consultantEmails: string[];
@@ -55,16 +56,32 @@ export type SubjectJsonb = {
   isMandatory: boolean;
 };
 
+/** Phần tử trong `campusProgramOfferingList` — BE có thể mở rộng; client chỉ cần giữ nguyên cấu trúc khi cần. */
+export type CurriculumProgramOffering = Record<string, unknown>;
+
+export type CurriculumProgram = {
+  baseTuitionFee: number | null;
+  targetStudentDescription: string | null;
+  name: string;
+  campusProgramOfferingList: CurriculumProgramOffering[];
+  graduationStandard: string | null;
+  isActive: string | null;
+};
+
 export type Curriculum = {
   curriculumStatus: string;
-  methodLearning: string;
-  enrollmentYear: number;
+  methodLearningList: string[];
+  applicationYear: number;
   name: string;
   description: string | null;
-  programList: unknown[];
+  programList: CurriculumProgram[];
   subjectsJsonb: SubjectJsonb[];
   curriculumType: string;
   groupCode: string;
+  /** @deprecated BE cũ — dùng `methodLearningList` */
+  methodLearning?: string;
+  /** @deprecated BE cũ — dùng `applicationYear` */
+  enrollmentYear?: number;
 };
 
 export type SchoolDetail = SchoolSummary & {

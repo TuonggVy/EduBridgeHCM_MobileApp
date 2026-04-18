@@ -1,5 +1,7 @@
 import { apiRequest } from './client';
 import type {
+  Curriculum,
+  CurriculumProgram,
   NearbyCampusSearchItem,
   NearbyCampusSearchResponse,
   SchoolDetail,
@@ -33,6 +35,7 @@ function normalizeCampusList(school: SchoolDetail): SchoolDetail['campusList'] {
 
   return campusList.map((campus) => ({
     ...campus,
+    ward: typeof campus.ward === 'string' ? campus.ward : null,
     consultantEmails: Array.isArray(campus.consultantEmails)
       ? campus.consultantEmails.filter((email): email is string => typeof email === 'string')
       : [],
@@ -40,14 +43,67 @@ function normalizeCampusList(school: SchoolDetail): SchoolDetail['campusList'] {
   }));
 }
 
+function normalizeCurriculumProgram(program: unknown): CurriculumProgram {
+  if (!program || typeof program !== 'object') {
+    return {
+      baseTuitionFee: null,
+      targetStudentDescription: null,
+      name: '',
+      campusProgramOfferingList: [],
+      graduationStandard: null,
+      isActive: null,
+    };
+  }
+  const p = program as Record<string, unknown>;
+  const fee = p.baseTuitionFee;
+  return {
+    baseTuitionFee: typeof fee === 'number' && Number.isFinite(fee) ? fee : null,
+    targetStudentDescription: typeof p.targetStudentDescription === 'string' ? p.targetStudentDescription : null,
+    name: typeof p.name === 'string' ? p.name : '',
+    campusProgramOfferingList: Array.isArray(p.campusProgramOfferingList)
+      ? (p.campusProgramOfferingList.filter((row) => row && typeof row === 'object') as CurriculumProgram['campusProgramOfferingList'])
+      : [],
+    graduationStandard: typeof p.graduationStandard === 'string' ? p.graduationStandard : null,
+    isActive: typeof p.isActive === 'string' ? p.isActive : null,
+  };
+}
+
+function normalizeCurriculum(curriculum: Curriculum & Record<string, unknown>): Curriculum {
+  const legacyMethod = curriculum.methodLearning;
+  const methodLearningList = Array.isArray(curriculum.methodLearningList)
+    ? curriculum.methodLearningList.filter((m): m is string => typeof m === 'string')
+    : typeof legacyMethod === 'string'
+      ? [legacyMethod]
+      : [];
+
+  const applicationYear =
+    typeof curriculum.applicationYear === 'number' && Number.isFinite(curriculum.applicationYear)
+      ? curriculum.applicationYear
+      : typeof curriculum.enrollmentYear === 'number' && Number.isFinite(curriculum.enrollmentYear)
+        ? curriculum.enrollmentYear
+        : 0;
+
+  const programList = Array.isArray(curriculum.programList)
+    ? curriculum.programList.map((row) => normalizeCurriculumProgram(row))
+    : [];
+
+  return {
+    curriculumStatus: curriculum.curriculumStatus,
+    methodLearningList,
+    applicationYear,
+    name: curriculum.name,
+    description: curriculum.description ?? null,
+    programList,
+    subjectsJsonb: Array.isArray(curriculum.subjectsJsonb) ? curriculum.subjectsJsonb : [],
+    curriculumType: curriculum.curriculumType,
+    groupCode: curriculum.groupCode,
+  };
+}
+
 function normalizeSchoolDetail(school: SchoolDetail): SchoolDetail {
   const campusList = normalizeCampusList(school);
   const curriculumList = Array.isArray(school.curriculumList)
-    ? school.curriculumList.map((curriculum) => ({
-        ...curriculum,
-        programList: Array.isArray(curriculum.programList) ? curriculum.programList : [],
-        subjectsJsonb: Array.isArray(curriculum.subjectsJsonb) ? curriculum.subjectsJsonb : [],
-      }))
+    ? school.curriculumList.map((curriculum) => normalizeCurriculum(curriculum as Curriculum & Record<string, unknown>))
     : [];
 
   return {

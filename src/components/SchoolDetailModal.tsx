@@ -28,6 +28,8 @@ import {
   getCurriculumTypeLabel,
   getMethodLearningBadgeColors,
   getMethodLearningLabel,
+  getProgramActiveBadgeColors,
+  getProgramActiveLabel,
 } from '../utils/curriculumLabels';
 
 const HEADER_TOP = Platform.OS === 'ios' ? 50 : (StatusBar.currentHeight ?? 24) + 8;
@@ -38,6 +40,16 @@ const NEARBY_SEARCH_RADIUS_KM = 50;
 
 function formatKm(d: number): string {
   return `${d.toFixed(d < 10 ? 1 : 0)} km`;
+}
+
+/** BE có thể trả HTML trong mô tả; RN Text không render tag — bỏ tag để hiển thị sạch. */
+function stripBasicHtml(html: string): string {
+  return html.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
+}
+
+function formatTuitionVnd(amount: number | null): string | null {
+  if (amount == null || !Number.isFinite(amount)) return null;
+  return `${new Intl.NumberFormat('vi-VN').format(amount)} đ`;
 }
 
 function formatFacilityValue(value?: number | null, unit?: string | null): string | null {
@@ -407,11 +419,11 @@ export function SchoolDetailModal({
                               </View>
                             ) : null}
 
-                            {(campus.district || campus.city) ? (
+                            {(campus.ward || campus.district || campus.city) ? (
                               <View style={styles.metaRow}>
                                 <MaterialIcons name="location-city" size={16} color="#64748b" />
                                 <Text style={styles.meta}>
-                                  {[campus.district, campus.city].filter(Boolean).join(', ')}
+                                  {[campus.ward, campus.district, campus.city].filter(Boolean).join(', ')}
                                 </Text>
                               </View>
                             ) : null}
@@ -617,14 +629,18 @@ export function SchoolDetailModal({
                   const key = curriculum.groupCode || curriculum.name;
                   const expanded = !!expandedCurriculum[key];
                   const typeColors = getCurriculumTypeBadgeColors(curriculum.curriculumType);
-                  const methodColors = getMethodLearningBadgeColors(curriculum.methodLearning);
                   const statusColors = getCurriculumStatusBadgeColors(curriculum.curriculumStatus);
                   const typePill = badgePillStyle(typeColors);
-                  const methodPill = badgePillStyle(methodColors);
                   const statusPill = badgePillStyle({
                     bg: statusColors.bg,
                     text: statusColors.text,
                   });
+                  const methodKeys =
+                    curriculum.methodLearningList.length > 0
+                      ? curriculum.methodLearningList
+                      : curriculum.methodLearning
+                        ? [curriculum.methodLearning]
+                        : [];
 
                   return (
                     <View key={key} style={styles.curriculumCard}>
@@ -642,15 +658,24 @@ export function SchoolDetailModal({
                           />
                         </View>
                         <Text style={styles.metaSmall}>
-                          Năm tuyển sinh: {curriculum.enrollmentYear}
+                          Năm tuyển sinh:{' '}
+                          {typeof curriculum.applicationYear === 'number' && curriculum.applicationYear > 0
+                            ? curriculum.applicationYear
+                            : curriculum.enrollmentYear ?? '—'}
                         </Text>
                         <View style={styles.badgeRow}>
                           <View style={typePill.wrap}>
                             <Text style={typePill.text}>{getCurriculumTypeLabel(curriculum.curriculumType)}</Text>
                           </View>
-                          <View style={methodPill.wrap}>
-                            <Text style={methodPill.text}>{getMethodLearningLabel(curriculum.methodLearning)}</Text>
-                          </View>
+                          {methodKeys.map((method) => {
+                            const methodColors = getMethodLearningBadgeColors(method);
+                            const methodPill = badgePillStyle(methodColors);
+                            return (
+                              <View key={`${key}-method-${method}`} style={methodPill.wrap}>
+                                <Text style={methodPill.text}>{getMethodLearningLabel(method)}</Text>
+                              </View>
+                            );
+                          })}
                           <View style={statusPill.wrap}>
                             <Text style={statusPill.text}>
                               {getCurriculumStatusLabel(curriculum.curriculumStatus)}
@@ -662,6 +687,50 @@ export function SchoolDetailModal({
                         <View style={styles.curriculumBody}>
                           {curriculum.description ? (
                             <Text style={styles.sectionText}>{curriculum.description}</Text>
+                          ) : null}
+                          {curriculum.programList.length > 0 ? (
+                            <View style={styles.programSection}>
+                              <Text style={styles.programSectionTitle}>Chương trình / lớp</Text>
+                              {curriculum.programList.map((program, pi) => {
+                                const activeColors = program.isActive
+                                  ? getProgramActiveBadgeColors(program.isActive)
+                                  : null;
+                                const activePill = activeColors ? badgePillStyle(activeColors) : null;
+                                const tuitionLabel = formatTuitionVnd(program.baseTuitionFee);
+                                return (
+                                  <View key={`${key}-prog-${pi}`} style={styles.programCard}>
+                                    <View style={styles.programHeaderRow}>
+                                      <Text style={styles.programName}>
+                                        {(program.name ?? '').trim() || 'Chương trình'}
+                                      </Text>
+                                      {activePill && program.isActive ? (
+                                        <View style={activePill.wrap}>
+                                          <Text style={activePill.text}>
+                                            {getProgramActiveLabel(program.isActive)}
+                                          </Text>
+                                        </View>
+                                      ) : null}
+                                    </View>
+                                    {tuitionLabel ? (
+                                      <Text style={styles.programTuition}>Học phí tham khảo: {tuitionLabel}</Text>
+                                    ) : null}
+                                    {program.targetStudentDescription ? (
+                                      <Text style={styles.programBodyText}>
+                                        {stripBasicHtml(program.targetStudentDescription)}
+                                      </Text>
+                                    ) : null}
+                                    {program.graduationStandard ? (
+                                      <>
+                                        <Text style={styles.programSubLabel}>Chuẩn tốt nghiệp</Text>
+                                        <Text style={styles.programBodyText}>
+                                          {stripBasicHtml(program.graduationStandard)}
+                                        </Text>
+                                      </>
+                                    ) : null}
+                                  </View>
+                                );
+                              })}
+                            </View>
                           ) : null}
                           {curriculum.subjectsJsonb.map((subject) => (
                             <View key={`${key}-${subject.name}`} style={styles.subjectItem}>
@@ -1112,6 +1181,26 @@ const styles = StyleSheet.create({
     marginTop: 10,
   },
   curriculumBody: { marginTop: 10, gap: 8 },
+  programSection: { marginTop: 4, gap: 10 },
+  programSectionTitle: { fontSize: 14, fontWeight: '700', color: '#0f172a' },
+  programCard: {
+    borderRadius: 10,
+    padding: 12,
+    backgroundColor: '#f8fafc',
+    borderWidth: 1,
+    borderColor: '#e2e8f0',
+    gap: 6,
+  },
+  programHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+    gap: 8,
+  },
+  programName: { fontSize: 14, fontWeight: '700', color: '#0f172a', flex: 1 },
+  programTuition: { fontSize: 13, fontWeight: '600', color: '#0369a1' },
+  programSubLabel: { fontSize: 13, fontWeight: '700', color: '#334155', marginTop: 4 },
+  programBodyText: { fontSize: 13, color: '#475569', lineHeight: 19 },
   subjectItem: { backgroundColor: '#f8fafc', borderRadius: 10, padding: 10 },
   subjectTitleRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   subjectName: { fontSize: 14, fontWeight: '600', color: '#0f172a', flex: 1 },
