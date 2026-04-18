@@ -667,15 +667,6 @@ export function SchoolDetailModal({
                           <View style={typePill.wrap}>
                             <Text style={typePill.text}>{getCurriculumTypeLabel(curriculum.curriculumType)}</Text>
                           </View>
-                          {methodKeys.map((method) => {
-                            const methodColors = getMethodLearningBadgeColors(method);
-                            const methodPill = badgePillStyle(methodColors);
-                            return (
-                              <View key={`${key}-method-${method}`} style={methodPill.wrap}>
-                                <Text style={methodPill.text}>{getMethodLearningLabel(method)}</Text>
-                              </View>
-                            );
-                          })}
                           <View style={statusPill.wrap}>
                             <Text style={statusPill.text}>
                               {getCurriculumStatusLabel(curriculum.curriculumStatus)}
@@ -685,6 +676,19 @@ export function SchoolDetailModal({
                       </Pressable>
                       {expanded ? (
                         <View style={styles.curriculumBody}>
+                          {methodKeys.length > 0 ? (
+                            <View style={styles.badgeRow}>
+                              {methodKeys.map((method) => {
+                                const methodColors = getMethodLearningBadgeColors(method);
+                                const methodPill = badgePillStyle(methodColors);
+                                return (
+                                  <View key={`${key}-method-${method}`} style={methodPill.wrap}>
+                                    <Text style={methodPill.text}>{getMethodLearningLabel(method)}</Text>
+                                  </View>
+                                );
+                              })}
+                            </View>
+                          ) : null}
                           {curriculum.description ? (
                             <Text style={styles.sectionText}>{curriculum.description}</Text>
                           ) : null}
