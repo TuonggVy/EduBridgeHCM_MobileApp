@@ -8,6 +8,7 @@ import {
   Platform,
   StatusBar,
   Modal,
+  Alert,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 const MaterialIcons = require('@expo/vector-icons').MaterialIcons;
@@ -103,6 +104,9 @@ export default function HomeScreen() {
   const [schoolDetailLoading, setSchoolDetailLoading] = useState(false);
   const [schoolDetailVisible, setSchoolDetailVisible] = useState(false);
   const [consultLoading, setConsultLoading] = useState(false);
+  const [studentPickerVisible, setStudentPickerVisible] = useState(false);
+  const [studentPickerCampusId, setStudentPickerCampusId] = useState<number | null>(null);
+  const [studentPickerOptions, setStudentPickerOptions] = useState<ParentStudentProfile[]>([]);
   const [schoolsRefreshing, setSchoolsRefreshing] = useState(false);
   const [favouriteModalVisible, setFavouriteModalVisible] = useState(false);
   const [favouriteIdBySchoolId, setFavouriteIdBySchoolId] = useState<Record<number, number>>({});
@@ -229,7 +233,96 @@ export default function HomeScreen() {
     });
   }, []);
 
-  const handleContactConsult = useCallback(async () => {
+  const closeStudentPicker = useCallback(() => {
+    setStudentPickerVisible(false);
+    setStudentPickerCampusId(null);
+    setStudentPickerOptions([]);
+  }, []);
+
+  const createConsultConversation = useCallback(
+    async (campusId: number, studentProfileId: number) => {
+      if (!user?.email?.trim()) {
+        showError('Không tìm thấy email phụ huynh để tạo cuộc trò chuyện');
+        return;
+      }
+      if (!selectedSchoolDetail) {
+        showError('Không có dữ liệu trường để liên hệ tư vấn');
+        return;
+      }
+
+      const campus = selectedSchoolDetail.campusList.find((it) => Number(it.id) === Number(campusId));
+      const counsellorEmail = campus?.consultantEmails.find((email) => email?.trim())?.trim();
+      if (!campus || !counsellorEmail) {
+        showError('Cơ sở đã chọn chưa có thông tin tư vấn viên');
+        return;
+      }
+
+      setConsultLoading(true);
+      try {
+        const res = await createParentConversation({
+          parentEmail: user.email.trim(),
+          campusId: campus.id,
+          studentProfileId,
+        });
+        const conversationId = String(res.body ?? '').trim();
+        if (!conversationId) {
+          throw new Error('Không nhận được conversationId từ máy chủ');
+        }
+
+        // Lấy lại metadata conversation từ BE để tránh lệch campus/student khi BE trả về conversation cũ.
+        let resolvedCampusId: number | string = campus.id;
+        let resolvedStudentProfileId: number | string = studentProfileId;
+        let resolvedCounsellorEmail = counsellorEmail;
+        let resolvedCounsellorName = selectedSchoolDetail.name;
+        try {
+          const listRes = await fetchParentConversations();
+          const items: any[] = Array.isArray(listRes.body?.items) ? (listRes.body.items as any[]) : [];
+          const matched: any = items.find((it) => String(it?.conversationId ?? it?.id ?? '') === conversationId);
+          if (matched) {
+            const matchedCampus = asString(matched?.campusId);
+            const matchedStudent = asString(matched?.studentId ?? matched?.studentProfileId);
+            const matchedCounsellor = asString(matched?.otherUser ?? matched?.counsellorEmail);
+            const matchedCounsellorName =
+              asString(matched?.counsellorName) ??
+              asString(matched?.schoolName) ??
+              asString(matched?.name);
+            if (matchedCampus != null && matchedCampus.trim() !== '') resolvedCampusId = matchedCampus;
+            if (matchedStudent != null && matchedStudent.trim() !== '') resolvedStudentProfileId = matchedStudent;
+            if (matchedCounsellor != null && matchedCounsellor.trim() !== '') {
+              resolvedCounsellorEmail = matchedCounsellor;
+            }
+            if (matchedCounsellorName != null && matchedCounsellorName.trim() !== '') {
+              resolvedCounsellorName = matchedCounsellorName;
+            }
+          }
+        } catch {
+          // Best-effort: fallback dữ liệu local vẫn mở chat được.
+        }
+
+        setSelectedConversation({
+          conversationId,
+          campusId: resolvedCampusId,
+          studentProfileId: resolvedStudentProfileId,
+          counsellorEmail: resolvedCounsellorEmail,
+          counsellorName: resolvedCounsellorName,
+          schoolId: selectedSchoolDetail.id,
+          schoolName: selectedSchoolDetail.name,
+        });
+        setSchoolDetailVisible(false);
+        setSelectedSchoolId(null);
+        setSelectedSchoolDetail(null);
+        closeStudentPicker();
+        setChatView('chat');
+      } catch (e) {
+        showError(e instanceof Error ? e.message : 'Không thể tạo cuộc trò chuyện tư vấn');
+      } finally {
+        setConsultLoading(false);
+      }
+    },
+    [closeStudentPicker, selectedSchoolDetail, showError, user?.email]
+  );
+
+  const handleContactConsult = useCallback(async (campusId: number) => {
     if (!user?.email?.trim()) {
       showError('Không tìm thấy email phụ huynh để tạo cuộc trò chuyện');
       return;
@@ -239,94 +332,57 @@ export default function HomeScreen() {
       return;
     }
 
-    const campus = selectedSchoolDetail.campusList.find(
-      (it) => Array.isArray(it.consultantEmails) && it.consultantEmails.some((email) => email?.trim())
-    );
-    const counsellorEmail = campus?.consultantEmails.find((email) => email?.trim())?.trim();
-    if (!campus || !counsellorEmail) {
-      showError('Trường chưa có thông tin tư vấn viên');
-      return;
-    }
-
-    let studentPool = students;
-    if (studentPool.length === 0) {
-      try {
-        const res = await fetchParentStudents();
-        studentPool = Array.isArray(res.body) ? res.body : [];
-        setStudents(studentPool);
-      } catch {
-        studentPool = [];
-      }
-    }
-
-    const matchedStudent = studentPool.find((s) => Number.isFinite(Number(s.id)));
-    const studentProfileId = matchedStudent?.id != null ? Number(matchedStudent.id) : NaN;
-    if (!Number.isFinite(studentProfileId)) {
-      showError('Vui lòng tạo hồ sơ học sinh trước khi liên hệ tư vấn');
+    const campus = selectedSchoolDetail.campusList.find((it) => Number(it.id) === Number(campusId));
+    if (!campus) {
+      showError('Cơ sở đã chọn chưa có thông tin tư vấn viên');
       return;
     }
 
     setConsultLoading(true);
+    let studentPool: ParentStudentProfile[] = [];
     try {
-      const res = await createParentConversation({
-        parentEmail: user.email.trim(),
-        campusId: campus.id,
-        studentProfileId,
-      });
-      const conversationId = String(res.body ?? '').trim();
-      if (!conversationId) {
-        throw new Error('Không nhận được conversationId từ máy chủ');
-      }
-
-      // Lấy lại metadata conversation từ BE để tránh lệch campus/student khi BE trả về conversation cũ.
-      let resolvedCampusId: number | string = campus.id;
-      let resolvedStudentProfileId: number | string = studentProfileId;
-      let resolvedCounsellorEmail = counsellorEmail;
-      let resolvedCounsellorName = selectedSchoolDetail.name;
-      try {
-        const listRes = await fetchParentConversations();
-        const items: any[] = Array.isArray(listRes.body?.items) ? (listRes.body.items as any[]) : [];
-        const matched: any = items.find((it) => String(it?.conversationId ?? it?.id ?? '') === conversationId);
-        if (matched) {
-          const matchedCampus = asString(matched?.campusId);
-          const matchedStudent = asString(matched?.studentId ?? matched?.studentProfileId);
-          const matchedCounsellor = asString(matched?.otherUser ?? matched?.counsellorEmail);
-          const matchedCounsellorName =
-            asString(matched?.counsellorName) ??
-            asString(matched?.schoolName) ??
-            asString(matched?.name);
-          if (matchedCampus != null && matchedCampus.trim() !== '') resolvedCampusId = matchedCampus;
-          if (matchedStudent != null && matchedStudent.trim() !== '') resolvedStudentProfileId = matchedStudent;
-          if (matchedCounsellor != null && matchedCounsellor.trim() !== '') {
-            resolvedCounsellorEmail = matchedCounsellor;
-          }
-          if (matchedCounsellorName != null && matchedCounsellorName.trim() !== '') {
-            resolvedCounsellorName = matchedCounsellorName;
-          }
-        }
-      } catch {
-        // Best-effort: fallback dữ liệu local vẫn mở chat được.
-      }
-
-      setSelectedConversation({
-        conversationId,
-        campusId: resolvedCampusId,
-        studentProfileId: resolvedStudentProfileId,
-        counsellorEmail: resolvedCounsellorEmail,
-        counsellorName: resolvedCounsellorName,
-        schoolId: selectedSchoolDetail.id,
-        schoolName: selectedSchoolDetail.name,
-      });
-      setSchoolDetailVisible(false);
-      setSelectedSchoolId(null);
-      setSelectedSchoolDetail(null);
-      setChatView('chat');
-    } catch (e) {
-      showError(e instanceof Error ? e.message : 'Không thể tạo cuộc trò chuyện tư vấn');
-    } finally {
-      setConsultLoading(false);
+      const res = await fetchParentStudents();
+      studentPool = Array.isArray(res.body) ? res.body : [];
+      setStudents(studentPool);
+    } catch {
+      studentPool = [];
     }
-  }, [selectedSchoolDetail, showError, students, user?.email]);
+
+    const validStudents = studentPool.filter((s) => Number.isFinite(Number(s.id)));
+    if (validStudents.length === 0) {
+      setConsultLoading(false);
+      Alert.alert(
+        'Thiếu hồ sơ học sinh',
+        'Hãy thêm hồ sơ học sinh trước khi nhắn tin với trường',
+        [
+          {
+            text: 'Đồng ý',
+            onPress: () => {
+              setSchoolDetailVisible(false);
+              setSelectedSchoolId(null);
+              setSelectedSchoolDetail(null);
+              closeStudentPicker();
+              setActiveTab('account');
+              setStudentFormInitial(null);
+              setShowStudentForm(true);
+            },
+          },
+        ]
+      );
+      return;
+    }
+
+    if (validStudents.length > 1) {
+      setStudentPickerCampusId(campus.id);
+      setStudentPickerOptions(validStudents);
+      setStudentPickerVisible(true);
+      setConsultLoading(false);
+      return;
+    }
+
+    const firstStudentId = Number(validStudents[0].id);
+    void createConsultConversation(campus.id, firstStudentId);
+  }, [closeStudentPicker, createConsultConversation, selectedSchoolDetail, showError, user?.email]);
 
   useEffect(() => {
     refreshSchools();
@@ -633,14 +689,24 @@ export default function HomeScreen() {
         loading={schoolDetailLoading}
         consultLoading={consultLoading}
         school={selectedSchoolDetail}
+        studentPickerVisible={studentPickerVisible}
+        studentPickerOptions={studentPickerOptions}
+        studentPickerCampusName={
+          studentPickerCampusId == null
+            ? null
+            : selectedSchoolDetail?.campusList.find((campus) => campus.id === studentPickerCampusId)?.name ?? null
+        }
+        onCloseStudentPicker={closeStudentPicker}
+        onSelectStudent={(studentId) => {
+          if (studentPickerCampusId == null) return;
+          void createConsultConversation(studentPickerCampusId, studentId);
+        }}
         isFavourite={
           selectedSchoolId != null
             ? schools.find((item) => item.id === selectedSchoolId)?.isFavourite ?? false
             : false
         }
-        onContactConsult={() => {
-          void handleContactConsult();
-        }}
+        onContactConsult={handleContactConsult}
         onToggleFavourite={() => {
           if (selectedSchoolId != null) toggleSchoolFavourite(selectedSchoolId);
         }}
@@ -648,6 +714,7 @@ export default function HomeScreen() {
           setSchoolDetailVisible(false);
           setSelectedSchoolId(null);
           setSelectedSchoolDetail(null);
+          closeStudentPicker();
         }}
       />
 

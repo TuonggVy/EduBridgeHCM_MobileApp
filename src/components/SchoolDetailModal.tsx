@@ -19,6 +19,7 @@ import MapView, { Marker } from 'react-native-maps';
 import * as Location from 'expo-location';
 const MaterialIcons = require('@expo/vector-icons').MaterialIcons;
 import type { SchoolDetail } from '../types/school';
+import type { ParentStudentProfile } from '../types/studentProfile';
 import { searchNearbyCampus } from '../api/school';
 import {
   badgePillStyle,
@@ -81,7 +82,12 @@ type Props = {
   consultLoading?: boolean;
   onClose: () => void;
   onToggleFavourite: () => void;
-  onContactConsult?: () => void;
+  onContactConsult?: (campusId: number) => void;
+  studentPickerVisible?: boolean;
+  studentPickerOptions?: ParentStudentProfile[];
+  studentPickerCampusName?: string | null;
+  onCloseStudentPicker?: () => void;
+  onSelectStudent?: (studentProfileId: number) => void;
 };
 
 type FacilityItem = NonNullable<NonNullable<SchoolDetail['campusList'][number]['facility']>['itemList']>[number];
@@ -221,6 +227,11 @@ export function SchoolDetailModal({
   onClose,
   onToggleFavourite,
   onContactConsult,
+  studentPickerVisible = false,
+  studentPickerOptions = [],
+  studentPickerCampusName = null,
+  onCloseStudentPicker,
+  onSelectStudent,
 }: Props) {
   const [expandedDescription, setExpandedDescription] = useState(false);
   const [expandedCurriculum, setExpandedCurriculum] = useState<Record<string, boolean>>({});
@@ -229,14 +240,25 @@ export function SchoolDetailModal({
   const [facilityViewerVisible, setFacilityViewerVisible] = useState(false);
   const [facilityViewerImages, setFacilityViewerImages] = useState<FacilityImage[]>([]);
   const [facilityViewerIndex, setFacilityViewerIndex] = useState(0);
+  const [campusPickerVisible, setCampusPickerVisible] = useState(false);
   const facilityViewerListRef = useRef<FlatList<FacilityImage> | null>(null);
 
   const curriculumList = useMemo(() => school?.curriculumList ?? [], [school?.curriculumList]);
   const campusList = useMemo(() => school?.campusList ?? [], [school?.campusList]);
+  const consultCampuses = useMemo(
+    () =>
+      campusList.filter(
+        (campus) =>
+          Array.isArray(campus.consultantEmails) &&
+          campus.consultantEmails.some((email) => email?.trim())
+      ),
+    [campusList]
+  );
 
   useEffect(() => {
     if (!visible) {
       setDistancesKmByCampusId({});
+      setCampusPickerVisible(false);
     }
   }, [visible]);
 
@@ -764,7 +786,7 @@ export function SchoolDetailModal({
           <Pressable
             onPress={() => {
               if (onContactConsult) {
-                onContactConsult();
+                setCampusPickerVisible(true);
                 return;
               }
               if (school?.hotline) {
@@ -784,6 +806,107 @@ export function SchoolDetailModal({
             </Text>
           </Pressable>
         </View>
+        <Modal
+          visible={campusPickerVisible}
+          transparent
+          animationType="fade"
+          onRequestClose={() => setCampusPickerVisible(false)}
+        >
+          <Pressable style={styles.campusPickerBackdrop} onPress={() => setCampusPickerVisible(false)}>
+            <Pressable style={styles.campusPickerCard} onPress={() => {}}>
+              <View style={styles.campusPickerHeader}>
+                <Text style={styles.campusPickerTitle}>Chọn cơ sở muốn tư vấn</Text>
+                <Pressable onPress={() => setCampusPickerVisible(false)} hitSlop={8}>
+                  <MaterialIcons name="close" size={20} color="#64748b" />
+                </Pressable>
+              </View>
+              {consultCampuses.length === 0 ? (
+                <Text style={styles.campusPickerEmptyText}>Trường chưa có thông tin tư vấn viên theo cơ sở.</Text>
+              ) : (
+                consultCampuses.map((campus) => (
+                  <Pressable
+                    key={`consult-campus-${campus.id}`}
+                    style={({ pressed }) => [
+                      styles.campusPickerItem,
+                      pressed && styles.campusPickerItemPressed,
+                    ]}
+                    disabled={consultLoading}
+                    onPress={() => {
+                      if (!onContactConsult) return;
+                      setCampusPickerVisible(false);
+                      onContactConsult(campus.id);
+                    }}
+                  >
+                    <Text style={styles.campusPickerItemName}>{campus.name}</Text>
+                    {campus.address ? (
+                      <Text style={styles.campusPickerItemAddress} numberOfLines={2}>
+                        {campus.address}
+                      </Text>
+                    ) : null}
+                  </Pressable>
+                ))
+              )}
+            </Pressable>
+          </Pressable>
+        </Modal>
+        <Modal
+          visible={studentPickerVisible}
+          transparent
+          animationType="fade"
+          onRequestClose={() => {
+            if (consultLoading) return;
+            onCloseStudentPicker?.();
+          }}
+        >
+          <Pressable style={styles.studentPickerBackdrop} onPress={() => (consultLoading ? null : onCloseStudentPicker?.())}>
+            <Pressable style={styles.studentPickerCard} onPress={() => {}}>
+              <View style={styles.studentPickerHeader}>
+                <Text style={styles.studentPickerTitle}>Chọn học sinh để nhắn tin</Text>
+                <Pressable disabled={consultLoading} onPress={onCloseStudentPicker} hitSlop={8}>
+                  <MaterialIcons name="close" size={20} color="#64748b" />
+                </Pressable>
+              </View>
+              <Text style={styles.studentPickerSubtitle}>
+                {studentPickerCampusName?.trim()
+                  ? `Cơ sở đã chọn: ${studentPickerCampusName.trim()}`
+                  : 'Vui lòng chọn hồ sơ học sinh bạn muốn tư vấn.'}
+              </Text>
+              {studentPickerOptions.map((student) => {
+                const studentId = Number(student.id);
+                const isPressDisabled = consultLoading || !Number.isFinite(studentId);
+                return (
+                  <Pressable
+                    key={`student-picker-${student.id}`}
+                    disabled={isPressDisabled}
+                    style={({ pressed }) => [
+                      styles.studentPickerItem,
+                      pressed && !isPressDisabled && styles.studentPickerItemPressed,
+                    ]}
+                    onPress={() => {
+                      if (!Number.isFinite(studentId)) return;
+                      onSelectStudent?.(studentId);
+                    }}
+                  >
+                    <Text style={styles.studentPickerName}>
+                      {student.studentName?.trim() || `Học sinh #${student.id}`}
+                    </Text>
+                    {student.personalityTypeCode ? (
+                      <Text style={styles.studentPickerMeta}>
+                        Nhóm tính cách: {student.personalityTypeCode}
+                      </Text>
+                    ) : null}
+                  </Pressable>
+                );
+              })}
+              {consultLoading ? (
+                <View style={styles.studentPickerLoading}>
+                  <ActivityIndicator size="small" color="#1976d2" />
+                  <Text style={styles.studentPickerLoadingText}>Đang kết nối tư vấn...</Text>
+                </View>
+              ) : null}
+            </Pressable>
+          </Pressable>
+        </Modal>
         {facilityViewerVisible ? (
           <View style={styles.facilityViewerBackdrop}>
             <Pressable style={styles.facilityViewerCloseBtn} onPress={closeFacilityGallery}>
@@ -1236,4 +1359,102 @@ const styles = StyleSheet.create({
   },
   bottomCtaIcon: { marginRight: 2 },
   bottomCtaText: { color: '#fff', fontSize: 16, fontWeight: '700' },
+  campusPickerBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(15, 23, 42, 0.45)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 20,
+  },
+  campusPickerCard: {
+    width: '100%',
+    maxWidth: 430,
+    maxHeight: '70%',
+    backgroundColor: '#fff',
+    borderRadius: 16,
+    padding: 16,
+    gap: 10,
+  },
+  campusPickerHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 10,
+  },
+  campusPickerTitle: { flex: 1, fontSize: 17, fontWeight: '700', color: '#0f172a' },
+  campusPickerEmptyText: { color: '#64748b', fontSize: 14, lineHeight: 20 },
+  campusPickerItem: {
+    borderWidth: 1,
+    borderColor: '#e2e8f0',
+    borderRadius: 12,
+    padding: 12,
+    gap: 4,
+    backgroundColor: '#fff',
+  },
+  campusPickerItemPressed: { backgroundColor: '#f8fafc' },
+  campusPickerItemName: { fontSize: 15, fontWeight: '700', color: '#0f172a' },
+  campusPickerItemAddress: { fontSize: 13, color: '#64748b', lineHeight: 18 },
+  studentPickerBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(15, 23, 42, 0.45)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 20,
+  },
+  studentPickerCard: {
+    width: '100%',
+    maxWidth: 430,
+    maxHeight: '70%',
+    backgroundColor: '#fff',
+    borderRadius: 16,
+    padding: 16,
+    gap: 10,
+  },
+  studentPickerHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 10,
+  },
+  studentPickerTitle: {
+    flex: 1,
+    fontSize: 17,
+    fontWeight: '700',
+    color: '#0f172a',
+  },
+  studentPickerSubtitle: {
+    fontSize: 14,
+    color: '#475569',
+    marginBottom: 4,
+  },
+  studentPickerItem: {
+    borderWidth: 1,
+    borderColor: '#e2e8f0',
+    borderRadius: 12,
+    padding: 12,
+    gap: 4,
+    backgroundColor: '#fff',
+  },
+  studentPickerItemPressed: { backgroundColor: '#f8fafc' },
+  studentPickerName: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: '#0f172a',
+  },
+  studentPickerMeta: {
+    fontSize: 13,
+    color: '#64748b',
+  },
+  studentPickerLoading: {
+    marginTop: 4,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+  },
+  studentPickerLoadingText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#1976d2',
+  },
 });
