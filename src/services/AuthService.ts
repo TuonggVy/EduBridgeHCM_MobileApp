@@ -1,6 +1,7 @@
 import { jwtDecode } from 'jwt-decode';
 import { GoogleSignin } from '@react-native-google-signin/google-signin';
 import { isSuccessResponse } from '@react-native-google-signin/google-signin';
+import { isErrorWithCode, statusCodes } from '@react-native-google-signin/google-signin';
 import { register as apiRegister, signin as apiSignin } from '../api/auth';
 import { setAccessToken, setRefreshToken } from './TokenStorage';
 import type { AuthUser } from '../types/auth';
@@ -15,6 +16,28 @@ export type RegisterWithGoogleResult =
   | { success: false; error: string };
 
 const PARENT_ROLE = 'PARENT';
+const GOOGLE_ANDROID_PACKAGE = 'com.edubridge.hcm';
+
+function mapGoogleSigninError(error: unknown): string {
+  if (isErrorWithCode(error)) {
+    if (error.code === statusCodes.SIGN_IN_CANCELLED) {
+      return 'Bạn đã hủy đăng nhập Google';
+    }
+    if (error.code === statusCodes.IN_PROGRESS) {
+      return 'Đăng nhập Google đang xử lý, vui lòng thử lại';
+    }
+    if (error.code === statusCodes.PLAY_SERVICES_NOT_AVAILABLE) {
+      return 'Google Play Services không khả dụng trên thiết bị';
+    }
+  }
+
+  const rawMessage = error instanceof Error ? error.message : String(error);
+  if (rawMessage.includes('DEVELOPER_ERROR')) {
+    return `Google Sign-In cấu hình chưa đúng (DEVELOPER_ERROR). Kiểm tra package ${GOOGLE_ANDROID_PACKAGE}, SHA-1 debug/release và Web client ID trên Google Cloud/Firebase.`;
+  }
+
+  return rawMessage || 'Đăng nhập Google thất bại';
+}
 
 /**
  * Luồng theo BE:
@@ -24,13 +47,30 @@ const PARENT_ROLE = 'PARENT';
  * 4. Nếu thành công thì trả data về callback onSuccess
  */
 export async function signInWithGoogle(): Promise<SignInWithGoogleResult> {
-  const response = await GoogleSignin.signIn();
+  let response;
+  try {
+    await GoogleSignin.hasPlayServices();
+    response = await GoogleSignin.signIn();
+  } catch (e: unknown) {
+    const message = mapGoogleSigninError(e);
+    console.error('[AuthService] Google Sign-In thất bại:', message, e);
+    return { success: false, error: message };
+  }
+
   if (!isSuccessResponse(response)) {
     console.warn('[AuthService] Đăng nhập Google bị hủy hoặc không thành công');
     return { success: false, error: 'Đăng nhập Google bị hủy' };
   }
 
-  const tokens = await GoogleSignin.getTokens();
+  let tokens;
+  try {
+    tokens = await GoogleSignin.getTokens();
+  } catch (e: unknown) {
+    const message = mapGoogleSigninError(e);
+    console.error('[AuthService] Lấy token Google thất bại:', message, e);
+    return { success: false, error: message };
+  }
+
   const idToken = tokens.idToken;
   if (!idToken) {
     console.error('[AuthService] Không nhận được JWT (idToken) từ Google');
@@ -61,12 +101,29 @@ export async function signInWithGoogle(): Promise<SignInWithGoogleResult> {
  * Đăng ký Parent bằng Google: email + avatar (URL ảnh đại diện Gmail từ JWT `picture`) → POST /api/v1/auth/register.
  */
 export async function registerWithGoogle(): Promise<RegisterWithGoogleResult> {
-  const response = await GoogleSignin.signIn();
+  let response;
+  try {
+    await GoogleSignin.hasPlayServices();
+    response = await GoogleSignin.signIn();
+  } catch (e: unknown) {
+    const message = mapGoogleSigninError(e);
+    console.error('[AuthService] Google Sign-In thất bại khi đăng ký:', message, e);
+    return { success: false, error: message };
+  }
+
   if (!isSuccessResponse(response)) {
     return { success: false, error: 'Đăng ký Google bị hủy' };
   }
 
-  const tokens = await GoogleSignin.getTokens();
+  let tokens;
+  try {
+    tokens = await GoogleSignin.getTokens();
+  } catch (e: unknown) {
+    const message = mapGoogleSigninError(e);
+    console.error('[AuthService] Lấy token Google thất bại khi đăng ký:', message, e);
+    return { success: false, error: message };
+  }
+
   const idToken = tokens.idToken;
   if (!idToken) {
     return { success: false, error: 'Không nhận được JWT từ Google' };
