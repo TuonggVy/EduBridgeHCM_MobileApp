@@ -92,7 +92,9 @@ async function doRequest<T>(
         try {
           return JSON.parse(rawText) as unknown;
         } catch (parseError) {
-          console.error('[API] Không parse được JSON response:', parseError);
+          if (__DEV__) {
+            console.log('[API] Không parse được JSON response:', parseError);
+          }
           return {};
         }
       })()
@@ -105,7 +107,9 @@ async function doRequest<T>(
 
   if (!res.ok) {
     const msg = (data as { message?: string }).message || 'Request failed';
-    console.error('[API] Request thất bại:', { url, status: res.status, statusText: res.statusText, data });
+    if (__DEV__) {
+      console.log('[API] Request thất bại:', { url, status: res.status, statusText: res.statusText, data });
+    }
     throw new ApiError(msg, res.status, url, data);
   }
   return data as T;

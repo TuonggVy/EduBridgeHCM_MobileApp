@@ -6,6 +6,7 @@ import {
   Pressable,
   FlatList,
   ActivityIndicator,
+  Image,
   useColorScheme,
 } from 'react-native';
 
@@ -28,6 +29,16 @@ function asString(v: unknown): string | null {
   return null;
 }
 
+function sanitizeCounsellorEmail(v: unknown): string {
+  const raw = asString(v)?.trim() ?? '';
+  if (!raw) return '';
+  const normalized = raw.toLowerCase();
+  if (normalized === 'n/a' || normalized === 'na' || normalized === 'none' || normalized === 'null') {
+    return '';
+  }
+  return normalized.includes('@') ? raw : '';
+}
+
 function normalizeConversations(raw: unknown): ParentConversationsItem[] {
   const arr: unknown[] = Array.isArray(raw)
     ? raw
@@ -42,11 +53,11 @@ function normalizeConversations(raw: unknown): ParentConversationsItem[] {
       '';
 
     const counsellorEmail =
-      asString(it?.counsellorEmail) ??
-      asString(it?.otherUser) ??
-      asString(it?.schoolEmail) ??
-      asString(it?.participantCounsellorEmail) ??
-      asString(it?.participantEmail) ??
+      sanitizeCounsellorEmail(it?.counsellorEmail) ||
+      sanitizeCounsellorEmail(it?.otherUser) ||
+      sanitizeCounsellorEmail(it?.schoolEmail) ||
+      sanitizeCounsellorEmail(it?.participantCounsellorEmail) ||
+      sanitizeCounsellorEmail(it?.participantEmail) ||
       '';
 
     // Người được hiển thị ở tiêu đề chat nên là Counsoller (không ưu tiên student/child).
@@ -58,7 +69,7 @@ function normalizeConversations(raw: unknown): ParentConversationsItem[] {
       asString(it?.name) ??
       asString(it?.participantName) ??
       asString(it?.title) ??
-      asString(it?.otherUser) ??
+      (sanitizeCounsellorEmail(it?.otherUser) || null) ??
       null;
 
     const participantParentEmail =
@@ -243,7 +254,11 @@ export default function ConversationsScreen({
                 style={({ pressed }) => [styles.row, pressed && styles.rowPressed, isDark && styles.rowDark]}
               >
                 <View style={styles.avatar}>
-                  <Ionicons name="person" size={18} color={isDark ? '#CBD5E1' : '#1976d2'} />
+                  {item.schoolLogoUrl ? (
+                    <Image source={{ uri: item.schoolLogoUrl }} style={styles.avatarImage} resizeMode="cover" />
+                  ) : (
+                    <Ionicons name="person" size={18} color={isDark ? '#CBD5E1' : '#1976d2'} />
+                  )}
                 </View>
                 <View style={styles.rowMain}>
                   <View style={styles.rowTop}>
@@ -323,7 +338,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     marginRight: 12,
+    overflow: 'hidden',
   },
+  avatarImage: { width: '100%', height: '100%' },
   rowMain: { flex: 1 },
   rowTop: { flexDirection: 'row', alignItems: 'center' },
   rowTitle: { fontSize: 16, fontWeight: '800', color: '#0f172a' },

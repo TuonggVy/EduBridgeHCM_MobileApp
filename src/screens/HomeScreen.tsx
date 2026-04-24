@@ -39,7 +39,12 @@ import {
   fetchFavouriteSchoolIdMap,
   removeFavouriteSchool,
 } from '../api/favouriteSchool';
-import { createParentConversation, fetchParentConversations } from '../api/parentChat';
+import {
+  createParentConversation,
+  fetchParentConversations,
+  fetchParentMessagesHistory,
+} from '../api/parentChat';
+import { ApiError } from '../api/client';
 import { fetchSchoolPublicDetail, fetchSchoolPublicList } from '../api/school';
 import type { SchoolDetail, SchoolSummary } from '../types/school';
 import { SchoolDetailModal } from '../components/SchoolDetailModal';
@@ -70,6 +75,16 @@ function asString(v: unknown): string | null {
   if (typeof v === 'string') return v;
   if (typeof v === 'number') return String(v);
   return null;
+}
+
+function sanitizeCounsellorEmail(v: unknown): string | null {
+  const raw = asString(v)?.trim() ?? '';
+  if (!raw) return null;
+  const normalized = raw.toLowerCase();
+  if (normalized === 'n/a' || normalized === 'na' || normalized === 'none' || normalized === 'null') {
+    return null;
+  }
+  return normalized.includes('@') ? raw : null;
 }
 
 // ─── Main (shell: header, bottom tabs, modals) ───────────────────────────────
@@ -257,23 +272,13 @@ export default function HomeScreen() {
         return;
       }
 
-      setConsultLoading(true);
-      try {
-        const res = await createParentConversation({
-          parentEmail: user.email.trim(),
-          campusId: campus.id,
-          studentProfileId,
-        });
-        const conversationId = String(res.body ?? '').trim();
-        if (!conversationId) {
-          throw new Error('Không nhận được conversationId từ máy chủ');
-        }
-
+      const openChatByConversationId = async (conversationId: string) => {
         // Lấy lại metadata conversation từ BE để tránh lệch campus/student khi BE trả về conversation cũ.
         let resolvedCampusId: number | string = campus.id;
         let resolvedStudentProfileId: number | string = studentProfileId;
         let resolvedCounsellorEmail = counsellorEmail;
         let resolvedCounsellorName = selectedSchoolDetail.name;
+        let resolvedSchoolLogoUrl = selectedSchoolDetail.logoUrl ?? null;
         try {
           const listRes = await fetchParentConversations();
           const items: any[] = Array.isArray(listRes.body?.items) ? (listRes.body.items as any[]) : [];
@@ -281,11 +286,14 @@ export default function HomeScreen() {
           if (matched) {
             const matchedCampus = asString(matched?.campusId);
             const matchedStudent = asString(matched?.studentId ?? matched?.studentProfileId);
-            const matchedCounsellor = asString(matched?.otherUser ?? matched?.counsellorEmail);
+            const matchedCounsellor =
+              sanitizeCounsellorEmail(matched?.otherUser) ??
+              sanitizeCounsellorEmail(matched?.counsellorEmail);
             const matchedCounsellorName =
               asString(matched?.counsellorName) ??
               asString(matched?.schoolName) ??
               asString(matched?.name);
+            const matchedSchoolLogoUrl = asString(matched?.schoolLogoUrl);
             if (matchedCampus != null && matchedCampus.trim() !== '') resolvedCampusId = matchedCampus;
             if (matchedStudent != null && matchedStudent.trim() !== '') resolvedStudentProfileId = matchedStudent;
             if (matchedCounsellor != null && matchedCounsellor.trim() !== '') {
@@ -293,6 +301,9 @@ export default function HomeScreen() {
             }
             if (matchedCounsellorName != null && matchedCounsellorName.trim() !== '') {
               resolvedCounsellorName = matchedCounsellorName;
+            }
+            if (matchedSchoolLogoUrl != null && matchedSchoolLogoUrl.trim() !== '') {
+              resolvedSchoolLogoUrl = matchedSchoolLogoUrl;
             }
           }
         } catch {
@@ -307,14 +318,50 @@ export default function HomeScreen() {
           counsellorName: resolvedCounsellorName,
           schoolId: selectedSchoolDetail.id,
           schoolName: selectedSchoolDetail.name,
+          schoolLogoUrl: resolvedSchoolLogoUrl,
         });
         setSchoolDetailVisible(false);
         setSelectedSchoolId(null);
         setSelectedSchoolDetail(null);
         closeStudentPicker();
         setChatView('chat');
+      };
+
+      setConsultLoading(true);
+      try {
+        const res = await createParentConversation({
+          parentEmail: user.email.trim(),
+          campusId: campus.id,
+          studentProfileId,
+        });
+        const conversationId = String(res.body ?? '').trim();
+        if (!conversationId) {
+          throw new Error('Không nhận được conversationId từ máy chủ');
+        }
+        await openChatByConversationId(conversationId);
       } catch (e) {
-        showError(e instanceof Error ? e.message : 'Không thể tạo cuộc trò chuyện tư vấn');
+        if (e instanceof ApiError && e.status === 400) {
+          try {
+            const historyRes = await fetchParentMessagesHistory(
+              user.email.trim(),
+              campus.id,
+              studentProfileId
+            );
+            const existingConversationId = String(historyRes.body?.conversationId ?? '').trim();
+            if (!existingConversationId) {
+              throw new Error('Không tìm thấy conversation hiện có để tiếp tục tư vấn');
+            }
+            await openChatByConversationId(existingConversationId);
+          } catch (fallbackError) {
+            showError(
+              fallbackError instanceof Error
+                ? fallbackError.message
+                : 'Không thể mở lại cuộc trò chuyện tư vấn hiện có'
+            );
+          }
+        } else {
+          showError(e instanceof Error ? e.message : 'Không thể tạo cuộc trò chuyện tư vấn');
+        }
       } finally {
         setConsultLoading(false);
       }
@@ -470,6 +517,7 @@ export default function HomeScreen() {
         parentEmail={resolvedParent}
         counsellorEmail={resolvedCounsellor}
         counsellorName={selectedConversation.counsellorName ?? undefined}
+        counsellorAvatarUrl={selectedConversation.schoolLogoUrl ?? undefined}
         initialLastMessageContent={selectedConversation.lastMessageContent ?? undefined}
         initialLastMessageAt={selectedConversation.lastMessageAt ?? undefined}
         onBack={() => setChatView('app')}
