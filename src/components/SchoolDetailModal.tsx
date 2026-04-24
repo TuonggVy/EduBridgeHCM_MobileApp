@@ -447,27 +447,34 @@ export function SchoolDetailModal({
                                 onPress={() => openGoogleMapsDirections(campus.latitude!, campus.longitude!)}
                                 style={styles.campusMiniMapWrap}
                               >
-                                <MapView
-                                  style={styles.campusMiniMap}
-                                  pointerEvents="none"
-                                  scrollEnabled={false}
-                                  rotateEnabled={false}
-                                  zoomEnabled={false}
-                                  pitchEnabled={false}
-                                  initialRegion={{
-                                    latitude: campus.latitude,
-                                    longitude: campus.longitude,
-                                    latitudeDelta: 0.01,
-                                    longitudeDelta: 0.01,
-                                  }}
-                                >
-                                  <Marker
-                                    coordinate={{
+                                {Platform.OS === 'android' ? (
+                                  <View style={styles.campusMapFallback}>
+                                    <MaterialIcons name="map" size={18} color="#1976d2" />
+                                    <Text style={styles.campusMapFallbackText}>Mở Google Maps để xem vị trí</Text>
+                                  </View>
+                                ) : (
+                                  <MapView
+                                    style={styles.campusMiniMap}
+                                    pointerEvents="none"
+                                    scrollEnabled={false}
+                                    rotateEnabled={false}
+                                    zoomEnabled={false}
+                                    pitchEnabled={false}
+                                    initialRegion={{
                                       latitude: campus.latitude,
                                       longitude: campus.longitude,
+                                      latitudeDelta: 0.01,
+                                      longitudeDelta: 0.01,
                                     }}
-                                  />
-                                </MapView>
+                                  >
+                                    <Marker
+                                      coordinate={{
+                                        latitude: campus.latitude,
+                                        longitude: campus.longitude,
+                                      }}
+                                    />
+                                  </MapView>
+                                )}
                                 <View style={styles.mapTapHint} pointerEvents="none">
                                   <MaterialIcons name="directions" size={16} color="#fff" />
                                   <Text style={styles.mapTapHintText}>Chạm để chỉ đường (Google Maps)</Text>
@@ -1022,6 +1029,16 @@ const styles = StyleSheet.create({
     height: 140,
     width: '100%',
   },
+  campusMapFallback: {
+    height: 140,
+    width: '100%',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#f8fafc',
+    paddingHorizontal: 12,
+    gap: 8,
+  },
+  campusMapFallbackText: { color: '#0f172a', fontSize: 13, fontWeight: '600', textAlign: 'center' },
   mapTapHint: {
     position: 'absolute',
     left: 0,
