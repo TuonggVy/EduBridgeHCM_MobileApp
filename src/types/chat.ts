@@ -47,7 +47,7 @@ export type ParentMessageReadItem = {
 
 export type ParentMessagesReadResponse = {
   message: string;
-  body: ParentMessageReadItem[];
+  body: ParentMessageReadItem[] | null;
 };
 
 export type ParentCreateConversationRequest = {
@@ -76,15 +76,25 @@ export type ParentMessagesHistoryGradeBlock = {
   subjectResults: ParentMessagesHistorySubjectResult[];
 };
 
+export type ParentMessagesHistoryItem = {
+  senderName: string;
+  receiverName: string;
+  id: number;
+  message: string;
+  timestamp: string;
+  status: string;
+};
+
 /** REST body: GET /api/v1/parent/messages/history/.../{studentProfileId} */
 export type ParentMessagesHistoryBody = {
   nextCursorId: number | null;
   conversationId: number;
   campusId?: number;
+  studentProfileId?: number;
   hasMore: boolean;
-  messages?: unknown[];
+  messages?: ParentMessagesHistoryItem[];
   /** Một số bản BE dùng `items` thay cho `messages`. */
-  items?: unknown[];
+  items?: ParentMessagesHistoryItem[];
   favouriteJob?: string | null;
   traits?: ParentMessagesHistoryTrait[];
   gender?: string | null;

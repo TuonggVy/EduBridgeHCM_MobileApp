@@ -54,6 +54,31 @@ function makeId() {
   return `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
 }
 
+function normalizeUserFacingErrorMessage(message: string): string {
+  const raw = (message ?? '').trim();
+  if (!raw) return 'Không thể xử lý yêu cầu lúc này. Vui lòng thử lại.';
+
+  const lower = raw.toLowerCase();
+  const looksTechnical =
+    lower.includes('[api]') ||
+    lower.includes('request failed') ||
+    lower.includes('network request failed') ||
+    lower.includes('http://') ||
+    lower.includes('https://') ||
+    raw.startsWith('{') ||
+    raw.startsWith('[');
+
+  if (looksTechnical) {
+    return 'Không thể xử lý yêu cầu lúc này. Vui lòng thử lại.';
+  }
+
+  if (raw.length > 180) {
+    return 'Có lỗi xảy ra. Vui lòng thử lại sau.';
+  }
+
+  return raw;
+}
+
 function palette(
   type: ToastType,
   isDark: boolean
@@ -174,7 +199,13 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
       showSuccess: (message, title = 'Thành công') =>
         showToast({ type: 'success', title, message }),
       showError: (message, title = 'Có lỗi xảy ra', actionLabel, onAction) =>
-        showToast({ type: 'error', title, message, actionLabel, onAction }),
+        showToast({
+          type: 'error',
+          title,
+          message: normalizeUserFacingErrorMessage(message),
+          actionLabel,
+          onAction,
+        }),
       showWarning: (message, title = 'Cảnh báo') =>
         showToast({ type: 'warning', title, message }),
       showInfo: (message, title = 'Thông tin') =>

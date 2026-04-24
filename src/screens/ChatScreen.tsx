@@ -3,6 +3,7 @@ import {
   ActivityIndicator,
   AppState,
   FlatList,
+  Image,
   KeyboardAvoidingView,
   Platform,
   Pressable,
@@ -55,6 +56,16 @@ function asString(v: unknown): string | null {
 
 function emailsEqual(a: string, b: string): boolean {
   return a.trim().toLowerCase() === b.trim().toLowerCase();
+}
+
+function sanitizeReceiverEmail(v: string): string {
+  const raw = (v ?? '').trim();
+  if (!raw) return '';
+  const normalized = raw.toLowerCase();
+  if (normalized === 'n/a' || normalized === 'na' || normalized === 'none' || normalized === 'null') {
+    return '';
+  }
+  return normalized.includes('@') ? raw : '';
 }
 
 /** seen > sent > sending — tránh poll/history ghi đè Seen → Delivered liên tục */
@@ -265,6 +276,7 @@ export default function ChatScreen({
   parentEmail,
   counsellorEmail,
   counsellorName,
+  counsellorAvatarUrl,
   initialLastMessageContent,
   initialLastMessageAt,
   onBack,
@@ -274,7 +286,14 @@ export default function ChatScreen({
 
   const listRef = useRef<FlatList<any> | null>(null);
   const markReadTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const chatContextRef = useRef({ parentEmail, counsellorEmail, conversationId, studentProfileId, campusId });
+  const [activeConversationId, setActiveConversationId] = useState(String(conversationId));
+  const chatContextRef = useRef({
+    parentEmail,
+    counsellorEmail,
+    conversationId: String(conversationId),
+    studentProfileId,
+    campusId,
+  });
 
   const [connected, setConnected] = useState(false);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -288,8 +307,18 @@ export default function ChatScreen({
   const [chatError, setChatError] = useState<string | null>(null);
 
   useEffect(() => {
-    chatContextRef.current = { parentEmail, counsellorEmail, conversationId, studentProfileId, campusId };
-  }, [parentEmail, counsellorEmail, conversationId, studentProfileId, campusId]);
+    setActiveConversationId(String(conversationId));
+  }, [conversationId]);
+
+  useEffect(() => {
+    chatContextRef.current = {
+      parentEmail,
+      counsellorEmail,
+      conversationId: activeConversationId,
+      studentProfileId,
+      campusId,
+    };
+  }, [activeConversationId, parentEmail, counsellorEmail, studentProfileId, campusId]);
 
   const displayMessages = useMemo(() => {
     // For inverted FlatList: we want newest at bottom, so reverse data.
@@ -305,7 +334,7 @@ export default function ChatScreen({
       if (markReadTimerRef.current) clearTimeout(markReadTimerRef.current);
       markReadTimerRef.current = setTimeout(async () => {
         try {
-          const res = await markConversationMessagesRead(conversationId, parentEmail);
+          const res = await markConversationMessagesRead(activeConversationId, parentEmail);
           const readIdSet = new Set(
             Array.isArray(res?.body) ? res.body.map((item) => String(item.id)) : []
           );
@@ -322,7 +351,7 @@ export default function ChatScreen({
         }
       }, 350);
     },
-    [conversationId, parentEmail]
+    [activeConversationId, parentEmail]
   );
 
   const loadLatest = useCallback(async () => {
@@ -336,20 +365,24 @@ export default function ChatScreen({
           parentEmail,
           campusId: String(campusId),
           studentProfileId: String(studentProfileId),
-          conversationId: String(conversationId),
+          conversationId: String(activeConversationId),
         });
       }
       const res = await fetchParentMessagesHistory(parentEmail, campusId, studentProfileId);
       const resBody = res.body as Record<string, unknown>;
+      const resolvedConversationId =
+        asString(resBody.conversationId)?.trim() || String(activeConversationId);
       const rawItems = historyMessagesFromBody(resBody);
       const nextCursor: string | undefined = asString(resBody.nextCursorId) ?? undefined;
       const pageHasMore: boolean =
         typeof resBody?.hasMore === 'boolean' ? resBody.hasMore : Boolean(resBody?.hasMore);
 
       const normalized = (rawItems ?? [])
-        .map((it) => normalizeIncomingMessage(it, conversationId))
+        .map((it) => normalizeIncomingMessage(it, resolvedConversationId))
         .filter((m): m is ChatMessage => !!m)
         .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
+
+      setActiveConversationId(resolvedConversationId);
 
       if (normalized.length > 0) {
         setMessages(normalized);
@@ -357,7 +390,7 @@ export default function ChatScreen({
         setMessages([
           {
             id: LIST_PREVIEW_MESSAGE_ID,
-            conversationId,
+            conversationId: resolvedConversationId,
             senderEmail: counsellorEmail || 'unknown',
             content: initialLastMessageContent.trim(),
             createdAt: toISO(initialLastMessageAt) ?? new Date().toISOString(),
@@ -382,8 +415,8 @@ export default function ChatScreen({
       setLoadingLatest(false);
     }
   }, [
+    activeConversationId,
     campusId,
-    conversationId,
     handleMarkRead,
     initialLastMessageAt,
     initialLastMessageContent,
@@ -401,21 +434,25 @@ export default function ChatScreen({
           parentEmail,
           campusId: String(campusId),
           studentProfileId: String(studentProfileId),
-          conversationId: String(conversationId),
+          conversationId: String(activeConversationId),
           cursorId: String(cursorId),
         });
       }
       const res = await fetchParentMessagesHistory(parentEmail, campusId, studentProfileId, cursorId);
       const resBody = res.body as Record<string, unknown>;
+      const resolvedConversationId =
+        asString(resBody.conversationId)?.trim() || String(activeConversationId);
       const rawItems = historyMessagesFromBody(resBody);
       const nextCursor: string | undefined = asString(resBody.nextCursorId) ?? undefined;
       const pageHasMore: boolean =
         typeof resBody?.hasMore === 'boolean' ? resBody.hasMore : Boolean(resBody?.hasMore);
 
       const normalizedOlder = (rawItems ?? [])
-        .map((it) => normalizeIncomingMessage(it, conversationId))
+        .map((it) => normalizeIncomingMessage(it, resolvedConversationId))
         .filter((m): m is ChatMessage => !!m)
         .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
+
+      setActiveConversationId(resolvedConversationId);
 
       setMessages((prev) => {
         const next = [...normalizedOlder, ...prev];
@@ -438,7 +475,7 @@ export default function ChatScreen({
           parentEmail,
           campusId: String(campusId),
           studentProfileId: String(studentProfileId),
-          conversationId: String(conversationId),
+          conversationId: String(activeConversationId),
           cursorId: String(cursorId),
           error: e instanceof Error ? e.message : String(e),
         });
@@ -449,7 +486,7 @@ export default function ChatScreen({
   }, [
     campusId,
     cursorId,
-    conversationId,
+    activeConversationId,
     hasMore,
     loadingMore,
     parentEmail,
@@ -463,9 +500,9 @@ export default function ChatScreen({
       if (!raw || typeof raw !== 'object') return;
       const incomingCid = raw.conversationId ?? (raw.conversation as { id?: unknown } | undefined)?.id;
       if (incomingCid == null || incomingCid === '') return;
-      if (String(incomingCid) !== String(conversationId)) return;
+      if (String(incomingCid) !== String(activeConversationId)) return;
 
-      const normalized = normalizeIncomingMessage(body as any, conversationId);
+      const normalized = normalizeIncomingMessage(body as any, activeConversationId);
       if (!normalized) return;
 
       setMessages((prev) => {
@@ -523,7 +560,7 @@ export default function ChatScreen({
     return () => {
       disconnect();
     };
-  }, [campusId, conversationId, handleMarkRead, loadLatest, parentEmail, studentProfileId]);
+  }, [campusId, activeConversationId, handleMarkRead, loadLatest, parentEmail, studentProfileId]);
 
   /** WS trễ / lỡ — đồng bộ REST định kỳ khi màn hình đang active (giống web ~3.5s). */
   useEffect(() => {
@@ -544,11 +581,14 @@ export default function ChatScreen({
         }
         const res = await fetchParentMessagesHistory(pe, cps, sid);
         const resBody = res.body as Record<string, unknown>;
+        const resolvedConversationId = asString(resBody.conversationId)?.trim() || cid;
         const rawItems = historyMessagesFromBody(resBody);
         const normalized = (rawItems ?? [])
-          .map((it) => normalizeIncomingMessage(it, cid))
+          .map((it) => normalizeIncomingMessage(it, resolvedConversationId))
           .filter((m): m is ChatMessage => !!m)
           .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
+
+        setActiveConversationId(resolvedConversationId);
 
         setMessages((prev) => {
           if (normalized.length === 0) return prev;
@@ -578,14 +618,15 @@ export default function ChatScreen({
   const handleSend = useCallback(() => {
     const text = inputText.trim();
     if (!text) return;
-    if (!counsellorEmail || !conversationId) return;
+    if (!activeConversationId) return;
+    const receiver = sanitizeReceiverEmail(counsellorEmail);
 
     const tmpId = `tmp-${Date.now()}`;
     const nowISO = new Date().toISOString();
 
     const optimistic: ChatMessage = {
       id: tmpId,
-      conversationId,
+      conversationId: activeConversationId,
       senderEmail: parentEmail,
       content: text,
       createdAt: nowISO,
@@ -607,14 +648,16 @@ export default function ChatScreen({
 
     sendMessage(
       buildPrivateChatPayload({
-        conversationId,
+        conversationId: activeConversationId,
         message: text,
         senderName: parentEmail.trim(),
-        receiverName: counsellorEmail.trim(),
+        receiverName: receiver,
+        campusId,
+        studentProfileId,
         clientMessageId: tmpId,
       })
     );
-  }, [counsellorEmail, conversationId, inputText, parentEmail]);
+  }, [activeConversationId, campusId, counsellorEmail, inputText, parentEmail, studentProfileId]);
 
   const renderMessageItem = useCallback(
     ({ item, index }: { item: ChatMessage & { _chronoIndex: number }; index: number }) => {
@@ -687,7 +730,11 @@ export default function ChatScreen({
 
         <View style={styles.headerCenter}>
           <View style={styles.headerAvatar}>
-            <Ionicons name="person" size={18} color="#fff" />
+            {counsellorAvatarUrl ? (
+              <Image source={{ uri: counsellorAvatarUrl }} style={styles.headerAvatarImage} resizeMode="cover" />
+            ) : (
+              <Ionicons name="person" size={18} color="#fff" />
+            )}
           </View>
           <View style={styles.headerText}>
             <Text style={[styles.headerName, isDark && styles.headerNameDark]}>
@@ -699,14 +746,7 @@ export default function ChatScreen({
           </View>
         </View>
 
-        <View style={styles.headerActions}>
-          <Pressable hitSlop={10} style={styles.iconBtn} onPress={() => {}}>
-            <Ionicons name="call-outline" size={18} color={isDark ? '#E5E7EB' : '#334155'} />
-          </Pressable>
-          <Pressable hitSlop={10} style={styles.iconBtn} onPress={() => {}}>
-            <Ionicons name="videocam-outline" size={18} color={isDark ? '#E5E7EB' : '#334155'} />
-          </Pressable>
-        </View>
+        <View style={styles.headerActionsSpacer} />
       </View>
 
       {loadingLatest ? (
@@ -820,7 +860,7 @@ const styles = StyleSheet.create({
   headerDark: { backgroundColor: '#0B1220', borderBottomColor: 'rgba(148,163,184,0.18)' },
   backBtn: { width: 36, height: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center' },
 
-  headerCenter: { flexDirection: 'row', alignItems: 'center', flex: 1, gap: 12 },
+  headerCenter: { flexDirection: 'row', alignItems: 'center', flex: 1, gap: 8 },
   headerAvatar: {
     width: 36,
     height: 36,
@@ -828,14 +868,15 @@ const styles = StyleSheet.create({
     backgroundColor: '#1976d2',
     alignItems: 'center',
     justifyContent: 'center',
+    overflow: 'hidden',
   },
+  headerAvatarImage: { width: '100%', height: '100%' },
   headerText: { flex: 1 },
   headerName: { fontSize: 16, fontWeight: '900', color: '#0f172a' },
   headerNameDark: { color: '#E5E7EB' },
   headerStatus: { marginTop: 2, fontSize: 12, color: '#64748b' },
   headerStatusDark: { color: '#94a3b8' },
-  headerActions: { flexDirection: 'row', gap: 10 },
-  iconBtn: { width: 34, height: 34, borderRadius: 17, backgroundColor: 'rgba(25,118,210,0.08)', alignItems: 'center', justifyContent: 'center' },
+  headerActionsSpacer: { width: 20 },
 
   center: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   errorText: {

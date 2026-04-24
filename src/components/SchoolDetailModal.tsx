@@ -245,15 +245,7 @@ export function SchoolDetailModal({
 
   const curriculumList = useMemo(() => school?.curriculumList ?? [], [school?.curriculumList]);
   const campusList = useMemo(() => school?.campusList ?? [], [school?.campusList]);
-  const consultCampuses = useMemo(
-    () =>
-      campusList.filter(
-        (campus) =>
-          Array.isArray(campus.consultantEmails) &&
-          campus.consultantEmails.some((email) => email?.trim())
-      ),
-    [campusList]
-  );
+  const consultCampuses = useMemo(() => campusList, [campusList]);
 
   useEffect(() => {
     if (!visible) {
@@ -821,7 +813,7 @@ export function SchoolDetailModal({
                 </Pressable>
               </View>
               {consultCampuses.length === 0 ? (
-                <Text style={styles.campusPickerEmptyText}>Trường chưa có thông tin tư vấn viên theo cơ sở.</Text>
+                <Text style={styles.campusPickerEmptyText}>Trường chưa cập nhật danh sách cơ sở.</Text>
               ) : (
                 consultCampuses.map((campus) => (
                   <Pressable
@@ -829,8 +821,9 @@ export function SchoolDetailModal({
                     style={({ pressed }) => [
                       styles.campusPickerItem,
                       pressed && styles.campusPickerItemPressed,
+                      !campus.consultantEmails.some((email) => email?.trim()) && styles.campusPickerItemDisabled,
                     ]}
-                    disabled={consultLoading}
+                    disabled={consultLoading || !campus.consultantEmails.some((email) => email?.trim())}
                     onPress={() => {
                       if (!onContactConsult) return;
                       setCampusPickerVisible(false);
@@ -842,6 +835,9 @@ export function SchoolDetailModal({
                       <Text style={styles.campusPickerItemAddress} numberOfLines={2}>
                         {campus.address}
                       </Text>
+                    ) : null}
+                    {!campus.consultantEmails.some((email) => email?.trim()) ? (
+                      <Text style={styles.campusPickerItemHint}>Chưa có tư vấn viên cho cơ sở này</Text>
                     ) : null}
                   </Pressable>
                 ))
@@ -1391,9 +1387,13 @@ const styles = StyleSheet.create({
     gap: 4,
     backgroundColor: '#fff',
   },
+  campusPickerItemDisabled: {
+    opacity: 0.6,
+  },
   campusPickerItemPressed: { backgroundColor: '#f8fafc' },
   campusPickerItemName: { fontSize: 15, fontWeight: '700', color: '#0f172a' },
   campusPickerItemAddress: { fontSize: 13, color: '#64748b', lineHeight: 18 },
+  campusPickerItemHint: { marginTop: 4, fontSize: 12, color: '#b45309', fontWeight: '600' },
   studentPickerBackdrop: {
     flex: 1,
     backgroundColor: 'rgba(15, 23, 42, 0.45)',
