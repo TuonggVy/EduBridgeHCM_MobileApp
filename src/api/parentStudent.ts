@@ -10,6 +10,8 @@ import type {
   ParentStudentsApiResponse,
   ParentSubjectsResponse,
   ParentStudentProfileApi,
+  TranscriptAutoFillPayload,
+  TranscriptAutoFillResponse,
 } from '../types/studentProfile';
 
 export async function fetchParentStudents(): Promise<ParentStudentsResponse> {
@@ -31,8 +33,21 @@ export async function fetchParentStudents(): Promise<ParentStudentsResponse> {
         favouriteJob: item.favouriteJob,
         academicInfos: academicProfileMetadata.map((m) => ({
           gradeLevel: m.gradeLevel,
-          subjectResults: m.subjectResults,
+          subjectResults: (Array.isArray(m.subjectResults) ? m.subjectResults : [])
+            .map((sr) => {
+              const subjectName =
+                typeof sr?.subjectName === 'string'
+                  ? sr.subjectName
+                  : typeof sr?.name === 'string'
+                    ? sr.name
+                    : '';
+              const score = Number(sr?.score);
+              if (!subjectName || Number.isNaN(score)) return null;
+              return { subjectName, score };
+            })
+            .filter((sr): sr is { subjectName: string; score: number } => Boolean(sr)),
         })),
+        transcriptImages: Array.isArray(item.transcriptImages) ? item.transcriptImages : [],
       };
     }
   );
@@ -73,4 +88,13 @@ export async function fetchParentPersonalityTypes(): Promise<ParentPersonalityTy
 
 export async function fetchParentMajors(): Promise<ParentMajorsResponse> {
   return apiRequest<ParentMajorsResponse>('/api/v1/parent/major', { method: 'GET' });
+}
+
+export async function autoFillTranscriptScores(
+  payload: TranscriptAutoFillPayload
+): Promise<TranscriptAutoFillResponse> {
+  return apiRequest<TranscriptAutoFillResponse>('/api/v1/parent/transcript/auto/fill', {
+    method: 'POST',
+    body: payload,
+  });
 }

@@ -4,6 +4,15 @@ export type SubjectResult = {
   score: number;
 };
 
+export type SubjectResultApi = {
+  subjectName?: string;
+  name?: string;
+  score: number;
+  id?: number;
+  type?: string;
+  isAvailable?: boolean;
+};
+
 export type AcademicInfo = {
   subjectResults: SubjectResult[];
   gradeLevel: string;
@@ -11,7 +20,12 @@ export type AcademicInfo = {
 
 export type AcademicProfileMetadata = {
   gradeLevel: string;
-  subjectResults: SubjectResult[];
+  subjectResults: SubjectResultApi[];
+};
+
+export type TranscriptImageItem = {
+  grade: string;
+  imageUrl: string | null;
 };
 
 export type ParentStudentProfileApi = {
@@ -21,6 +35,7 @@ export type ParentStudentProfileApi = {
   personalityTypeCode: string;
   favouriteJob: string;
   academicProfileMetadata?: AcademicProfileMetadata[];
+  transcriptImages?: TranscriptImageItem[];
 };
 
 export type ParentStudentProfile = {
@@ -30,6 +45,7 @@ export type ParentStudentProfile = {
   personalityTypeCode: string;
   favouriteJob: string;
   academicInfos: AcademicInfo[];
+  transcriptImages?: TranscriptImageItem[];
 };
 
 export type CreateParentStudentPayload = {
@@ -38,6 +54,7 @@ export type CreateParentStudentPayload = {
   personalityTypeCode: string;
   favouriteJob: string;
   academicInfos: AcademicInfo[];
+  transcriptImages?: TranscriptImageItem[];
 };
 
 /** PUT /api/v1/parent/student */
@@ -136,4 +153,20 @@ export type MajorGroup = {
 export type ParentMajorsResponse = {
   message: string;
   body: MajorGroup[];
+};
+
+export type TranscriptImagePayload = {
+  gradeLevel: string;
+  imageUrl: string | null;
+};
+
+export type TranscriptAutoFillPayload = {
+  images: TranscriptImagePayload[];
+};
+
+export type TranscriptAutoFillResponse = {
+  message: string;
+  body: {
+    academicInfos: AcademicInfo[];
+  };
 };
