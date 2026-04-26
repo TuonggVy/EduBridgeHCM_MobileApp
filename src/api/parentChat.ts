@@ -1,0 +1,64 @@
+import { apiRequest } from './client';
+import type {
+  ParentCreateConversationRequest,
+  ParentCreateConversationResponse,
+  ParentConversationsResponse,
+  ParentMessagesHistoryResponse,
+  ParentMessagesReadResponse,
+} from '../types/chat';
+
+/**
+ * Khớp OpenAPI:
+ * - POST /api/v1/parent/conversation
+ * - GET  /api/v1/parent/conversations?cursorId=
+ * - GET  /api/v1/parent/messages/history/{parentEmail}/{campusId}/{studentProfileId}?cursorId=
+ * - PUT  /api/v1/parent/messages/read/{conversationId}/{username}
+ */
+
+export async function createParentConversation(
+  payload: ParentCreateConversationRequest
+): Promise<ParentCreateConversationResponse> {
+  return apiRequest<ParentCreateConversationResponse>('/api/v1/parent/conversation', {
+    method: 'POST',
+    body: payload,
+  });
+}
+
+export async function fetchParentConversations(
+  cursorId?: string | number | null
+): Promise<ParentConversationsResponse> {
+  const query =
+    cursorId === undefined || cursorId === null || cursorId === ''
+      ? ''
+      : `?cursorId=${encodeURIComponent(String(cursorId))}`;
+  return apiRequest<ParentConversationsResponse>(`/api/v1/parent/conversations${query}`, {
+    method: 'GET',
+  });
+}
+
+export async function fetchParentMessagesHistory(
+  parentEmail: string,
+  campusId: string | number,
+  studentProfileId: string | number,
+  cursorId?: string | number | null
+): Promise<ParentMessagesHistoryResponse> {
+  const query =
+    cursorId === undefined || cursorId === null || cursorId === ''
+      ? ''
+      : `?cursorId=${encodeURIComponent(String(cursorId))}`;
+  return apiRequest<ParentMessagesHistoryResponse>(
+    `/api/v1/parent/messages/history/${encodeURIComponent(parentEmail)}/${encodeURIComponent(String(campusId))}/${encodeURIComponent(String(studentProfileId))}${query}`,
+    { method: 'GET' }
+  );
+}
+
+export async function markConversationMessagesRead(
+  conversationId: string | number,
+  username: string
+): Promise<ParentMessagesReadResponse> {
+  return apiRequest<ParentMessagesReadResponse>(
+    `/api/v1/parent/messages/read/${encodeURIComponent(String(conversationId))}/${encodeURIComponent(username)}`,
+    { method: 'PUT' }
+  );
+}
+

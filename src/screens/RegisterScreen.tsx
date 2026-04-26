@@ -16,12 +16,12 @@ const Ionicons = require('@expo/vector-icons').Ionicons;
 
 const GRADIENT_COLORS = ['#1976d2', '#42a5f5', '#64b5f6'] as const;
 
-type LoginScreenProps = {
-  onGoToRegister?: () => void;
+type RegisterScreenProps = {
+  onGoToLogin: () => void;
 };
 
-export default function LoginScreen({ onGoToRegister }: LoginScreenProps) {
-  const { loginWithGoogle, isLoading, error, clearError } = useAuth();
+export default function RegisterScreen({ onGoToLogin }: RegisterScreenProps) {
+  const { registerWithGoogle, isLoading, error, clearError } = useAuth();
 
   return (
     <View style={styles.screen}>
@@ -39,7 +39,7 @@ export default function LoginScreen({ onGoToRegister }: LoginScreenProps) {
           </View>
           <Text style={styles.title}>EduBridge HCM</Text>
           <Text style={styles.subtitle}>
-            Kết nối tư vấn tuyển sinh lớp 10{'\n'}trường THPT tư thục tại TP.HCM
+            Đăng ký tài khoản Phụ huynh{'\n'}kết nối tư vấn tuyển sinh lớp 10
           </Text>
 
           {error ? (
@@ -57,7 +57,7 @@ export default function LoginScreen({ onGoToRegister }: LoginScreenProps) {
                   styles.googleButton,
                   pressed && styles.googleButtonPressed,
                 ]}
-                onPress={loginWithGoogle}
+                onPress={registerWithGoogle}
               >
                 <LinearGradient
                   colors={[...GRADIENT_COLORS]}
@@ -69,21 +69,21 @@ export default function LoginScreen({ onGoToRegister }: LoginScreenProps) {
                     <View style={styles.googleLogoWrap}>
                       <Ionicons name="logo-google" size={22} color="#fff" />
                     </View>
-                    <Text style={styles.googleButtonText}>Continue with Google</Text>
+                    <Text style={styles.googleButtonText}>
+                      Sign up with Google
+                    </Text>
                   </View>
                 </LinearGradient>
               </Pressable>
             )}
           </View>
 
-          {onGoToRegister ? (
-            <Pressable style={styles.registerLink} onPress={onGoToRegister}>
-              <Text style={styles.registerLinkText}>
-                Chưa có tài khoản?{' '}
-                <Text style={styles.registerLinkHighlight}>Đăng ký</Text>
-              </Text>
-            </Pressable>
-          ) : null}
+          <Pressable style={styles.loginLink} onPress={onGoToLogin}>
+            <Text style={styles.loginLinkText}>
+              Đã có tài khoản?{' '}
+              <Text style={styles.loginLinkHighlight}>Đăng nhập</Text>
+            </Text>
+          </Pressable>
         </View>
       </KeyboardAvoidingView>
     </View>
@@ -188,15 +188,15 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: '#fff',
   },
-  registerLink: {
+  loginLink: {
     marginTop: 24,
     paddingVertical: 8,
   },
-  registerLinkText: {
+  loginLinkText: {
     fontSize: 15,
     color: '#64748b',
   },
-  registerLinkHighlight: {
+  loginLinkHighlight: {
     fontWeight: '600',
     color: '#1976d2',
   },

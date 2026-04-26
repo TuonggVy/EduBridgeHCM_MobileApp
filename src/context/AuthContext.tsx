@@ -5,7 +5,9 @@ import React, {
   useCallback,
 } from 'react';
 import { GoogleSignin } from '@react-native-google-signin/google-signin';
-import { signInWithGoogle } from '../services/AuthService';
+import { logout as apiLogout } from '../api/auth';
+import { registerWithGoogle as registerWithGoogleService, signInWithGoogle } from '../services/AuthService';
+import { clearTokens } from '../services/TokenStorage';
 import type { AuthUser } from '../types/auth';
 
 type AuthContextType = {
@@ -13,13 +15,19 @@ type AuthContextType = {
   isLoading: boolean;
   error: string | null;
   loginWithGoogle: () => Promise<void>;
+  registerWithGoogle: () => Promise<void>;
   logout: () => Promise<void>;
   clearError: () => void;
 };
 
 const AuthContext = createContext<AuthContextType | null>(null);
 
-export function AuthProvider({ children }: { children: React.ReactNode }) {
+type AuthProviderProps = {
+  children: React.ReactNode;
+  onRegisterSuccess?: () => void;
+};
+
+export function AuthProvider({ children, onRegisterSuccess }: AuthProviderProps) {
   const [user, setUser] = useState<AuthUser | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -44,8 +52,32 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   }, []);
 
+  const registerWithGoogle = useCallback(async () => {
+    setIsLoading(true);
+    setError(null);
+    try {
+      const result = await registerWithGoogleService();
+      if (result.success) {
+        onRegisterSuccess?.();
+        // Không set user: chuyển sang màn hình đăng nhập để user đăng nhập lại.
+      } else {
+        setError(result.error);
+      }
+    } catch (e) {
+      console.error('[AuthContext] Lỗi khi đăng ký:', e);
+      setError('Đăng ký thất bại');
+    } finally {
+      setIsLoading(false);
+    }
+  }, [onRegisterSuccess]);
+
   const logout = useCallback(async () => {
     await GoogleSignin.signOut();
+    try {
+      await apiLogout();
+    } finally {
+      await clearTokens();
+    }
     setUser(null);
     setError(null);
   }, []);
@@ -59,6 +91,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         isLoading,
         error,
         loginWithGoogle,
+        registerWithGoogle,
         logout,
         clearError,
       }}
