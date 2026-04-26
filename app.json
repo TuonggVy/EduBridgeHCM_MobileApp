@@ -15,7 +15,10 @@
       "supportsTablet": true,
       "bundleIdentifier": "com.edubridge.hcm",
       "infoPlist": {
-        "NSLocationWhenInUseUsageDescription": "EduBridge cần quyền vị trí để hiển thị các trường gần bạn."
+        "NSLocationWhenInUseUsageDescription": "EduBridge cần quyền vị trí để hiển thị các trường gần bạn.",
+        "NSCameraUsageDescription": "EduBridge cần quyền camera để chụp ảnh học bạ.",
+        "NSPhotoLibraryUsageDescription": "EduBridge cần quyền thư viện ảnh để chọn ảnh học bạ.",
+        "NSPhotoLibraryAddUsageDescription": "EduBridge cần quyền lưu ảnh vào thư viện khi cần."
       }
     },
     "android": {
@@ -40,6 +43,13 @@
         "@react-native-google-signin/google-signin",
         {
           "iosUrlScheme": "com.googleusercontent.apps.655929399159-kt2nf9h0qjj3dcnm2ue6opjmtac3rl8l"
+        }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "EduBridge cần quyền thư viện ảnh để chọn ảnh học bạ.",
+          "cameraPermission": "EduBridge cần quyền camera để chụp ảnh học bạ."
         }
       ],
       [

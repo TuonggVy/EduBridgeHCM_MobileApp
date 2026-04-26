@@ -16,8 +16,10 @@ import {
   UIManager,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
+import * as ImagePicker from 'expo-image-picker';
 const Ionicons = require('@expo/vector-icons').Ionicons;
 import {
+  autoFillTranscriptScores,
   createParentStudent,
   updateParentStudent,
   fetchParentMajors,
@@ -31,6 +33,7 @@ import type {
   SubjectGroup,
   PersonalityTypesGrouped,
   PersonalityTypeDetail,
+  TranscriptImagePayload,
 } from '../types/studentProfile';
 import { groupColorForPersonality } from '../utils/personalityTypes';
 import { useToast } from '../components/AppToast';
@@ -61,11 +64,22 @@ const ALLOWED_GRADE_LEVELS: Set<string> = new Set(GRADE_OPTIONS.map((g) => g.val
 
 const REQUIRED_FIELD_TITLE = 'Required';
 const REQUIRED_FIELD_MESSAGE = 'Nhập thông tin';
+const CLOUDINARY_CLOUD_NAME =
+  process.env.EXPO_PUBLIC_CLOUDINARY_CLOUD_NAME?.trim() || process.env.VITE_CLOUDINARY_CLOUD_NAME?.trim() || '';
+const CLOUDINARY_UPLOAD_PRESET =
+  process.env.EXPO_PUBLIC_CLOUDINARY_UPLOAD_PRESET?.trim() || process.env.VITE_CLOUDINARY_UPLOAD_PRESET?.trim() || '';
 
 type SubjectRow = { subjectName: string; score: string };
 type SubjectType = 'regular' | 'foreign_language';
 type AcademicBlock = { gradeLevel: string; regularRows: SubjectRow[]; foreignRows: SubjectRow[] };
 type LegacyAcademicBlock = { gradeLevel?: string; rows?: SubjectRow[] };
+type TranscriptUploadStatus = 'idle' | 'uploading' | 'uploaded' | 'error' | 'extracting' | 'extracted';
+type TranscriptUploadItem = {
+  imageUrl: string | null;
+  localUri?: string;
+  status: TranscriptUploadStatus;
+  error?: string;
+};
 
 type Props = {
   visible: boolean;
@@ -213,6 +227,44 @@ function gradeLevelDisplayValue(input: string): string {
   return input;
 }
 
+function normalizeVietnameseText(input: string): string {
+  return input
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/đ/g, 'd')
+    .replace(/Đ/g, 'D')
+    .toLowerCase()
+    .trim();
+}
+
+async function uploadImageToCloudinary(params: { uri: string; mimeType?: string; fileName?: string }) {
+  if (!CLOUDINARY_CLOUD_NAME || !CLOUDINARY_UPLOAD_PRESET) {
+    throw new Error('Thiếu cấu hình Cloudinary. Vui lòng thêm EXPO_PUBLIC_CLOUDINARY_CLOUD_NAME và EXPO_PUBLIC_CLOUDINARY_UPLOAD_PRESET');
+  }
+  const mimeType = params.mimeType || 'image/jpeg';
+  const ext = mimeType.includes('png') ? 'png' : 'jpg';
+  const url = `https://api.cloudinary.com/v1_1/${CLOUDINARY_CLOUD_NAME}/image/upload`;
+  const formData = new FormData();
+  formData.append('file', {
+    uri: params.uri,
+    type: mimeType,
+    name: params.fileName || `transcript-${Date.now()}.${ext}`,
+  } as unknown as Blob);
+  formData.append('upload_preset', CLOUDINARY_UPLOAD_PRESET);
+
+  const res = await fetch(url, { method: 'POST', body: formData });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok || data?.error) {
+    const msg =
+      (typeof data?.error === 'object' && data?.error?.message) ||
+      (typeof data?.error === 'string' && data?.error) ||
+      `Upload thất bại (${res.status})`;
+    throw new Error(msg);
+  }
+  if (!data?.secure_url) throw new Error('Phản hồi Cloudinary không có secure_url');
+  return String(data.secure_url);
+}
+
 export default function StudentProfileFormScreen({ visible, initialStudent, onClose, onSaved }: Props) {
   const { showWarning, showError, showSuccess } = useToast();
   const scrollRef = useRef<ScrollView>(null);
@@ -276,6 +328,10 @@ export default function StudentProfileFormScreen({ visible, initialStudent, onCl
 
   const [subjectPickerOpen, setSubjectPickerOpen] = useState(false);
   const [pickTarget, setPickTarget] = useState<{ bi: number; ri: number; type: SubjectType } | null>(null);
+  const [transcriptUploads, setTranscriptUploads] = useState<Record<string, TranscriptUploadItem>>({});
+  const [transcriptPreviewOpen, setTranscriptPreviewOpen] = useState(false);
+  const [transcriptPreview, setTranscriptPreview] = useState<AcademicInfo[]>([]);
+  const [transcriptExtracting, setTranscriptExtracting] = useState(false);
 
   const [saving, setSaving] = useState(false);
   const [jobSuggestOpen, setJobSuggestOpen] = useState(false);
@@ -290,6 +346,56 @@ export default function StudentProfileFormScreen({ visible, initialStudent, onCl
       }))
       .filter((g) => g.majors.length > 0);
   }, [favouriteJob, majorGroups]);
+
+  const regularSubjectNames = useMemo(() => {
+    const regularGroups = subjectGroups.filter((g) => g.type === 'regular');
+    const sourceGroups = regularGroups.length
+      ? regularGroups
+      : subjectGroups.filter((g) => g.type !== 'foreign_language');
+    const names = sourceGroups
+      .flatMap((g) => g.subjects || [])
+      .map((s) => s.name.trim())
+      .filter(Boolean);
+    return Array.from(new Set(names));
+  }, [subjectGroups]);
+
+  const allowedRegularSubjectNameKeys = useMemo(
+    () => new Set(regularSubjectNames.map((name) => normalizeVietnameseText(name)).filter(Boolean)),
+    [regularSubjectNames]
+  );
+
+  const foreignSubjectNameKeys = useMemo(() => {
+    return new Set(
+      subjectGroups
+        .filter((g) => g.type === 'foreign_language')
+        .flatMap((g) => g.subjects || [])
+        .map((s) => normalizeVietnameseText(s.name))
+        .filter(Boolean)
+    );
+  }, [subjectGroups]);
+
+  const normalizeAcademicWithCatalogSubjects = useCallback(
+    (block: AcademicBlock | LegacyAcademicBlock): AcademicBlock => {
+      const normalized = normalizeAcademicBlock(block);
+      if (!regularSubjectNames.length) return normalized;
+
+      const scoreByName = new Map<string, string>();
+      normalized.regularRows.forEach((row) => {
+        const key = row.subjectName.trim();
+        if (!key || scoreByName.has(key)) return;
+        scoreByName.set(key, row.score);
+      });
+
+      return {
+        ...normalized,
+        regularRows: regularSubjectNames.map((name) => ({
+          subjectName: name,
+          score: scoreByName.get(name) ?? '',
+        })),
+      };
+    },
+    [regularSubjectNames]
+  );
 
   useEffect(() => {
     if (!visible) return;
@@ -334,11 +440,27 @@ export default function StudentProfileFormScreen({ visible, initialStudent, onCl
   useEffect(() => {
     if (!visible) return;
     setFieldErrors({});
+    setTranscriptUploads({});
+    setTranscriptPreview([]);
+    setTranscriptPreviewOpen(false);
     if (initialStudent) {
       setStudentName(initialStudent.studentName ?? '');
       setGender(initialStudent.gender ?? '');
       setPersonalityCode(initialStudent.personalityTypeCode ?? '');
       setFavouriteJob(initialStudent.favouriteJob ?? '');
+      setTranscriptUploads(() => {
+        const next: Record<string, TranscriptUploadItem> = {};
+        (initialStudent.transcriptImages || []).forEach((item) => {
+          const normalizedGrade = normalizeGradeLevelInput(item.grade || '');
+          if (!ALLOWED_GRADE_LEVELS.has(normalizedGrade) || !item.imageUrl) return;
+          next[normalizedGrade] = {
+            imageUrl: item.imageUrl,
+            localUri: item.imageUrl,
+            status: 'uploaded',
+          };
+        });
+        return next;
+      });
       if (initialStudent.academicInfos?.length) {
         setAcademics(
           initialStudent.academicInfos.map((a) => {
@@ -357,19 +479,24 @@ export default function StudentProfileFormScreen({ visible, initialStudent, onCl
               regularRows: regularRows.length ? regularRows : [{ subjectName: '', score: '' }],
               foreignRows: foreignRows.length ? foreignRows : [{ subjectName: '', score: '' }],
             };
-          })
+          }).map(normalizeAcademicWithCatalogSubjects)
         );
       } else {
-        setAcademics([emptyAcademic()]);
+        setAcademics([normalizeAcademicWithCatalogSubjects(emptyAcademic())]);
       }
     } else {
       setStudentName('');
       setGender('');
       setPersonalityCode('');
       setFavouriteJob('');
-      setAcademics([emptyAcademic()]);
+      setAcademics([normalizeAcademicWithCatalogSubjects(emptyAcademic())]);
     }
-  }, [visible, initialStudent, subjectGroups]);
+  }, [visible, initialStudent, subjectGroups, normalizeAcademicWithCatalogSubjects]);
+
+  useEffect(() => {
+    if (!visible || !regularSubjectNames.length) return;
+    setAcademics((prev) => prev.map(normalizeAcademicWithCatalogSubjects));
+  }, [visible, regularSubjectNames, normalizeAcademicWithCatalogSubjects]);
 
   const openSubjectPicker = (bi: number, ri: number, type: SubjectType) => {
     setPickTarget({ bi, ri, type });
@@ -407,7 +534,7 @@ export default function StudentProfileFormScreen({ visible, initialStudent, onCl
     );
   }, [academics, pickTarget]);
 
-  const addAcademicBlock = () => setAcademics((p) => [...p, emptyAcademic()]);
+  const addAcademicBlock = () => setAcademics((p) => [...p, normalizeAcademicWithCatalogSubjects(emptyAcademic())]);
   const removeAcademicBlock = (bi: number) => {
     if (academics.length <= 1) return;
     setAcademics((p) => p.filter((_, i) => i !== bi));
@@ -456,6 +583,173 @@ export default function StudentProfileFormScreen({ visible, initialStudent, onCl
     );
   };
 
+  const setTranscriptStatus = useCallback(
+    (gradeLevel: string, patch: Partial<TranscriptUploadItem>) => {
+      setTranscriptUploads((prev) => ({
+        ...prev,
+        [gradeLevel]: {
+          ...prev[gradeLevel],
+          imageUrl: prev[gradeLevel]?.imageUrl ?? null,
+          status: prev[gradeLevel]?.status ?? 'idle',
+          ...patch,
+        },
+      }));
+    },
+    []
+  );
+
+  const pickAndUploadTranscript = useCallback(
+    async (gradeLevel: string, source: 'camera' | 'library') => {
+      try {
+        const permission =
+          source === 'camera'
+            ? await ImagePicker.requestCameraPermissionsAsync()
+            : await ImagePicker.requestMediaLibraryPermissionsAsync();
+        if (!permission.granted) {
+          showWarning('Bạn chưa cấp quyền truy cập ảnh/camera', 'Warning');
+          return;
+        }
+
+        const result =
+          source === 'camera'
+            ? await ImagePicker.launchCameraAsync({
+                allowsEditing: false,
+                quality: 0.85,
+              })
+            : await ImagePicker.launchImageLibraryAsync({
+                allowsEditing: false,
+                quality: 0.85,
+              });
+        if (result.canceled || !result.assets?.length) return;
+        const asset = result.assets[0];
+        if (!asset?.uri) return;
+
+        setTranscriptStatus(gradeLevel, { localUri: asset.uri, status: 'uploading', error: undefined });
+        try {
+          const uploadedUrl = await uploadImageToCloudinary({
+            uri: asset.uri,
+            mimeType: asset.mimeType || 'image/jpeg',
+            fileName: asset.fileName || `transcript-${gradeLevel}.jpg`,
+          });
+          setTranscriptStatus(gradeLevel, {
+            imageUrl: uploadedUrl,
+            localUri: asset.uri,
+            status: 'uploaded',
+            error: undefined,
+          });
+        } catch (e) {
+          const message = e instanceof Error ? e.message : 'Upload thất bại';
+          setTranscriptStatus(gradeLevel, { status: 'error', error: message });
+          showError(message, 'Upload thất bại');
+        }
+      } catch (e) {
+        const message = e instanceof Error ? e.message : 'Không thể mở camera/thư viện';
+        showError(message, 'Không mở được trình chọn ảnh');
+        setTranscriptStatus(gradeLevel, { status: 'error', error: message });
+      }
+    },
+    [setTranscriptStatus, showError, showWarning]
+  );
+
+  const removeTranscriptUpload = useCallback((gradeLevel: string) => {
+    setTranscriptUploads((prev) => ({
+      ...prev,
+      [gradeLevel]: { imageUrl: null, status: 'idle' },
+    }));
+  }, []);
+
+  const applyAutoFillResult = useCallback(
+    (academicInfos: AcademicInfo[]) => {
+      setAcademics((prev) =>
+        prev.map((rawBlock) => {
+          const block = normalizeAcademicBlock(rawBlock);
+          const normalizedGrade = normalizeGradeLevelInput(block.gradeLevel);
+          const matched = academicInfos.find((a) => normalizeGradeLevelInput(a.gradeLevel) === normalizedGrade);
+          if (!matched) return normalizeAcademicWithCatalogSubjects(block);
+
+          const regularRows: SubjectRow[] = [];
+          const foreignRows: SubjectRow[] = [];
+          (matched.subjectResults || []).forEach((sr) => {
+            const normalizedName = normalizeVietnameseText(sr.subjectName || '');
+            const row = { subjectName: sr.subjectName, score: String(sr.score ?? '') };
+            if (foreignSubjectNameKeys.has(normalizedName)) foreignRows.push(row);
+            else regularRows.push(row);
+          });
+
+          return normalizeAcademicWithCatalogSubjects({
+            gradeLevel: normalizedGrade,
+            regularRows,
+            foreignRows: foreignRows.length ? foreignRows : [{ subjectName: '', score: '' }],
+          });
+        })
+      );
+      showSuccess('Đã điền điểm từ học bạ vào form.', 'Thành công');
+    },
+    [foreignSubjectNameKeys, normalizeAcademicWithCatalogSubjects, showSuccess]
+  );
+
+  const runAutoFillTranscript = useCallback(async () => {
+    const payloadImages: TranscriptImagePayload[] = GRADE_OPTIONS.map((g) => ({
+      gradeLevel: g.value,
+      imageUrl: transcriptUploads[g.value]?.imageUrl || null,
+    }));
+    if (!payloadImages.some((x) => x.imageUrl)) {
+      showWarning('Vui lòng tải ít nhất 1 ảnh học bạ trước khi tự động điền', 'Warning');
+      return;
+    }
+
+    setTranscriptExtracting(true);
+    setTranscriptPreview([]);
+    try {
+      setTranscriptUploads((prev) => {
+        const next = { ...prev };
+        payloadImages.forEach((img) => {
+          if (!img.imageUrl) return;
+          next[img.gradeLevel] = {
+            ...(next[img.gradeLevel] || { imageUrl: img.imageUrl, status: 'uploaded' }),
+            status: 'extracting',
+            error: undefined,
+          };
+        });
+        return next;
+      });
+
+      const res = await autoFillTranscriptScores({ images: payloadImages });
+      const infos = Array.isArray(res.body?.academicInfos) ? res.body.academicInfos : [];
+      setTranscriptPreview(infos);
+      setTranscriptPreviewOpen(true);
+      setTranscriptUploads((prev) => {
+        const next = { ...prev };
+        payloadImages.forEach((img) => {
+          if (!img.imageUrl) return;
+          next[img.gradeLevel] = {
+            ...(next[img.gradeLevel] || { imageUrl: img.imageUrl, status: 'uploaded' }),
+            status: 'extracted',
+            error: undefined,
+          };
+        });
+        return next;
+      });
+    } catch (e) {
+      const message = e instanceof Error ? e.message : 'Không thể trích xuất điểm từ học bạ';
+      showError(message, 'Something went wrong');
+      setTranscriptUploads((prev) => {
+        const next = { ...prev };
+        payloadImages.forEach((img) => {
+          if (!img.imageUrl) return;
+          next[img.gradeLevel] = {
+            ...(next[img.gradeLevel] || { imageUrl: img.imageUrl, status: 'uploaded' }),
+            status: 'error',
+            error: message,
+          };
+        });
+        return next;
+      });
+    } finally {
+      setTranscriptExtracting(false);
+    }
+  }, [showError, showWarning, transcriptUploads]);
+
   const handleSave = async () => {
     setFieldErrors({});
     const name = studentName.trim();
@@ -491,12 +785,14 @@ export default function StudentProfileFormScreen({ visible, initialStudent, onCl
         return;
       }
       const subjectResults: { subjectName: string; score: number }[] = [];
-      let validForeignLanguageCount = 0;
       for (let ri = 0; ri < block.regularRows.length; ri++) {
         const row = block.regularRows[ri];
         const sn = row.subjectName.trim();
         if (!sn) continue;
-        const sc = parseFloat(row.score.replace(',', '.'));
+        if (!allowedRegularSubjectNameKeys.has(normalizeVietnameseText(sn))) continue;
+        const scoreText = row.score.trim();
+        if (!scoreText) continue;
+        const sc = parseFloat(scoreText.replace(',', '.'));
         if (Number.isNaN(sc)) {
           warnRequiredAt(`row-regular-${bi}-${ri}`, 'Vui lòng nhập điểm hợp lệ');
           return;
@@ -512,12 +808,7 @@ export default function StudentProfileFormScreen({ visible, initialStudent, onCl
           warnRequiredAt(`row-foreign-${bi}-${ri}`, 'Vui lòng nhập điểm hợp lệ');
           return;
         }
-        validForeignLanguageCount += 1;
         subjectResults.push({ subjectName: sn, score: sc });
-      }
-      if (validForeignLanguageCount < 1) {
-        warnRequiredAt(`row-foreign-${bi}-0`, 'Vui lòng chọn ít nhất 1 môn ngoại ngữ');
-        return;
       }
       if (!subjectResults.length) {
         warnRequiredAt(`row-regular-${bi}-0`, 'Vui lòng nhập ít nhất 1 môn học');
@@ -526,12 +817,20 @@ export default function StudentProfileFormScreen({ visible, initialStudent, onCl
       academicInfos.push({ gradeLevel: gl, subjectResults });
     }
 
+    const transcriptImages = GRADE_OPTIONS
+      .map((g) => ({
+        grade: g.value,
+        imageUrl: transcriptUploads[g.value]?.imageUrl || null,
+      }))
+      .filter((item) => item.imageUrl);
+
     const payloadBase = {
       studentName: name,
       gender,
       personalityTypeCode: personalityCode.trim().toUpperCase(),
       favouriteJob: favJob,
       academicInfos,
+      transcriptImages,
     };
 
     const rawId = initialStudent?.id;
@@ -785,17 +1084,91 @@ export default function StudentProfileFormScreen({ visible, initialStudent, onCl
                 {!!fieldErrors[`grade-${bi}`] && <Text style={styles.fieldErrorText}>{fieldErrors[`grade-${bi}`]}</Text>}
                 </View>
 
+                {ALLOWED_GRADE_LEVELS.has(normalizeGradeLevelInput(block.gradeLevel)) && (
+                  <View style={styles.transcriptCard}>
+                    <View style={styles.transcriptHead}>
+                      <Text style={styles.transcriptTitle}>Tải học bạ {gradeLevelDisplayValue(block.gradeLevel)}</Text>
+                      {(() => {
+                        const grade = normalizeGradeLevelInput(block.gradeLevel);
+                        const status = transcriptUploads[grade]?.status || 'idle';
+                        const statusMap: Record<TranscriptUploadStatus, { label: string; color: string; bg: string }> = {
+                          idle: { label: 'Chưa tải', color: '#64748b', bg: '#f1f5f9' },
+                          uploading: { label: 'Đang tải', color: '#b45309', bg: '#fef3c7' },
+                          uploaded: { label: 'Đã tải', color: '#1d4ed8', bg: '#dbeafe' },
+                          extracting: { label: 'Đang xử lý', color: '#b45309', bg: '#fef3c7' },
+                          extracted: { label: 'Đã trích xuất', color: '#15803d', bg: '#dcfce7' },
+                          error: { label: 'Lỗi', color: '#b91c1c', bg: '#fee2e2' },
+                        };
+                        const st = statusMap[status];
+                        return (
+                          <View style={[styles.statusBadge, { backgroundColor: st.bg }]}>
+                            <Text style={[styles.statusBadgeTxt, { color: st.color }]}>{st.label}</Text>
+                          </View>
+                        );
+                      })()}
+                    </View>
+                    <Text style={styles.transcriptHint}>Chụp hoặc tải ảnh để hệ thống tự động nhập điểm.</Text>
+                    <View style={styles.transcriptActions}>
+                      <Pressable
+                        onPress={() => pickAndUploadTranscript(normalizeGradeLevelInput(block.gradeLevel), 'camera')}
+                        style={styles.outlineBtn}
+                      >
+                        <Ionicons name="camera-outline" size={17} color={PRIMARY} />
+                        <Text style={styles.outlineBtnTxt}>Chụp ảnh</Text>
+                      </Pressable>
+                      <Pressable
+                        onPress={() => pickAndUploadTranscript(normalizeGradeLevelInput(block.gradeLevel), 'library')}
+                        style={styles.outlineBtn}
+                      >
+                        <Ionicons name="images-outline" size={17} color={PRIMARY} />
+                        <Text style={styles.outlineBtnTxt}>Chọn từ thư viện</Text>
+                      </Pressable>
+                    </View>
+                    {(() => {
+                      const grade = normalizeGradeLevelInput(block.gradeLevel);
+                      const item = transcriptUploads[grade];
+                      if (!item?.localUri) return null;
+                      return (
+                        <View style={styles.uploadPreviewRow}>
+                          <Image source={{ uri: item.localUri }} style={styles.uploadThumb} />
+                          <View style={{ flex: 1 }}>
+                            <Text style={styles.uploadPreviewTxt}>Ảnh học bạ {gradeLevelDisplayValue(block.gradeLevel)}</Text>
+                            {!!item.error && <Text style={styles.uploadErrorTxt}>{item.error}</Text>}
+                          </View>
+                          <Pressable onPress={() => removeTranscriptUpload(grade)} style={styles.trashBtn}>
+                            <Ionicons name="trash-outline" size={19} color="#ef4444" />
+                          </Pressable>
+                        </View>
+                      );
+                    })()}
+                    {bi === 0 && (
+                      <Pressable onPress={runAutoFillTranscript} style={styles.autoFillBtn} disabled={transcriptExtracting}>
+                        <LinearGradient colors={[...GRADIENT_SAVE]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={styles.autoFillGrad}>
+                          {transcriptExtracting ? (
+                            <>
+                              <ActivityIndicator size="small" color="#fff" />
+                              <Text style={styles.autoFillTxt}>Đang đọc dữ liệu học bạ...</Text>
+                            </>
+                          ) : (
+                            <>
+                              <Ionicons name="sparkles-outline" size={18} color="#fff" />
+                              <Text style={styles.autoFillTxt}>Tự động điền điểm</Text>
+                            </>
+                          )}
+                        </LinearGradient>
+                      </Pressable>
+                    )}
+                  </View>
+                )}
+
                 <Text style={styles.subjectSectionTitle}>Môn học chính</Text>
                 {block.regularRows.map((row, ri) => (
                   <View key={ri} style={styles.rowBlock} ref={setFieldRef(`row-regular-${bi}-${ri}`)} collapsable={false}>
                     <Text style={styles.rowLabel}>Môn & điểm</Text>
                     <View style={styles.rowInner}>
-                      <Pressable style={styles.subjectPick} onPress={() => openSubjectPicker(bi, ri, 'regular')}>
-                        <Text style={row.subjectName ? styles.subjectPickTxt : styles.subjectPickPh}>
-                          {row.subjectName || 'Chọn môn'}
-                        </Text>
-                        <Ionicons name="chevron-down" size={18} color="#64748b" />
-                      </Pressable>
+                      <View style={styles.subjectPick}>
+                        <Text style={styles.subjectPickTxt}>{row.subjectName}</Text>
+                      </View>
                       <TextInput
                         style={styles.scoreInput}
                         value={row.score}
@@ -804,23 +1177,14 @@ export default function StudentProfileFormScreen({ visible, initialStudent, onCl
                         placeholderTextColor="#94a3b8"
                         keyboardType="decimal-pad"
                       />
-                      {block.regularRows.length > 1 && (
-                        <Pressable onPress={() => removeSubjectRow(bi, ri, 'regular')} style={styles.trashBtn}>
-                          <Ionicons name="trash-outline" size={20} color="#ef4444" />
-                        </Pressable>
-                      )}
                     </View>
                     {!!fieldErrors[`row-regular-${bi}-${ri}`] && (
                       <Text style={styles.fieldErrorText}>{fieldErrors[`row-regular-${bi}-${ri}`]}</Text>
                     )}
                   </View>
                 ))}
-                <Pressable onPress={() => addSubjectRow(bi, 'regular')} style={styles.addRowBtn}>
-                  <Ionicons name="add-circle-outline" size={20} color={PRIMARY} />
-                  <Text style={styles.addRowTxt}>Thêm môn học chính</Text>
-                </Pressable>
 
-                <Text style={styles.subjectSectionTitle}>Ngoại ngữ (bắt buộc ít nhất 1 môn)</Text>
+                <Text style={styles.subjectSectionTitle}>Ngoại ngữ (không bắt buộc)</Text>
                 {block.foreignRows.map((row, ri) => (
                   <View key={ri} style={styles.rowBlock} ref={setFieldRef(`row-foreign-${bi}-${ri}`)} collapsable={false}>
                     <Text style={styles.rowLabel}>Môn & điểm</Text>
@@ -892,6 +1256,62 @@ export default function StudentProfileFormScreen({ visible, initialStudent, onCl
           }}
           onPick={onSubjectPicked}
         />
+
+        <Modal
+          visible={transcriptPreviewOpen}
+          animationType="slide"
+          transparent
+          onRequestClose={() => setTranscriptPreviewOpen(false)}
+        >
+          <View style={styles.previewOverlay}>
+            <View style={styles.previewSheet}>
+              <View style={styles.previewHead}>
+                <Text style={styles.previewTitle}>Kết quả nhận diện</Text>
+                <Pressable onPress={() => setTranscriptPreviewOpen(false)} hitSlop={10}>
+                  <Ionicons name="close" size={22} color="#64748b" />
+                </Pressable>
+              </View>
+              <ScrollView contentContainerStyle={styles.previewBody}>
+                {GRADE_OPTIONS.map((g) => {
+                  const info = transcriptPreview.find((x) => normalizeGradeLevelInput(x.gradeLevel) === g.value);
+                  const rows = Array.isArray(info?.subjectResults) ? info?.subjectResults : [];
+                  return (
+                    <View key={g.value} style={styles.previewGradeCard}>
+                      <Text style={styles.previewGradeTitle}>{g.label}</Text>
+                      {rows.length ? (
+                        rows.map((row, idx) => (
+                          <View key={`${g.value}-${idx}`} style={styles.previewRow}>
+                            <Text style={styles.previewSubject} numberOfLines={1}>
+                              {row.subjectName}
+                            </Text>
+                            <Text style={styles.previewScore}>{row.score}</Text>
+                          </View>
+                        ))
+                      ) : (
+                        <Text style={styles.previewEmpty}>Chưa có dữ liệu điểm cho khối này</Text>
+                      )}
+                    </View>
+                  );
+                })}
+              </ScrollView>
+              <Text style={styles.previewWarn}>Dữ liệu trong form sẽ được cập nhật theo kết quả nhận diện.</Text>
+              <View style={styles.previewActions}>
+                <Pressable onPress={() => setTranscriptPreviewOpen(false)} style={styles.previewCancelBtn}>
+                  <Text style={styles.previewCancelTxt}>Đóng</Text>
+                </Pressable>
+                <Pressable
+                  onPress={() => {
+                    applyAutoFillResult(transcriptPreview);
+                    setTranscriptPreviewOpen(false);
+                  }}
+                  style={styles.previewApplyBtn}
+                >
+                  <Text style={styles.previewApplyTxt}>Điền vào form</Text>
+                </Pressable>
+              </View>
+            </View>
+          </View>
+        </Modal>
       </KeyboardAvoidingView>
     </Modal>
   );
@@ -1025,6 +1445,58 @@ const styles = StyleSheet.create({
     marginRight: 8,
   },
   gradeChipTxt: { fontSize: 13, fontWeight: '600', color: '#475569' },
+  transcriptCard: {
+    marginTop: 4,
+    backgroundColor: '#f8fbff',
+    borderRadius: radius.lg,
+    borderWidth: 1,
+    borderColor: '#bfdbfe',
+    borderStyle: 'dashed',
+    padding: sp.sm,
+  },
+  transcriptHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8 },
+  transcriptTitle: { flex: 1, fontSize: 14, fontWeight: '700', color: '#0f172a' },
+  transcriptHint: { marginTop: 6, fontSize: 12, color: '#64748b' },
+  transcriptActions: { flexDirection: 'row', gap: 8, marginTop: 10 },
+  outlineBtn: {
+    flex: 1,
+    borderWidth: 1,
+    borderColor: '#bfdbfe',
+    borderRadius: radius.md,
+    paddingVertical: 10,
+    paddingHorizontal: 10,
+    backgroundColor: '#fff',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+  },
+  outlineBtnTxt: { fontSize: 13, fontWeight: '600', color: PRIMARY },
+  statusBadge: { paddingHorizontal: 8, paddingVertical: 4, borderRadius: radius.full },
+  statusBadgeTxt: { fontSize: 11, fontWeight: '700' },
+  uploadPreviewRow: {
+    marginTop: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    backgroundColor: '#fff',
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: '#dbeafe',
+    padding: 8,
+  },
+  uploadThumb: { width: 56, height: 56, borderRadius: 8, backgroundColor: '#e2e8f0' },
+  uploadPreviewTxt: { fontSize: 12, fontWeight: '600', color: '#334155' },
+  uploadErrorTxt: { marginTop: 2, fontSize: 11, color: '#dc2626' },
+  autoFillBtn: { marginTop: 10, borderRadius: radius.md, overflow: 'hidden' },
+  autoFillGrad: {
+    paddingVertical: 11,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+  },
+  autoFillTxt: { fontSize: 14, fontWeight: '700', color: '#fff' },
   rowBlock: { marginTop: sp.sm },
   rowLabel: { fontSize: 13, fontWeight: '600', color: '#94a3b8', marginBottom: 6 },
   rowInner: { flexDirection: 'row', alignItems: 'center', gap: 8 },
@@ -1069,6 +1541,77 @@ const styles = StyleSheet.create({
   saveBtn: { borderRadius: radius.lg, overflow: 'hidden', minHeight: 52 },
   saveGrad: { paddingVertical: 16, alignItems: 'center', justifyContent: 'center' },
   saveTxt: { fontSize: 16, fontWeight: '700', color: '#fff' },
+  previewOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(15,23,42,0.45)',
+    justifyContent: 'flex-end',
+  },
+  previewSheet: {
+    maxHeight: '88%',
+    backgroundColor: '#fff',
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    paddingTop: 12,
+  },
+  previewHead: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: sp.md,
+    paddingBottom: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: '#e2e8f0',
+  },
+  previewTitle: { fontSize: 17, fontWeight: '800', color: '#0f172a' },
+  previewBody: { padding: sp.md, gap: 10 },
+  previewGradeCard: {
+    borderWidth: 1,
+    borderColor: '#e2e8f0',
+    borderRadius: radius.lg,
+    padding: sp.sm,
+    backgroundColor: '#f8fafc',
+  },
+  previewGradeTitle: { fontSize: 14, fontWeight: '800', color: '#1e3a8a', marginBottom: 8 },
+  previewRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 5,
+    borderBottomWidth: 1,
+    borderBottomColor: '#e2e8f0',
+    gap: 8,
+  },
+  previewSubject: { flex: 1, fontSize: 13, color: '#334155' },
+  previewScore: { width: 40, textAlign: 'right', fontSize: 13, fontWeight: '700', color: '#0f172a' },
+  previewEmpty: { fontSize: 13, color: '#64748b' },
+  previewWarn: {
+    marginHorizontal: sp.md,
+    marginTop: 4,
+    padding: 10,
+    borderRadius: radius.md,
+    backgroundColor: '#fef3c7',
+    color: '#92400e',
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  previewActions: { flexDirection: 'row', gap: 10, padding: sp.md },
+  previewCancelBtn: {
+    flex: 1,
+    borderWidth: 1,
+    borderColor: '#cbd5e1',
+    borderRadius: radius.md,
+    paddingVertical: 12,
+    alignItems: 'center',
+  },
+  previewCancelTxt: { fontSize: 14, fontWeight: '600', color: '#475569' },
+  previewApplyBtn: {
+    flex: 1,
+    backgroundColor: PRIMARY,
+    borderRadius: radius.md,
+    paddingVertical: 12,
+    alignItems: 'center',
+  },
+  previewApplyTxt: { fontSize: 14, fontWeight: '700', color: '#fff' },
 });
 
 const subPickerStyles = StyleSheet.create({
