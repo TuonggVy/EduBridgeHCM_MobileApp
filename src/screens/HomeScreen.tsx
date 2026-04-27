@@ -52,6 +52,7 @@ import { useToast } from '../components/AppToast';
 import FavouriteSchoolsScreen from './FavouriteSchoolsScreen';
 import PostFeedScreen from './PostFeedScreen';
 import AiAssistantChatScreen from './AiAssistantChatScreen';
+import ConsultationBookingScreen from './ConsultationBookingScreen';
 
 const HEADER_TOP_PADDING =
   Platform.OS === 'ios' ? 50 : (StatusBar.currentHeight ?? 24) + 8;
@@ -125,6 +126,8 @@ export default function HomeScreen() {
   const [schoolsRefreshing, setSchoolsRefreshing] = useState(false);
   const [favouriteModalVisible, setFavouriteModalVisible] = useState(false);
   const [favouriteIdBySchoolId, setFavouriteIdBySchoolId] = useState<Record<number, number>>({});
+  const [consultBookingVisible, setConsultBookingVisible] = useState(false);
+  const [consultBookingSchool, setConsultBookingSchool] = useState<SchoolDetail | null>(null);
 
   const refreshStudents = useCallback(async () => {
     try {
@@ -756,6 +759,13 @@ export default function HomeScreen() {
             : false
         }
         onContactConsult={handleContactConsult}
+        onOpenConsultBooking={() => {
+          if (!selectedSchoolDetail) return;
+          setConsultBookingSchool(selectedSchoolDetail);
+          setSchoolDetailVisible(false);
+          closeStudentPicker();
+          setConsultBookingVisible(true);
+        }}
         onToggleFavourite={() => {
           if (selectedSchoolId != null) toggleSchoolFavourite(selectedSchoolId);
         }}
@@ -766,6 +776,23 @@ export default function HomeScreen() {
           closeStudentPicker();
         }}
       />
+
+      <Modal
+        visible={consultBookingVisible}
+        animationType="slide"
+        presentationStyle="fullScreen"
+        onRequestClose={() => setConsultBookingVisible(false)}
+      >
+        <ConsultationBookingScreen
+          visible={consultBookingVisible}
+          school={consultBookingSchool}
+          onClose={() => {
+            setConsultBookingVisible(false);
+            setConsultBookingSchool(null);
+            if (selectedSchoolDetail) setSchoolDetailVisible(true);
+          }}
+        />
+      </Modal>
 
       <CompleteProfileBottomSheet
         visible={showProfileSheet}
