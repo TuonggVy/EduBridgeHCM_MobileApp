@@ -126,6 +126,58 @@ export type NearbyCampusSearchResponse = {
   body: NearbyCampusSearchItem[];
 };
 
+export type AdmissionProcessStep = {
+  stepName: string;
+  stepOrder: number;
+  description: string | null;
+};
+
+export type AdmissionDocumentRequirement = {
+  code: string;
+  name: string;
+  required: boolean;
+};
+
+export type AdmissionMethodDetail = {
+  endDate: number[];
+  startDate: number[];
+  methodCode: string;
+  description: string | null;
+  displayName: string;
+  allowReservationSubmission: boolean;
+  admissionProcessSteps: AdmissionProcessStep[];
+  methodDocumentRequirements: AdmissionDocumentRequirement[];
+};
+
+export type AdmissionMethodTimeline = {
+  endDate: number[];
+  startDate: number[];
+  methodCode: string;
+  description: string | null;
+  displayName: string;
+  allowReservationSubmission: boolean;
+};
+
+export type SchoolCampaignTemplate = {
+  id: number;
+  schoolId: number;
+  year: number;
+  name: string;
+  description: string | null;
+  startDate: string | null;
+  endDate: string | null;
+  status: string;
+  admissionMethodDetails: AdmissionMethodDetail[];
+  admissionMethodTimelines: AdmissionMethodTimeline[];
+  mandatoryAll: AdmissionDocumentRequirement[];
+  campusProgramOfferings: Array<Record<string, unknown>>;
+};
+
+export type SchoolCampaignTemplateResponse = {
+  message: string;
+  body: SchoolCampaignTemplate[];
+};
+
 /** Một mục trong GET /api/v1/parent/favourite/school — `id` là id bản ghi yêu thích (dùng cho DELETE). */
 export type FavouriteSchoolItem = {
   id: number;

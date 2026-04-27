@@ -518,6 +518,7 @@ export default function HomeScreen() {
         counsellorEmail={resolvedCounsellor}
         counsellorName={selectedConversation.counsellorName ?? undefined}
         counsellorAvatarUrl={selectedConversation.schoolLogoUrl ?? undefined}
+        studentName={selectedConversation.studentName ?? undefined}
         initialLastMessageContent={selectedConversation.lastMessageContent ?? undefined}
         initialLastMessageAt={selectedConversation.lastMessageAt ?? undefined}
         onBack={() => setChatView('app')}

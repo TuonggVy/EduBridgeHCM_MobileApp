@@ -5,7 +5,7 @@ export function getCurriculumTypeLabel(curriculumType: string): string {
   const map: Record<string, string> = {
     INTEGRATED: 'Tích hợp',
     INTERNATIONAL: 'Quốc tế',
-    NATIONAL: 'Trong nước',
+    NATIONAL: 'Quốc gia',
     BILINGUAL: 'Song ngữ',
   };
   return map[curriculumType] ?? curriculumType;
