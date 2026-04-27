@@ -244,10 +244,13 @@ export default function ConversationsScreen({
               it.studentProfileId != null &&
               String(it.studentProfileId).trim() !== ''
           )}
-          keyExtractor={(it) => it.conversationId}
+          keyExtractor={(it) => `${it.conversationId}|${String(it.studentProfileId ?? '')}`}
           contentContainerStyle={styles.listContent}
           renderItem={({ item }) => {
             const unread = item.unreadCount ?? 0;
+            const studentLabel = item.studentName?.trim()
+              ? `Hồ sơ học sinh: ${item.studentName.trim()}`
+              : 'Hồ sơ học sinh: Đang cập nhật';
             return (
               <Pressable
                 onPress={() => onOpenChat(item)}
@@ -273,6 +276,9 @@ export default function ConversationsScreen({
                   </View>
                   <Text numberOfLines={1} style={[styles.rowSub, isDark && styles.rowSubDark]}>
                     {item.lastMessageContent ?? 'Chưa có tin nhắn'}
+                  </Text>
+                  <Text numberOfLines={1} style={[styles.rowMeta, isDark && styles.rowMetaDark]}>
+                    {studentLabel}
                   </Text>
                 </View>
                 <Ionicons name="chevron-forward" size={20} color={isDark ? '#334155' : '#94a3b8'} />
@@ -347,6 +353,8 @@ const styles = StyleSheet.create({
   rowTitleDark: { color: '#E5E7EB' },
   rowSub: { marginTop: 4, fontSize: 13, color: '#64748b' },
   rowSubDark: { color: '#94a3b8' },
+  rowMeta: { marginTop: 3, fontSize: 12, color: '#64748b', fontWeight: '600' },
+  rowMetaDark: { color: '#cbd5e1' },
 
   badge: {
     marginLeft: 10,
