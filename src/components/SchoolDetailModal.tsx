@@ -14,13 +14,18 @@ import {
   Animated,
   FlatList,
   Dimensions,
+  TextInput,
+  Alert,
 } from 'react-native';
 import MapView, { Marker } from 'react-native-maps';
 import * as Location from 'expo-location';
 const MaterialIcons = require('@expo/vector-icons').MaterialIcons;
 import type { SchoolDetail } from '../types/school';
+import type { SchoolCampaignTemplate } from '../types/school';
 import type { ParentStudentProfile } from '../types/studentProfile';
-import { searchNearbyCampus } from '../api/school';
+import { fetchSchoolCampaignTemplates, fetchSchoolPublicDetail, searchNearbyCampus } from '../api/school';
+import { bookOfflineConsultation, fetchParentConsultationSlots } from '../api/parentConsultation';
+import type { ParentConsultationSlot } from '../types/consultation';
 import {
   badgePillStyle,
   getCurriculumStatusBadgeColors,
@@ -41,6 +46,46 @@ const NEARBY_SEARCH_RADIUS_KM = 50;
 
 function formatKm(d: number): string {
   return `${d.toFixed(d < 10 ? 1 : 0)} km`;
+}
+
+function formatIsoDateRange(startDate?: string | null, endDate?: string | null): string {
+  if (!startDate && !endDate) return 'Đang cập nhật';
+  const toLabel = (value?: string | null) => {
+    if (!value) return '—';
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return value;
+    return date.toLocaleDateString('vi-VN');
+  };
+  return `${toLabel(startDate)} - ${toLabel(endDate)}`;
+}
+
+function formatArrayDate(parts: number[]): string {
+  if (parts.length < 3) return 'Đang cập nhật';
+  const [year, month, day] = parts;
+  return `${String(day).padStart(2, '0')}/${String(month).padStart(2, '0')}/${year}`;
+}
+
+function toIsoDate(value: Date): string {
+  const year = value.getFullYear();
+  const month = String(value.getMonth() + 1).padStart(2, '0');
+  const day = String(value.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+function addDays(value: Date, days: number): Date {
+  const date = new Date(value);
+  date.setDate(date.getDate() + days);
+  return date;
+}
+
+function getWeekStart(date: Date): Date {
+  const day = date.getDay();
+  const diff = day === 0 ? -6 : 1 - day;
+  return addDays(date, diff);
+}
+
+function formatSlotTimeRange(startTime: string, endTime: string): string {
+  return `${startTime.slice(0, 5)} - ${endTime.slice(0, 5)}`;
 }
 
 /** BE có thể trả HTML trong mô tả; RN Text không render tag — bỏ tag để hiển thị sạch. */
@@ -83,6 +128,7 @@ type Props = {
   onClose: () => void;
   onToggleFavourite: () => void;
   onContactConsult?: (campusId: number) => void;
+  onOpenConsultBooking?: () => void;
   studentPickerVisible?: boolean;
   studentPickerOptions?: ParentStudentProfile[];
   studentPickerCampusName?: string | null;
@@ -227,32 +273,175 @@ export function SchoolDetailModal({
   onClose,
   onToggleFavourite,
   onContactConsult,
+  onOpenConsultBooking,
   studentPickerVisible = false,
   studentPickerOptions = [],
   studentPickerCampusName = null,
   onCloseStudentPicker,
   onSelectStudent,
 }: Props) {
+  const [shouldRender, setShouldRender] = useState(visible);
+  const modalTranslateY = useRef(new Animated.Value(40)).current;
+  const modalOpacity = useRef(new Animated.Value(0)).current;
   const [expandedDescription, setExpandedDescription] = useState(false);
+  const [expandedCampaign, setExpandedCampaign] = useState<Record<number, boolean>>({});
+  const [expandedMethod, setExpandedMethod] = useState<Record<string, boolean>>({});
+  const [expandedMandatoryDocs, setExpandedMandatoryDocs] = useState<Record<number, boolean>>({});
   const [expandedCurriculum, setExpandedCurriculum] = useState<Record<string, boolean>>({});
+  const [expandedCurriculumDesc, setExpandedCurriculumDesc] = useState<Record<string, boolean>>({});
+  const [expandedCurriculumMethods, setExpandedCurriculumMethods] = useState<Record<string, boolean>>({});
+  const [expandedSubjects, setExpandedSubjects] = useState<Record<string, boolean>>({});
+  const [expandedProgram, setExpandedProgram] = useState<Record<string, boolean>>({});
+  const [expandedProgramGraduation, setExpandedProgramGraduation] = useState<Record<string, boolean>>({});
   const [expandedCampus, setExpandedCampus] = useState<Record<number, boolean>>({});
   const [distancesKmByCampusId, setDistancesKmByCampusId] = useState<Record<number, number>>({});
+  const [campaignTemplates, setCampaignTemplates] = useState<SchoolCampaignTemplate[]>([]);
+  const [campaignLoading, setCampaignLoading] = useState(false);
+  const [apiCurriculumList, setApiCurriculumList] = useState<SchoolDetail['curriculumList']>([]);
+  const [apiSchoolContact, setApiSchoolContact] = useState<{
+    hotline: string | null;
+    emailSupport: string | null;
+    websiteUrl: string | null;
+  }>({
+    hotline: null,
+    emailSupport: null,
+    websiteUrl: null,
+  });
+  const [curriculumLoading, setCurriculumLoading] = useState(false);
   const [facilityViewerVisible, setFacilityViewerVisible] = useState(false);
   const [facilityViewerImages, setFacilityViewerImages] = useState<FacilityImage[]>([]);
   const [facilityViewerIndex, setFacilityViewerIndex] = useState(0);
   const [campusPickerVisible, setCampusPickerVisible] = useState(false);
+  const [consultCampusPickerVisible, setConsultCampusPickerVisible] = useState(false);
+  const [consultBookingVisible, setConsultBookingVisible] = useState(false);
+  const [consultFormVisible, setConsultFormVisible] = useState(false);
+  const [selectedConsultCampusId, setSelectedConsultCampusId] = useState<number | null>(null);
+  const [consultWeekStart, setConsultWeekStart] = useState<Date>(() => getWeekStart(new Date()));
+  const [selectedConsultDate, setSelectedConsultDate] = useState<string>(() => toIsoDate(new Date()));
+  const [selectedConsultSlot, setSelectedConsultSlot] = useState<ParentConsultationSlot | null>(null);
+  const [consultSlotsLoading, setConsultSlotsLoading] = useState(false);
+  const [consultSlotsError, setConsultSlotsError] = useState<string | null>(null);
+  const [consultSlotsByDate, setConsultSlotsByDate] = useState<Record<string, ParentConsultationSlot[]>>({});
+  const [bookingPhone, setBookingPhone] = useState('');
+  const [bookingQuestion, setBookingQuestion] = useState('');
+  const [bookingSubmitting, setBookingSubmitting] = useState(false);
   const facilityViewerListRef = useRef<FlatList<FacilityImage> | null>(null);
 
-  const curriculumList = useMemo(() => school?.curriculumList ?? [], [school?.curriculumList]);
+  const curriculumList = useMemo(
+    () => (apiCurriculumList.length > 0 ? apiCurriculumList : school?.curriculumList ?? []),
+    [apiCurriculumList, school?.curriculumList]
+  );
   const campusList = useMemo(() => school?.campusList ?? [], [school?.campusList]);
   const consultCampuses = useMemo(() => campusList, [campusList]);
+  const selectedConsultCampus = useMemo(
+    () => consultCampuses.find((campus) => campus.id === selectedConsultCampusId) ?? null,
+    [consultCampuses, selectedConsultCampusId]
+  );
+  const weekDates = useMemo(() => {
+    return Array.from({ length: 7 }, (_, index) => addDays(consultWeekStart, index));
+  }, [consultWeekStart]);
+  const weekDateKeys = useMemo(() => weekDates.map((date) => toIsoDate(date)), [weekDates]);
+  const selectedDateSlots = useMemo(
+    () => consultSlotsByDate[selectedConsultDate] ?? [],
+    [consultSlotsByDate, selectedConsultDate]
+  );
+  const upcomingSlotsCount = useMemo(
+    () => selectedDateSlots.filter((slot) => slot.status === 'UPCOMING').length,
+    [selectedDateSlots]
+  );
+  const displayHotline = apiSchoolContact.hotline ?? school?.hotline ?? null;
+  const displayEmailSupport = apiSchoolContact.emailSupport ?? school?.emailSupport ?? null;
+  const displayWebsiteUrl = apiSchoolContact.websiteUrl ?? school?.websiteUrl ?? null;
+
+  useEffect(() => {
+    if (visible) {
+      setShouldRender(true);
+      modalTranslateY.setValue(40);
+      modalOpacity.setValue(0);
+      Animated.parallel([
+        Animated.timing(modalTranslateY, {
+          toValue: 0,
+          duration: 260,
+          useNativeDriver: true,
+        }),
+        Animated.timing(modalOpacity, {
+          toValue: 1,
+          duration: 220,
+          useNativeDriver: true,
+        }),
+      ]).start();
+      return;
+    }
+    Animated.parallel([
+      Animated.timing(modalTranslateY, {
+        toValue: 20,
+        duration: 180,
+        useNativeDriver: true,
+      }),
+      Animated.timing(modalOpacity, {
+        toValue: 0,
+        duration: 160,
+        useNativeDriver: true,
+      }),
+    ]).start(() => {
+      setShouldRender(false);
+    });
+  }, [visible, modalOpacity, modalTranslateY]);
 
   useEffect(() => {
     if (!visible) {
       setDistancesKmByCampusId({});
       setCampusPickerVisible(false);
+      setConsultCampusPickerVisible(false);
+      setConsultBookingVisible(false);
+      setConsultFormVisible(false);
+      setSelectedConsultCampusId(null);
+      setSelectedConsultSlot(null);
+      setConsultSlotsByDate({});
+      setConsultSlotsError(null);
+      setBookingPhone('');
+      setBookingQuestion('');
     }
   }, [visible]);
+
+  useEffect(() => {
+    if (!consultBookingVisible || !selectedConsultCampusId) return;
+    let cancelled = false;
+    const startDate = toIsoDate(weekDates[0]);
+    const endDate = toIsoDate(weekDates[6]);
+    setConsultSlotsLoading(true);
+    setConsultSlotsError(null);
+    void fetchParentConsultationSlots(selectedConsultCampusId, startDate, endDate)
+      .then((res) => {
+        if (cancelled) return;
+        const grouped: Record<string, ParentConsultationSlot[]> = {};
+        for (const slot of res.body) {
+          if (!grouped[slot.date]) grouped[slot.date] = [];
+          grouped[slot.date].push(slot);
+        }
+        setConsultSlotsByDate(grouped);
+      })
+      .catch((error: unknown) => {
+        if (cancelled) return;
+        const message =
+          error instanceof Error && error.message ? error.message : 'Không tải được lịch tư vấn. Vui lòng thử lại.';
+        setConsultSlotsByDate({});
+        setConsultSlotsError(message);
+      })
+      .finally(() => {
+        if (!cancelled) setConsultSlotsLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [consultBookingVisible, selectedConsultCampusId, weekDates]);
+
+  useEffect(() => {
+    if (!weekDateKeys.includes(selectedConsultDate)) {
+      setSelectedConsultDate(weekDateKeys[0]);
+      setSelectedConsultSlot(null);
+    }
+  }, [selectedConsultDate, weekDateKeys]);
 
   const openFacilityGallery = (images: FacilityImage[], startIndex = 0) => {
     if (images.length === 0) return;
@@ -310,10 +499,130 @@ export function SchoolDetailModal({
     };
   }, [visible, loading, school?.id]);
 
+  useEffect(() => {
+    if (!visible || !school?.id || loading) return;
+    let cancelled = false;
+    setCampaignLoading(true);
+    const year = new Date().getFullYear();
+    void fetchSchoolCampaignTemplates(school.id, year)
+      .then((res) => {
+        if (!cancelled) setCampaignTemplates(res.body);
+      })
+      .catch(() => {
+        if (!cancelled) setCampaignTemplates([]);
+      })
+      .finally(() => {
+        if (!cancelled) setCampaignLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [visible, loading, school?.id]);
+
+  useEffect(() => {
+    if (!visible || !school?.id || loading) return;
+    let cancelled = false;
+    setCurriculumLoading(true);
+    void fetchSchoolPublicDetail(school.id)
+      .then((res) => {
+        if (cancelled) return;
+        setApiCurriculumList(Array.isArray(res.body?.curriculumList) ? res.body.curriculumList : []);
+        setApiSchoolContact({
+          hotline: res.body?.hotline ?? null,
+          emailSupport: res.body?.emailSupport ?? null,
+          websiteUrl: res.body?.websiteUrl ?? null,
+        });
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setApiCurriculumList([]);
+          setApiSchoolContact({
+            hotline: null,
+            emailSupport: null,
+            websiteUrl: null,
+          });
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setCurriculumLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [visible, loading, school?.id]);
+
+  const handleSelectConsultCampus = (campusId: number) => {
+    const today = new Date();
+    setSelectedConsultCampusId(campusId);
+    setConsultWeekStart(getWeekStart(today));
+    setSelectedConsultDate(toIsoDate(today));
+    setSelectedConsultSlot(null);
+    setConsultCampusPickerVisible(false);
+    setConsultBookingVisible(true);
+  };
+
+  const handleSubmitConsultBooking = async () => {
+    if (!selectedConsultSlot) {
+      Alert.alert('Chưa chọn khung giờ', 'Vui lòng chọn khung giờ tư vấn trước khi đặt lịch.');
+      return;
+    }
+    const phone = bookingPhone.trim();
+    const question = bookingQuestion.trim();
+    if (!phone) {
+      Alert.alert('Thiếu số điện thoại', 'Vui lòng nhập số điện thoại để đặt lịch tư vấn.');
+      return;
+    }
+    setBookingSubmitting(true);
+    try {
+      await bookOfflineConsultation({
+        phone,
+        question,
+        appointmentDate: selectedConsultSlot.date,
+        appointmentTime: selectedConsultSlot.startTime,
+      });
+      setConsultFormVisible(false);
+      setBookingPhone('');
+      setBookingQuestion('');
+      Alert.alert('Đặt lịch thành công', 'Nhà trường sẽ liên hệ xác nhận lịch tư vấn với bạn.');
+    } catch (error: unknown) {
+      const message =
+        error instanceof Error && error.message
+          ? error.message
+          : 'Đặt lịch chưa thành công. Vui lòng thử lại sau.';
+      Alert.alert('Không thể đặt lịch', message);
+    } finally {
+      setBookingSubmitting(false);
+    }
+  };
+
+  const handleOpenConsultForm = () => {
+    if (!selectedConsultSlot) {
+      Alert.alert('Chưa chọn khung giờ', 'Vui lòng chọn một slot tư vấn trước khi đặt lịch.');
+      return;
+    }
+    setConsultFormVisible(true);
+  };
+
+  const getWeekdayShortLabel = (date: Date): string => {
+    const weekday = date.getDay();
+    if (weekday === 0) return 'CN';
+    return `T${weekday + 1}`;
+  };
+
+  if (!shouldRender) return null;
+
   return (
-    <>
-      <Modal visible={visible} animationType="slide" presentationStyle="fullScreen" onRequestClose={onClose}>
-      <View style={styles.screen}>
+      <Animated.View
+        pointerEvents={visible ? 'auto' : 'none'}
+        style={[
+          styles.screen,
+          styles.screenOverlay,
+          {
+            opacity: modalOpacity,
+            transform: [{ translateY: modalTranslateY }],
+          },
+        ]}
+      >
         <ScrollView showsVerticalScrollIndicator={false}>
           <View style={styles.banner}>
             {school?.logoUrl ? (
@@ -351,28 +660,40 @@ export function SchoolDetailModal({
                   <MaterialIcons name="event" size={16} color="#64748b" />
                   <Text style={styles.meta}>{school.foundingDate ?? 'Đang cập nhật'}</Text>
                 </View>
-                {school.hotline ? (
-                  <Pressable onPress={() => Linking.openURL(`tel:${school.hotline}`)} style={styles.metaRow}>
-                    <MaterialIcons name="phone" size={16} color="#2563eb" />
-                    <Text style={styles.link}>{school.hotline}</Text>
-                  </Pressable>
-                ) : null}
-                {school.emailSupport ? (
-                  <Pressable onPress={() => Linking.openURL(`mailto:${school.emailSupport}`)} style={styles.metaRow}>
-                    <MaterialIcons name="email" size={16} color="#2563eb" />
-                    <Text style={styles.link} numberOfLines={1}>
-                      {school.emailSupport}
-                    </Text>
-                  </Pressable>
-                ) : null}
-                {school.websiteUrl ? (
-                  <Pressable onPress={() => Linking.openURL(String(school.websiteUrl))} style={styles.metaRow}>
-                    <MaterialIcons name="language" size={16} color="#2563eb" />
-                    <Text style={styles.link} numberOfLines={1}>
-                      {school.websiteUrl}
-                    </Text>
-                  </Pressable>
-                ) : null}
+                <View style={styles.metaRow}>
+                  <MaterialIcons name="phone" size={16} color="#2563eb" />
+                  {displayHotline ? (
+                    <Pressable onPress={() => Linking.openURL(`tel:${displayHotline}`)}>
+                      <Text style={styles.link}>{displayHotline}</Text>
+                    </Pressable>
+                  ) : (
+                    <Text style={styles.meta}>Hotline: Đang cập nhật</Text>
+                  )}
+                </View>
+                <View style={styles.metaRow}>
+                  <MaterialIcons name="email" size={16} color="#2563eb" />
+                  {displayEmailSupport ? (
+                    <Pressable onPress={() => Linking.openURL(`mailto:${displayEmailSupport}`)}>
+                      <Text style={styles.link} numberOfLines={1}>
+                        {displayEmailSupport}
+                      </Text>
+                    </Pressable>
+                  ) : (
+                    <Text style={styles.meta}>Email: Đang cập nhật</Text>
+                  )}
+                </View>
+                <View style={styles.metaRow}>
+                  <MaterialIcons name="language" size={16} color="#2563eb" />
+                  {displayWebsiteUrl ? (
+                    <Pressable onPress={() => Linking.openURL(String(displayWebsiteUrl))}>
+                      <Text style={styles.link} numberOfLines={1}>
+                        {displayWebsiteUrl}
+                      </Text>
+                    </Pressable>
+                  ) : (
+                    <Text style={styles.meta}>Website: Đang cập nhật</Text>
+                  )}
+                </View>
                 {school.representativeName ? (
                   <View style={styles.metaRow}>
                     <MaterialIcons name="person-outline" size={16} color="#64748b" />
@@ -645,111 +966,356 @@ export function SchoolDetailModal({
               </View>
 
               <View style={styles.section}>
-                <Text style={styles.sectionTitle}>Chương trình đào tạo</Text>
-                {curriculumList.map((curriculum) => {
-                  const key = curriculum.groupCode || curriculum.name;
-                  const expanded = !!expandedCurriculum[key];
-                  const typeColors = getCurriculumTypeBadgeColors(curriculum.curriculumType);
-                  const statusColors = getCurriculumStatusBadgeColors(curriculum.curriculumStatus);
-                  const typePill = badgePillStyle(typeColors);
+                <Text style={styles.sectionTitle}>Chiến dịch tuyển sinh</Text>
+                {campaignLoading ? <Text style={styles.sectionText}>Đang tải chiến dịch tuyển sinh...</Text> : null}
+                {!campaignLoading && campaignTemplates.length === 0 ? (
+                  <Text style={styles.sectionText}>Nhà trường chưa cập nhật chiến dịch tuyển sinh.</Text>
+                ) : null}
+                {campaignTemplates.map((campaign) => {
+                  const expanded = !!expandedCampaign[campaign.id];
+                  const isOpen = campaign.status === 'OPEN_ADMISSION_CAMPAIGN';
                   const statusPill = badgePillStyle({
-                    bg: statusColors.bg,
-                    text: statusColors.text,
+                    bg: isOpen ? '#dcfce7' : '#fee2e2',
+                    text: isOpen ? '#15803d' : '#b91c1c',
                   });
-                  const methodKeys =
-                    curriculum.methodLearningList.length > 0
-                      ? curriculum.methodLearningList
-                      : curriculum.methodLearning
-                        ? [curriculum.methodLearning]
-                        : [];
-
+                  const mandatoryExpanded = !!expandedMandatoryDocs[campaign.id];
+                  const mandatoryItems = mandatoryExpanded ? campaign.mandatoryAll : campaign.mandatoryAll.slice(0, 3);
                   return (
-                    <View key={key} style={styles.curriculumCard}>
+                    <View key={campaign.id} style={styles.campaignCard}>
                       <Pressable
-                        onPress={() =>
-                          setExpandedCurriculum((prev) => ({ ...prev, [key]: !prev[key] }))
-                        }
+                        onPress={() => setExpandedCampaign((prev) => ({ ...prev, [campaign.id]: !prev[campaign.id] }))}
                       >
                         <View style={styles.curriculumHeaderRow}>
-                          <Text style={styles.curriculumName}>{curriculum.name}</Text>
-                          <MaterialIcons
-                            name={expanded ? 'expand-less' : 'expand-more'}
-                            size={22}
-                            color="#64748b"
-                          />
+                          <Text style={styles.curriculumName}>{campaign.name}</Text>
+                          <MaterialIcons name={expanded ? 'expand-less' : 'expand-more'} size={22} color="#64748b" />
                         </View>
-                        <Text style={styles.metaSmall}>
-                          Năm tuyển sinh:{' '}
-                          {typeof curriculum.applicationYear === 'number' && curriculum.applicationYear > 0
-                            ? curriculum.applicationYear
-                            : curriculum.enrollmentYear ?? '—'}
-                        </Text>
                         <View style={styles.badgeRow}>
-                          <View style={typePill.wrap}>
-                            <Text style={typePill.text}>{getCurriculumTypeLabel(curriculum.curriculumType)}</Text>
-                          </View>
                           <View style={statusPill.wrap}>
-                            <Text style={statusPill.text}>
-                              {getCurriculumStatusLabel(curriculum.curriculumStatus)}
-                            </Text>
+                            <Text style={statusPill.text}>{isOpen ? 'ĐANG MỞ' : 'ĐÃ ĐÓNG'}</Text>
                           </View>
                         </View>
+                        <Text style={styles.metaSmall}>Năm: {campaign.year}</Text>
+                        <Text style={styles.metaSmall}>
+                          {formatIsoDateRange(campaign.startDate, campaign.endDate)}
+                        </Text>
+                        {campaign.description ? (
+                          expanded ? (
+                            <View style={styles.programSection}>
+                              <Text style={styles.programSectionTitle}>Mô tả</Text>
+                              <Text style={styles.sectionText}>{stripBasicHtml(campaign.description)}</Text>
+                            </View>
+                          ) : (
+                            <Text numberOfLines={1} style={styles.sectionText}>
+                              {stripBasicHtml(campaign.description)}
+                            </Text>
+                          )
+                        ) : null}
                       </Pressable>
                       {expanded ? (
                         <View style={styles.curriculumBody}>
-                          {methodKeys.length > 0 ? (
-                            <View style={styles.badgeRow}>
-                              {methodKeys.map((method) => {
-                                const methodColors = getMethodLearningBadgeColors(method);
-                                const methodPill = badgePillStyle(methodColors);
+                          <Text style={styles.programSectionTitle}>Phương thức tuyển sinh</Text>
+                          {campaign.admissionMethodDetails.map((method) => {
+                            const methodKey = `${campaign.id}-${method.methodCode}`;
+                            const methodExpanded = !!expandedMethod[methodKey];
+                            return (
+                              <View key={methodKey} style={styles.methodCard}>
+                                <Pressable
+                                  onPress={() => setExpandedMethod((prev) => ({ ...prev, [methodKey]: !prev[methodKey] }))}
+                                >
+                                  <View style={styles.programHeaderRow}>
+                                    <Text style={styles.programName}>{method.displayName}</Text>
+                                    <MaterialIcons
+                                      name={methodExpanded ? 'expand-less' : 'expand-more'}
+                                      size={20}
+                                      color="#64748b"
+                                    />
+                                  </View>
+                                  <Text style={styles.metaSmall}>
+                                    {formatArrayDate(method.startDate)} - {formatArrayDate(method.endDate)}
+                                  </Text>
+                                  {method.allowReservationSubmission ? (
+                                    <Text style={styles.methodReservationTag}>Cho phép giữ chỗ</Text>
+                                  ) : null}
+                                </Pressable>
+                                {methodExpanded ? (
+                                  <View style={styles.methodBody}>
+                                    {method.description ? <Text style={styles.sectionText}>{method.description}</Text> : null}
+                                    {method.admissionProcessSteps.length > 0 ? (
+                                      <View style={styles.stepsWrap}>
+                                        <Text style={styles.programSubLabel}>Quy trình</Text>
+                                        {method.admissionProcessSteps
+                                          .slice()
+                                          .sort((a, b) => a.stepOrder - b.stepOrder)
+                                          .map((step) => (
+                                            <View key={`${methodKey}-step-${step.stepOrder}`} style={styles.stepItem}>
+                                              <View style={styles.stepDot} />
+                                              <View style={styles.stepContent}>
+                                                <Text style={styles.stepTitle}>
+                                                  Bước {step.stepOrder}: {step.stepName}
+                                                </Text>
+                                                {step.description ? (
+                                                  <Text style={styles.subjectDesc}>{step.description}</Text>
+                                                ) : null}
+                                              </View>
+                                            </View>
+                                          ))}
+                                      </View>
+                                    ) : null}
+                                    {method.methodDocumentRequirements.length > 0 ? (
+                                      <View style={styles.programSection}>
+                                        <Text style={styles.programSubLabel}>Hồ sơ theo phương thức</Text>
+                                        {method.methodDocumentRequirements.map((doc) => (
+                                          <View key={`${methodKey}-doc-${doc.code}`} style={styles.docItemRow}>
+                                            <MaterialIcons
+                                              name={doc.required ? 'check-circle' : 'radio-button-unchecked'}
+                                              size={16}
+                                              color={doc.required ? '#dc2626' : '#94a3b8'}
+                                            />
+                                            <Text style={styles.docItemText}>{doc.name}</Text>
+                                          </View>
+                                        ))}
+                                      </View>
+                                    ) : null}
+                                  </View>
+                                ) : null}
+                              </View>
+                            );
+                          })}
+                          {campaign.campusProgramOfferings.length > 0 ? (
+                            <View style={styles.programSection}>
+                              <Text style={styles.programSectionTitle}>Chỉ tiêu theo cơ sở</Text>
+                              {campaign.campusProgramOfferings.map((offering, idx) => {
+                                const campusName =
+                                  typeof offering.campusName === 'string' ? offering.campusName : `Cơ sở #${idx + 1}`;
+                                const quota =
+                                  typeof offering.quota === 'number' && Number.isFinite(offering.quota)
+                                    ? offering.quota
+                                    : null;
+                                const remainingQuota =
+                                  typeof offering.remainingQuota === 'number' && Number.isFinite(offering.remainingQuota)
+                                    ? offering.remainingQuota
+                                    : null;
+                                const tuitionFee =
+                                  typeof offering.tuitionFee === 'number' && Number.isFinite(offering.tuitionFee)
+                                    ? offering.tuitionFee
+                                    : null;
+                                const learningMode =
+                                  typeof offering.learningMode === 'string' ? offering.learningMode : null;
+                                const openDate = typeof offering.openDate === 'string' ? offering.openDate : null;
+                                const closeDate = typeof offering.closeDate === 'string' ? offering.closeDate : null;
+                                const programRaw =
+                                  offering.program && typeof offering.program === 'object'
+                                    ? (offering.program as Record<string, unknown>)
+                                    : null;
+                                const programName =
+                                  typeof programRaw?.name === 'string' ? programRaw.name : 'Chương trình';
+                                const statusLabel =
+                                  typeof offering.applicationStatus === 'string'
+                                    ? offering.applicationStatus
+                                    : typeof offering.status === 'string'
+                                      ? offering.status
+                                      : 'UNKNOWN';
+                                const statusPill = badgePillStyle({
+                                  bg: statusLabel.includes('OPEN') ? '#dcfce7' : '#f1f5f9',
+                                  text: statusLabel.includes('OPEN') ? '#15803d' : '#475569',
+                                });
                                 return (
-                                  <View key={`${key}-method-${method}`} style={methodPill.wrap}>
-                                    <Text style={methodPill.text}>{getMethodLearningLabel(method)}</Text>
+                                  <View key={`${campaign.id}-offering-${idx}`} style={styles.offeringCard}>
+                                    <View style={styles.programHeaderRow}>
+                                      <Text style={styles.programName}>{campusName}</Text>
+                                      <View style={statusPill.wrap}>
+                                        <Text style={statusPill.text}>{statusLabel}</Text>
+                                      </View>
+                                    </View>
+                                    <Text style={styles.programBodyText}>Chương trình: {programName}</Text>
+                                    {learningMode ? (
+                                      <Text style={styles.programBodyText}>Hình thức học: {learningMode}</Text>
+                                    ) : null}
+                                    {quota != null || remainingQuota != null ? (
+                                      <Text style={styles.programBodyText}>
+                                        Chỉ tiêu: {quota ?? '—'} | Còn lại: {remainingQuota ?? '—'}
+                                      </Text>
+                                    ) : null}
+                                    {tuitionFee != null ? (
+                                      <Text style={styles.programTuition}>
+                                        Học phí: {formatTuitionVnd(tuitionFee) ?? `${tuitionFee} đ`}
+                                      </Text>
+                                    ) : null}
+                                    <Text style={styles.metaSmall}>
+                                      Thời gian nhận hồ sơ: {formatIsoDateRange(openDate, closeDate)}
+                                    </Text>
                                   </View>
                                 );
                               })}
                             </View>
                           ) : null}
+                          {campaign.mandatoryAll.length > 0 ? (
+                            <View style={styles.programSection}>
+                              <Text style={styles.programSectionTitle}>Hồ sơ bắt buộc</Text>
+                              {mandatoryItems.map((doc) => (
+                                <View key={`${campaign.id}-mandatory-${doc.code}`} style={styles.docItemRow}>
+                                  <MaterialIcons name="description" size={16} color="#ef4444" />
+                                  <Text style={styles.docItemText}>{doc.name}</Text>
+                                </View>
+                              ))}
+                              {campaign.mandatoryAll.length > 3 ? (
+                                <Pressable
+                                  onPress={() =>
+                                    setExpandedMandatoryDocs((prev) => ({ ...prev, [campaign.id]: !prev[campaign.id] }))
+                                  }
+                                >
+                                  <Text style={styles.expandText}>{mandatoryExpanded ? 'Thu gọn' : 'Xem thêm'}</Text>
+                                </Pressable>
+                              ) : null}
+                            </View>
+                          ) : null}
+                          
+                        </View>
+                      ) : null}
+                    </View>
+                  );
+                })}
+              </View>
+
+              <View style={styles.section}>
+                <Text style={styles.sectionTitle}>Chương trình học</Text>
+                {curriculumLoading ? (
+                  <Text style={styles.sectionText}>Đang tải chương trình học...</Text>
+                ) : null}
+                {!curriculumLoading && curriculumList.length === 0 ? (
+                  <Text style={styles.sectionText}>Nhà trường chưa cập nhật chương trình học.</Text>
+                ) : null}
+                {curriculumList.map((curriculum) => {
+                  const key = curriculum.groupCode || curriculum.name;
+                  const expanded = !!expandedCurriculum[key];
+                  const typePill = badgePillStyle(getCurriculumTypeBadgeColors(curriculum.curriculumType));
+                  const statusPill = badgePillStyle(getCurriculumStatusBadgeColors(curriculum.curriculumStatus));
+                  const methodExpanded = !!expandedCurriculumMethods[key];
+                  const methodItems = methodExpanded
+                    ? curriculum.methodLearningList
+                    : curriculum.methodLearningList.slice(0, 3);
+                  const methodOverflow = Math.max(0, curriculum.methodLearningList.length - 3);
+                  const descExpanded = !!expandedCurriculumDesc[key];
+                  const subjectsExpanded = !!expandedSubjects[key];
+                  const subjects = subjectsExpanded ? curriculum.subjectsJsonb : curriculum.subjectsJsonb.slice(0, 3);
+                  return (
+                    <View key={key} style={styles.curriculumCard}>
+                      <Pressable onPress={() => setExpandedCurriculum((prev) => ({ ...prev, [key]: !prev[key] }))}>
+                        <View style={styles.curriculumHeaderRow}>
+                          <Text style={styles.curriculumName}>{curriculum.name}</Text>
+                          <MaterialIcons name={expanded ? 'expand-less' : 'expand-more'} size={22} color="#64748b" />
+                        </View>
+                        <Text style={styles.metaSmall}>Năm tuyển sinh: {curriculum.applicationYear || '—'}</Text>
+                        <View style={styles.badgeRow}>
+                          <View style={typePill.wrap}>
+                            <Text style={typePill.text}>{getCurriculumTypeLabel(curriculum.curriculumType)}</Text>
+                          </View>
+                          <View style={statusPill.wrap}>
+                            <Text style={statusPill.text}>{getCurriculumStatusLabel(curriculum.curriculumStatus)}</Text>
+                          </View>
+                        </View>
+                      </Pressable>
+                      {expanded ? (
+                        <View style={styles.curriculumBody}>
+                          {curriculum.methodLearningList.length > 0 ? (
+                            <View style={styles.programSection}>
+                              <Text style={styles.programSectionTitle}>Phương pháp học</Text>
+                              <View style={styles.methodBadgeRow}>
+                                {methodItems.map((method) => {
+                                  const methodPill = badgePillStyle(getMethodLearningBadgeColors(method));
+                                  return (
+                                    <View key={`${key}-method-${method}`} style={methodPill.wrap}>
+                                      <Text style={methodPill.text}>{getMethodLearningLabel(method)}</Text>
+                                    </View>
+                                  );
+                                })}
+                                {!methodExpanded && methodOverflow > 0 ? (
+                                  <Pressable
+                                    style={styles.moreChip}
+                                    onPress={() => setExpandedCurriculumMethods((prev) => ({ ...prev, [key]: true }))}
+                                  >
+                                    <Text style={styles.moreChipText}>+{methodOverflow}</Text>
+                                  </Pressable>
+                                ) : null}
+                              </View>
+                            </View>
+                          ) : null}
                           {curriculum.description ? (
-                            <Text style={styles.sectionText}>{curriculum.description}</Text>
+                            <View style={styles.programSection}>
+                              <Text style={styles.programSectionTitle}>Mô tả</Text>
+                              <Text numberOfLines={descExpanded ? undefined : 3} style={styles.sectionText}>
+                                {curriculum.description}
+                              </Text>
+                              <Pressable
+                                onPress={() =>
+                                  setExpandedCurriculumDesc((prev) => ({ ...prev, [key]: !prev[key] }))
+                                }
+                              >
+                                <Text style={styles.expandText}>{descExpanded ? 'Thu gọn' : 'Xem thêm'}</Text>
+                              </Pressable>
+                            </View>
                           ) : null}
                           {curriculum.programList.length > 0 ? (
                             <View style={styles.programSection}>
-                              <Text style={styles.programSectionTitle}>Chương trình / lớp</Text>
+                              <Text style={styles.programSectionTitle}>Danh sách chương trình đào tạo</Text>
                               {curriculum.programList.map((program, pi) => {
-                                const activeColors = program.isActive
-                                  ? getProgramActiveBadgeColors(program.isActive)
-                                  : null;
+                                const programKey = `${key}-prog-${pi}`;
+                                const programExpanded = !!expandedProgram[programKey];
+                                const graduationExpanded = !!expandedProgramGraduation[programKey];
+                                const activeColors = program.isActive ? getProgramActiveBadgeColors(program.isActive) : null;
                                 const activePill = activeColors ? badgePillStyle(activeColors) : null;
                                 const tuitionLabel = formatTuitionVnd(program.baseTuitionFee);
                                 return (
-                                  <View key={`${key}-prog-${pi}`} style={styles.programCard}>
-                                    <View style={styles.programHeaderRow}>
-                                      <Text style={styles.programName}>
-                                        {(program.name ?? '').trim() || 'Chương trình'}
-                                      </Text>
-                                      {activePill && program.isActive ? (
-                                        <View style={activePill.wrap}>
-                                          <Text style={activePill.text}>
-                                            {getProgramActiveLabel(program.isActive)}
-                                          </Text>
+                                  <View key={programKey} style={styles.programCard}>
+                                    <Pressable
+                                      onPress={() => setExpandedProgram((prev) => ({ ...prev, [programKey]: !prev[programKey] }))}
+                                    >
+                                      <View style={styles.programHeaderRow}>
+                                        <Text style={styles.programName}>{(program.name ?? '').trim() || 'Chương trình'}</Text>
+                                        <View style={styles.programHeaderActions}>
+                                          {activePill && program.isActive ? (
+                                            <View style={activePill.wrap}>
+                                              <Text style={activePill.text}>{getProgramActiveLabel(program.isActive)}</Text>
+                                            </View>
+                                          ) : null}
+                                          <MaterialIcons
+                                            name={programExpanded ? 'expand-less' : 'expand-more'}
+                                            size={20}
+                                            color="#64748b"
+                                          />
                                         </View>
+                                      </View>
+                                      {tuitionLabel ? <Text style={styles.programTuition}>Học phí: {tuitionLabel}</Text> : null}
+                                      {program.targetStudentDescription ? (
+                                        <>
+                                          <Text style={styles.studentTargetLabel}>Đối tượng học sinh</Text>
+                                          <Text numberOfLines={programExpanded ? undefined : 1} style={styles.programBodyText}>
+                                            {stripBasicHtml(program.targetStudentDescription)}
+                                          </Text>
+                                        </>
                                       ) : null}
-                                    </View>
-                                    {tuitionLabel ? (
-                                      <Text style={styles.programTuition}>Học phí tham khảo: {tuitionLabel}</Text>
-                                    ) : null}
-                                    {program.targetStudentDescription ? (
-                                      <Text style={styles.programBodyText}>
-                                        {stripBasicHtml(program.targetStudentDescription)}
-                                      </Text>
-                                    ) : null}
-                                    {program.graduationStandard ? (
+                                    </Pressable>
+                                    {programExpanded && program.graduationStandard ? (
                                       <>
-                                        <Text style={styles.programSubLabel}>Chuẩn tốt nghiệp</Text>
-                                        <Text style={styles.programBodyText}>
-                                          {stripBasicHtml(program.graduationStandard)}
-                                        </Text>
+                                        <Pressable
+                                          style={styles.graduationHeader}
+                                          onPress={() =>
+                                            setExpandedProgramGraduation((prev) => ({
+                                              ...prev,
+                                              [programKey]: !prev[programKey],
+                                            }))
+                                          }
+                                        >
+                                          <Text style={styles.programSubLabel}>Tiêu chuẩn đầu ra</Text>
+                                          <MaterialIcons
+                                            name={graduationExpanded ? 'expand-less' : 'expand-more'}
+                                            size={18}
+                                            color="#64748b"
+                                          />
+                                        </Pressable>
+                                        {graduationExpanded ? (
+                                          <Text style={styles.programBodyText}>{stripBasicHtml(program.graduationStandard)}</Text>
+                                        ) : null}
                                       </>
                                     ) : null}
                                   </View>
@@ -757,26 +1323,58 @@ export function SchoolDetailModal({
                               })}
                             </View>
                           ) : null}
-                          {curriculum.subjectsJsonb.map((subject) => (
-                            <View key={`${key}-${subject.name}`} style={styles.subjectItem}>
-                              <View style={styles.subjectTitleRow}>
-                                <MaterialIcons
-                                  name={subject.isMandatory ? 'check-circle' : 'radio-button-unchecked'}
-                                  size={18}
-                                  color={subject.isMandatory ? '#16a34a' : '#94a3b8'}
-                                />
-                                <Text style={styles.subjectName}>{subject.name}</Text>
-                              </View>
-                              {subject.description ? (
-                                <Text style={styles.subjectDesc}>{subject.description}</Text>
+                          {curriculum.subjectsJsonb.length > 0 ? (
+                            <View style={styles.programSection}>
+                              <Text style={styles.programSectionTitle}>Môn học</Text>
+                              {subjects.map((subject) => (
+                                <View key={`${key}-${subject.name}`} style={styles.subjectItem}>
+                                  <View style={styles.subjectTitleRow}>
+                                    <MaterialIcons
+                                      name={subject.isMandatory ? 'check-circle' : 'radio-button-unchecked'}
+                                      size={18}
+                                      color={subject.isMandatory ? '#16a34a' : '#94a3b8'}
+                                    />
+                                    <Text style={styles.subjectName}>{subject.name}</Text>
+                                  </View>
+                                  {subject.description ? <Text style={styles.subjectDesc}>{subject.description}</Text> : null}
+                                </View>
+                              ))}
+                              {curriculum.subjectsJsonb.length > 3 ? (
+                                <Pressable
+                                  onPress={() => setExpandedSubjects((prev) => ({ ...prev, [key]: !prev[key] }))}
+                                >
+                                  <Text style={styles.expandText}>
+                                    {subjectsExpanded ? 'Thu gọn môn học' : 'Xem tất cả môn học'}
+                                  </Text>
+                                </Pressable>
                               ) : null}
                             </View>
-                          ))}
+                          ) : null}
                         </View>
                       ) : null}
                     </View>
                   );
                 })}
+              </View>
+
+              <View style={styles.section}>
+                <Text style={styles.sectionTitle}>Đặt lịch tư vấn</Text>
+                <Text style={styles.sectionText}>
+                  Chọn cơ sở để xem lịch trống theo tuần và đặt lịch tư vấn trực tiếp.
+                </Text>
+                <Pressable
+                  style={styles.consultSectionButton}
+                  onPress={() => {
+                    if (onOpenConsultBooking) {
+                      onOpenConsultBooking();
+                      return;
+                    }
+                    setConsultCampusPickerVisible(true);
+                  }}
+                >
+                  <MaterialIcons name="event-available" size={18} color="#fff" />
+                  <Text style={styles.consultSectionButtonText}>Xem lịch tư vấn</Text>
+                </Pressable>
               </View>
             </View>
           )}
@@ -798,7 +1396,7 @@ export function SchoolDetailModal({
             {consultLoading ? (
               <ActivityIndicator size="small" color="#fff" />
             ) : (
-              <MaterialIcons name="phone-in-talk" size={20} color="#fff" style={styles.bottomCtaIcon} />
+              <MaterialIcons name="chat-bubble" size={20} color="#fff" style={styles.bottomCtaIcon} />
             )}
             <Text style={styles.bottomCtaText}>
               {consultLoading ? 'Đang kết nối tư vấn...' : 'Liên hệ tư vấn'}
@@ -849,6 +1447,238 @@ export function SchoolDetailModal({
                   </Pressable>
                 ))
               )}
+            </Pressable>
+          </Pressable>
+        </Modal>
+        <Modal
+          visible={consultCampusPickerVisible}
+          transparent
+          animationType="fade"
+          onRequestClose={() => setConsultCampusPickerVisible(false)}
+        >
+          <Pressable style={styles.campusPickerBackdrop} onPress={() => setConsultCampusPickerVisible(false)}>
+            <Pressable style={styles.campusPickerCard} onPress={() => {}}>
+              <View style={styles.campusPickerHeader}>
+                <Text style={styles.campusPickerTitle}>Chọn cơ sở để đặt lịch</Text>
+                <Pressable onPress={() => setConsultCampusPickerVisible(false)} hitSlop={8}>
+                  <MaterialIcons name="close" size={20} color="#64748b" />
+                </Pressable>
+              </View>
+              {consultCampuses.length === 0 ? (
+                <Text style={styles.campusPickerEmptyText}>Trường chưa cập nhật danh sách cơ sở.</Text>
+              ) : (
+                consultCampuses.map((campus) => (
+                  <Pressable
+                    key={`booking-campus-${campus.id}`}
+                    style={({ pressed }) => [styles.campusPickerItem, pressed && styles.campusPickerItemPressed]}
+                    onPress={() => handleSelectConsultCampus(campus.id)}
+                  >
+                    <Text style={styles.campusPickerItemName}>{campus.name}</Text>
+                    {campus.address ? (
+                      <Text style={styles.campusPickerItemAddress} numberOfLines={2}>
+                        {campus.address}
+                      </Text>
+                    ) : null}
+                    <Text style={styles.campusPickerItemHint}>Xem lịch trống trong tuần và chọn khung giờ phù hợp</Text>
+                  </Pressable>
+                ))
+              )}
+            </Pressable>
+          </Pressable>
+        </Modal>
+        <Modal
+          visible={consultBookingVisible}
+          transparent
+          animationType="slide"
+          onRequestClose={() => setConsultBookingVisible(false)}
+        >
+          <View style={styles.consultSheetBackdrop}>
+            <View style={styles.consultSheetCard}>
+              <View style={styles.consultSheetHeader}>
+                <View style={styles.consultSheetTitleWrap}>
+                  <Text style={styles.consultSheetTitle}>Lịch tư vấn</Text>
+                  <Text style={styles.consultSheetSubtitle} numberOfLines={1}>
+                    {selectedConsultCampus?.name ?? 'Chưa chọn cơ sở'}
+                  </Text>
+                </View>
+                <Pressable onPress={() => setConsultBookingVisible(false)} hitSlop={8}>
+                  <MaterialIcons name="close" size={20} color="#64748b" />
+                </Pressable>
+              </View>
+
+              <View style={styles.consultWeekNavRow}>
+                <Pressable style={styles.consultWeekNavBtn} onPress={() => setConsultWeekStart((prev) => addDays(prev, -7))}>
+                  <MaterialIcons name="chevron-left" size={20} color="#1d4ed8" />
+                </Pressable>
+                <Text style={styles.consultWeekLabel}>
+                  {toIsoDate(weekDates[0])} - {toIsoDate(weekDates[6])}
+                </Text>
+                <Pressable style={styles.consultWeekNavBtn} onPress={() => setConsultWeekStart((prev) => addDays(prev, 7))}>
+                  <MaterialIcons name="chevron-right" size={20} color="#1d4ed8" />
+                </Pressable>
+              </View>
+
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                style={styles.consultDateScroll}
+                contentContainerStyle={styles.consultDateScrollContent}
+              >
+                {weekDates.map((day) => {
+                  const dayKey = toIsoDate(day);
+                  const isSelected = selectedConsultDate === dayKey;
+                  const isToday = dayKey === toIsoDate(new Date());
+                  const hasSlots = (consultSlotsByDate[dayKey] ?? []).length > 0;
+                  return (
+                    <Pressable
+                      key={dayKey}
+                      style={[
+                        styles.consultDateChip,
+                        isSelected && styles.consultDateChipSelected,
+                        isToday && !isSelected && styles.consultDateChipToday,
+                        !hasSlots && styles.consultDateChipDisabled,
+                      ]}
+                      onPress={() => {
+                        setSelectedConsultDate(dayKey);
+                        setSelectedConsultSlot(null);
+                      }}
+                    >
+                      <Text style={[styles.consultDateChipWeekday, isSelected && styles.consultDateChipWeekdaySelected]}>
+                        {getWeekdayShortLabel(day)}
+                      </Text>
+                      <Text style={[styles.consultDateChipDay, isSelected && styles.consultDateChipDaySelected]}>
+                        {String(day.getDate()).padStart(2, '0')}
+                      </Text>
+                    </Pressable>
+                  );
+                })}
+              </ScrollView>
+
+              <View style={styles.consultSlotsContent}>
+                {consultSlotsLoading ? (
+                  <View style={styles.consultStateBox}>
+                    <ActivityIndicator size="small" color="#1d4ed8" />
+                    <Text style={styles.consultStateText}>Đang tải lịch tư vấn...</Text>
+                  </View>
+                ) : consultSlotsError ? (
+                  <View style={styles.consultStateBox}>
+                    <MaterialIcons name="error-outline" size={18} color="#dc2626" />
+                    <Text style={styles.consultStateText}>{consultSlotsError}</Text>
+                  </View>
+                ) : selectedDateSlots.length === 0 ? (
+                  <View style={styles.consultEmptyState}>
+                    <MaterialIcons name="calendar-today" size={24} color="#94a3b8" />
+                    <Text style={styles.consultEmptyTitle}>Không có lịch tư vấn</Text>
+                    <Text style={styles.consultEmptyText}>Vui lòng chọn ngày khác trong tuần.</Text>
+                  </View>
+                ) : (
+                  <>
+                    <View style={styles.consultSlotMetaRow}>
+                      <Text style={styles.consultSlotMetaText}>Còn {upcomingSlotsCount} slot khả dụng</Text>
+                    </View>
+                    <View style={styles.consultSlotsScrollWrap}>
+                      <ScrollView
+                        style={styles.consultSlotsScroll}
+                        contentContainerStyle={styles.consultSlotsScrollContent}
+                        showsVerticalScrollIndicator={false}
+                      >
+                        <View style={styles.consultSlotGrid}>
+                          {selectedDateSlots.map((slot) => {
+                            const isDisabled = slot.status === 'PAST';
+                            const isSelected = selectedConsultSlot?.campusScheduleTemplateId === slot.campusScheduleTemplateId;
+                            return (
+                              <Pressable
+                                key={`${slot.date}-${slot.campusScheduleTemplateId}`}
+                                disabled={isDisabled}
+                                style={[
+                                  styles.consultSlotCard,
+                                  isDisabled && styles.consultSlotCardDisabled,
+                                  isSelected && styles.consultSlotCardSelected,
+                                ]}
+                                onPress={() => setSelectedConsultSlot(slot)}
+                              >
+                                <Text style={[styles.consultSlotTime, isSelected && styles.consultSlotTimeSelected]}>
+                                  {formatSlotTimeRange(slot.startTime, slot.endTime)}
+                                </Text>
+                                <Text style={[styles.consultSlotStatus, isSelected && styles.consultSlotStatusSelected]}>
+                                  {slot.statusLabel || slot.status}
+                                </Text>
+                              </Pressable>
+                            );
+                          })}
+                        </View>
+                      </ScrollView>
+                    </View>
+                  </>
+                )}
+              </View>
+
+              <Pressable
+                style={[styles.consultBookingButton, !selectedConsultSlot && styles.consultBookingButtonDisabled]}
+                onPress={handleOpenConsultForm}
+              >
+                <Text style={styles.consultBookingButtonText}>Đặt lịch</Text>
+              </Pressable>
+            </View>
+          </View>
+        </Modal>
+        <Modal
+          visible={consultFormVisible}
+          transparent
+          animationType="slide"
+          onRequestClose={() => setConsultFormVisible(false)}
+        >
+          <Pressable style={styles.consultFormBackdrop} onPress={() => setConsultFormVisible(false)}>
+            <Pressable style={styles.consultFormCard} onPress={() => {}}>
+              <View style={styles.consultFormHeader}>
+                <Text style={styles.consultFormTitle}>Đặt lịch tư vấn</Text>
+                <Pressable onPress={() => setConsultFormVisible(false)} hitSlop={8}>
+                  <MaterialIcons name="close" size={20} color="#64748b" />
+                </Pressable>
+              </View>
+
+              <Text style={styles.consultFieldLabel}>Số điện thoại</Text>
+              <TextInput
+                value={bookingPhone}
+                onChangeText={setBookingPhone}
+                placeholder="Nhập số điện thoại"
+                keyboardType="phone-pad"
+                style={styles.consultInput}
+              />
+
+              <Text style={styles.consultFieldLabel}>Câu hỏi</Text>
+              <TextInput
+                value={bookingQuestion}
+                onChangeText={setBookingQuestion}
+                placeholder="Bạn muốn tư vấn điều gì?"
+                multiline
+                textAlignVertical="top"
+                style={[styles.consultInput, styles.consultInputMultiline]}
+              />
+
+              <Text style={styles.consultFieldLabel}>Khung giờ</Text>
+              <View style={styles.consultReadonlyField}>
+                <Text style={styles.consultReadonlyFieldText}>
+                  {selectedConsultSlot ? formatSlotTimeRange(selectedConsultSlot.startTime, selectedConsultSlot.endTime) : '—'}
+                </Text>
+              </View>
+
+              <Text style={styles.consultFieldLabel}>Ngày hẹn</Text>
+              <View style={styles.consultReadonlyField}>
+                <Text style={styles.consultReadonlyFieldText}>{selectedConsultSlot?.date ?? '—'}</Text>
+              </View>
+
+              <Pressable
+                style={[styles.consultSubmitButton, bookingSubmitting && styles.consultSubmitButtonDisabled]}
+                disabled={bookingSubmitting}
+                onPress={handleSubmitConsultBooking}
+              >
+                {bookingSubmitting ? (
+                  <ActivityIndicator size="small" color="#fff" />
+                ) : (
+                  <Text style={styles.consultSubmitButtonText}>Đặt lịch tư vấn</Text>
+                )}
+              </Pressable>
             </Pressable>
           </Pressable>
         </Modal>
@@ -952,14 +1782,17 @@ export function SchoolDetailModal({
             </View>
           </View>
         ) : null}
-      </View>
-      </Modal>
-    </>
+      </Animated.View>
   );
 }
 
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: '#f8fafc' },
+  screenOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    zIndex: 40,
+    elevation: 40,
+  },
   banner: {
     height: 240,
     backgroundColor: '#e2e8f0',
@@ -1307,6 +2140,19 @@ const styles = StyleSheet.create({
     padding: 12,
     marginTop: 10,
   },
+  campaignCard: {
+    borderWidth: 1,
+    borderColor: '#dbeafe',
+    borderRadius: 14,
+    padding: 12,
+    marginTop: 10,
+    backgroundColor: '#f8fbff',
+    shadowColor: '#0f172a',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.04,
+    shadowRadius: 8,
+    elevation: 1,
+  },
   curriculumHeaderRow: {
     flexDirection: 'row',
     alignItems: 'flex-start',
@@ -1320,8 +2166,70 @@ const styles = StyleSheet.create({
     gap: 8,
     marginTop: 10,
   },
+  methodBadgeRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginTop: 6,
+  },
   curriculumBody: { marginTop: 10, gap: 8 },
-  programSection: { marginTop: 4, gap: 10 },
+  methodCard: {
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#e2e8f0',
+    backgroundColor: '#fff',
+    padding: 10,
+    gap: 8,
+  },
+  methodReservationTag: {
+    marginTop: 8,
+    alignSelf: 'flex-start',
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 999,
+    backgroundColor: '#e8f5e9',
+    color: '#2e7d32',
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  methodBody: {
+    gap: 8,
+  },
+  stepsWrap: {
+    gap: 8,
+  },
+  stepItem: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 8,
+  },
+  stepDot: {
+    marginTop: 4,
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    backgroundColor: '#1976d2',
+  },
+  stepContent: {
+    flex: 1,
+  },
+  stepTitle: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#0f172a',
+  },
+  docItemRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 8,
+  },
+  docItemText: {
+    flex: 1,
+    fontSize: 13,
+    color: '#334155',
+    lineHeight: 18,
+  },
+  programSection: { marginTop: 10, gap: 10 },
   programSectionTitle: { fontSize: 14, fontWeight: '700', color: '#0f172a' },
   programCard: {
     borderRadius: 10,
@@ -1331,16 +2239,48 @@ const styles = StyleSheet.create({
     borderColor: '#e2e8f0',
     gap: 6,
   },
+  offeringCard: {
+    borderRadius: 10,
+    padding: 12,
+    backgroundColor: '#fff',
+    borderWidth: 1,
+    borderColor: '#dbeafe',
+    gap: 6,
+  },
   programHeaderRow: {
     flexDirection: 'row',
     alignItems: 'flex-start',
     justifyContent: 'space-between',
     gap: 8,
   },
+  programHeaderActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
   programName: { fontSize: 14, fontWeight: '700', color: '#0f172a', flex: 1 },
   programTuition: { fontSize: 13, fontWeight: '600', color: '#0369a1' },
+  graduationHeader: {
+    marginTop: 4,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 8,
+  },
   programSubLabel: { fontSize: 13, fontWeight: '700', color: '#334155', marginTop: 4 },
+  studentTargetLabel: { fontSize: 13, fontWeight: '700', color: '#334155', marginTop: 8 },
   programBodyText: { fontSize: 13, color: '#475569', lineHeight: 19 },
+  moreChip: {
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    backgroundColor: '#e3f2fd',
+  },
+  moreChipText: {
+    color: '#1976d2',
+    fontSize: 12,
+    fontWeight: '700',
+  },
   subjectItem: { backgroundColor: '#f8fafc', borderRadius: 10, padding: 10 },
   subjectTitleRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   subjectName: { fontSize: 14, fontWeight: '600', color: '#0f172a', flex: 1 },
@@ -1411,6 +2351,221 @@ const styles = StyleSheet.create({
   campusPickerItemName: { fontSize: 15, fontWeight: '700', color: '#0f172a' },
   campusPickerItemAddress: { fontSize: 13, color: '#64748b', lineHeight: 18 },
   campusPickerItemHint: { marginTop: 4, fontSize: 12, color: '#b45309', fontWeight: '600' },
+  consultSectionButton: {
+    marginTop: 12,
+    height: 44,
+    borderRadius: 12,
+    backgroundColor: '#1976d2',
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexDirection: 'row',
+    gap: 8,
+  },
+  consultSectionButtonText: { color: '#fff', fontSize: 15, fontWeight: '700' },
+  consultSheetBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(15, 23, 42, 0.45)',
+    justifyContent: 'flex-end',
+  },
+  consultSheetCard: {
+    backgroundColor: '#fff',
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    padding: 16,
+    paddingBottom: 24,
+    maxHeight: '90%',
+    gap: 10,
+    flexDirection: 'column',
+  },
+  consultSheetHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
+  },
+  consultSheetTitleWrap: { flex: 1 },
+  consultSheetTitle: { fontSize: 18, fontWeight: '700', color: '#0f172a' },
+  consultSheetSubtitle: { marginTop: 2, fontSize: 13, color: '#64748b' },
+  consultWeekNavRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  consultWeekNavBtn: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#e3f2fd',
+  },
+  consultWeekLabel: { fontSize: 13, color: '#334155', fontWeight: '600' },
+  consultDateScroll: { marginHorizontal: -4, height: 78 },
+  consultDateScrollContent: {
+    alignItems: 'flex-start',
+  },
+  consultDateChip: {
+    width: 72,
+    alignSelf: 'flex-start',
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: '#dbeafe',
+    backgroundColor: '#fff',
+    marginHorizontal: 4,
+    paddingVertical: 8,
+    alignItems: 'center',
+    gap: 2,
+  },
+  consultDateChipSelected: {
+    backgroundColor: '#1976d2',
+    borderColor: '#1976d2',
+    shadowColor: '#1976d2',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.2,
+    shadowRadius: 8,
+    elevation: 2,
+  },
+  consultDateChipToday: { borderColor: '#16a34a', borderWidth: 2 },
+  consultDateChipDisabled: { backgroundColor: '#f8fafc', borderColor: '#e2e8f0' },
+  consultDateChipWeekday: { fontSize: 12, fontWeight: '600', color: '#64748b' },
+  consultDateChipWeekdaySelected: { color: '#fff' },
+  consultDateChipDay: { fontSize: 16, fontWeight: '700', color: '#0f172a' },
+  consultDateChipDaySelected: { color: '#fff' },
+  consultSlotsContent: {
+    marginTop: 12,
+    flexShrink: 1,
+  },
+  consultStateBox: {
+    minHeight: 84,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: '#e2e8f0',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    backgroundColor: '#f8fafc',
+  },
+  consultStateText: { fontSize: 13, color: '#475569', textAlign: 'center', paddingHorizontal: 14 },
+  consultEmptyState: {
+    minHeight: 140,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: '#e2e8f0',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#f8fafc',
+    gap: 6,
+  },
+  consultEmptyTitle: { fontSize: 14, color: '#334155', fontWeight: '700' },
+  consultEmptyText: { fontSize: 13, color: '#64748b' },
+  consultSlotMetaRow: { marginTop: 2 },
+  consultSlotMetaText: { fontSize: 12, color: '#16a34a', fontWeight: '600' },
+  consultSlotsScrollWrap: {
+    marginTop: 8,
+    maxHeight: 250,
+    flexShrink: 1,
+  },
+  consultSlotsScroll: {
+    flexShrink: 1,
+  },
+  consultSlotsScrollContent: {
+    paddingBottom: 4,
+  },
+  consultSlotGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'space-between',
+    rowGap: 10,
+  },
+  consultSlotCard: {
+    width: '48.5%',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#dbeafe',
+    paddingVertical: 12,
+    paddingHorizontal: 10,
+    backgroundColor: '#fff',
+    gap: 6,
+  },
+  consultSlotCardSelected: {
+    backgroundColor: '#1976d2',
+    borderColor: '#1976d2',
+    shadowColor: '#1976d2',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.2,
+    shadowRadius: 8,
+    elevation: 2,
+  },
+  consultSlotCardDisabled: {
+    backgroundColor: '#e5e7eb',
+    borderColor: '#d1d5db',
+    opacity: 0.75,
+  },
+  consultSlotTime: { fontSize: 13, fontWeight: '700', color: '#0f172a' },
+  consultSlotTimeSelected: { color: '#fff' },
+  consultSlotStatus: { fontSize: 12, color: '#64748b' },
+  consultSlotStatusSelected: { color: '#dbeafe' },
+  consultBookingButton: {
+    marginTop: 16,
+    height: 48,
+    borderRadius: 14,
+    backgroundColor: '#1976d2',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  consultBookingButtonDisabled: { backgroundColor: '#90caf9' },
+  consultBookingButtonText: { fontSize: 15, fontWeight: '700', color: '#fff' },
+  consultFormBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(15, 23, 42, 0.45)',
+    justifyContent: 'flex-end',
+  },
+  consultFormCard: {
+    backgroundColor: '#fff',
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    padding: 16,
+    paddingBottom: 26,
+    gap: 10,
+  },
+  consultFormHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
+  },
+  consultFormTitle: { fontSize: 17, fontWeight: '700', color: '#0f172a' },
+  consultFieldLabel: { fontSize: 13, fontWeight: '600', color: '#334155' },
+  consultInput: {
+    borderWidth: 1,
+    borderColor: '#dbeafe',
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    fontSize: 14,
+    color: '#0f172a',
+    backgroundColor: '#fff',
+  },
+  consultInputMultiline: { minHeight: 90 },
+  consultReadonlyField: {
+    borderWidth: 1,
+    borderColor: '#e2e8f0',
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 11,
+    backgroundColor: '#f8fafc',
+  },
+  consultReadonlyFieldText: { fontSize: 14, color: '#0f172a', fontWeight: '600' },
+  consultSubmitButton: {
+    marginTop: 6,
+    height: 46,
+    borderRadius: 12,
+    backgroundColor: '#1976d2',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  consultSubmitButtonDisabled: { opacity: 0.8 },
+  consultSubmitButtonText: { color: '#fff', fontSize: 15, fontWeight: '700' },
   studentPickerBackdrop: {
     flex: 1,
     backgroundColor: 'rgba(15, 23, 42, 0.45)',

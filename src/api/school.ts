@@ -1,9 +1,14 @@
 import { apiRequest } from './client';
 import type {
+  AdmissionDocumentRequirement,
+  AdmissionMethodDetail,
+  AdmissionProcessStep,
   Curriculum,
   CurriculumProgram,
   NearbyCampusSearchItem,
   NearbyCampusSearchResponse,
+  SchoolCampaignTemplate,
+  SchoolCampaignTemplateResponse,
   SchoolDetail,
   SchoolDetailResponse,
   SchoolListResponse,
@@ -199,6 +204,104 @@ export async function searchNearbyCampus(
           row && typeof row === 'object' ? normalizeNearbyCampusSearchItem(row as Record<string, unknown>) : null
         )
         .filter((row): row is NearbyCampusSearchItem => row != null)
+    : [];
+  return { message: response.message, body };
+}
+
+function normalizeAdmissionStep(step: unknown): AdmissionProcessStep | null {
+  if (!step || typeof step !== 'object') return null;
+  const s = step as Record<string, unknown>;
+  if (typeof s.stepName !== 'string' || typeof s.stepOrder !== 'number') return null;
+  return {
+    stepName: s.stepName,
+    stepOrder: s.stepOrder,
+    description: typeof s.description === 'string' ? s.description : null,
+  };
+}
+
+function normalizeAdmissionDoc(doc: unknown): AdmissionDocumentRequirement | null {
+  if (!doc || typeof doc !== 'object') return null;
+  const d = doc as Record<string, unknown>;
+  if (typeof d.code !== 'string' || typeof d.name !== 'string') return null;
+  return {
+    code: d.code,
+    name: d.name,
+    required: Boolean(d.required),
+  };
+}
+
+function normalizeDateParts(parts: unknown): number[] {
+  if (!Array.isArray(parts)) return [];
+  return parts.filter((n): n is number => typeof n === 'number' && Number.isFinite(n));
+}
+
+function normalizeAdmissionMethodDetail(method: unknown): AdmissionMethodDetail | null {
+  if (!method || typeof method !== 'object') return null;
+  const m = method as Record<string, unknown>;
+  if (typeof m.methodCode !== 'string' || typeof m.displayName !== 'string') return null;
+  return {
+    endDate: normalizeDateParts(m.endDate),
+    startDate: normalizeDateParts(m.startDate),
+    methodCode: m.methodCode,
+    description: typeof m.description === 'string' ? m.description : null,
+    displayName: m.displayName,
+    allowReservationSubmission: Boolean(m.allowReservationSubmission),
+    admissionProcessSteps: Array.isArray(m.admissionProcessSteps)
+      ? m.admissionProcessSteps
+          .map((s) => normalizeAdmissionStep(s))
+          .filter((s): s is AdmissionProcessStep => s != null)
+      : [],
+    methodDocumentRequirements: Array.isArray(m.methodDocumentRequirements)
+      ? m.methodDocumentRequirements
+          .map((d) => normalizeAdmissionDoc(d))
+          .filter((d): d is AdmissionDocumentRequirement => d != null)
+      : [],
+  };
+}
+
+function normalizeCampaignTemplate(item: unknown): SchoolCampaignTemplate | null {
+  if (!item || typeof item !== 'object') return null;
+  const c = item as Record<string, unknown>;
+  if (typeof c.id !== 'number' || typeof c.schoolId !== 'number' || typeof c.name !== 'string') return null;
+  return {
+    id: c.id,
+    schoolId: c.schoolId,
+    year: typeof c.year === 'number' ? c.year : new Date().getFullYear(),
+    name: c.name,
+    description: typeof c.description === 'string' ? c.description : null,
+    startDate: typeof c.startDate === 'string' ? c.startDate : null,
+    endDate: typeof c.endDate === 'string' ? c.endDate : null,
+    status: typeof c.status === 'string' ? c.status : 'UNKNOWN',
+    admissionMethodDetails: Array.isArray(c.admissionMethodDetails)
+      ? c.admissionMethodDetails
+          .map((m) => normalizeAdmissionMethodDetail(m))
+          .filter((m): m is AdmissionMethodDetail => m != null)
+      : [],
+    admissionMethodTimelines: [],
+    mandatoryAll: Array.isArray(c.mandatoryAll)
+      ? c.mandatoryAll
+          .map((d) => normalizeAdmissionDoc(d))
+          .filter((d): d is AdmissionDocumentRequirement => d != null)
+      : [],
+    campusProgramOfferings: Array.isArray(c.campusProgramOfferings)
+      ? c.campusProgramOfferings.filter((p): p is Record<string, unknown> => !!p && typeof p === 'object')
+      : [],
+  };
+}
+
+export async function fetchSchoolCampaignTemplates(
+  schoolId: number,
+  year: number
+): Promise<SchoolCampaignTemplateResponse> {
+  const query = `year=${encodeURIComponent(String(year))}`;
+  const response = await apiRequest<{ message: string; body: unknown }>(
+    `/api/v1/school/${schoolId}/campaign/template/public?${query}`,
+    { method: 'GET' }
+  );
+  const body = Array.isArray(response.body)
+    ? response.body
+        .map((row) => normalizeCampaignTemplate(row))
+        .filter((row): row is SchoolCampaignTemplate => row != null)
     : [];
   return { message: response.message, body };
 }

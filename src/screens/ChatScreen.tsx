@@ -5,9 +5,11 @@ import {
   FlatList,
   Image,
   KeyboardAvoidingView,
+  Modal,
   Platform,
   Pressable,
   SafeAreaView,
+  ScrollView,
   StyleSheet,
   Text,
   TextInput,
@@ -29,6 +31,8 @@ import {
 } from '../api/parentChat';
 import { ApiError } from '../api/client';
 import type { ChatMessage } from '../types/chat';
+import { fetchParentStudents } from '../api/parentStudent';
+import type { ParentStudentProfile } from '../types/studentProfile';
 
 /** Kích thước icon attach / gửi — dùng chung để đồng nhất */
 const INPUT_BAR_ICON_SIZE = 22;
@@ -42,6 +46,7 @@ type ChatScreenProps = {
   counsellorEmail: string;
   counsellorName?: string | null;
   counsellorAvatarUrl?: string | null;
+  studentName?: string | null;
   /** Preview từ GET conversations khi GET history trả về rỗng (vẫn thấy tin trên list). */
   initialLastMessageContent?: string | null;
   initialLastMessageAt?: string | null;
@@ -277,6 +282,7 @@ export default function ChatScreen({
   counsellorEmail,
   counsellorName,
   counsellorAvatarUrl,
+  studentName,
   initialLastMessageContent,
   initialLastMessageAt,
   onBack,
@@ -305,6 +311,10 @@ export default function ChatScreen({
 
   const [inputText, setInputText] = useState('');
   const [chatError, setChatError] = useState<string | null>(null);
+  const [studentProfileVisible, setStudentProfileVisible] = useState(false);
+  const [studentProfileLoading, setStudentProfileLoading] = useState(false);
+  const [studentProfileData, setStudentProfileData] = useState<ParentStudentProfile | null>(null);
+  const [expandedGradeBlocks, setExpandedGradeBlocks] = useState<Record<string, boolean>>({});
 
   useEffect(() => {
     setActiveConversationId(String(conversationId));
@@ -659,6 +669,25 @@ export default function ChatScreen({
     );
   }, [activeConversationId, campusId, counsellorEmail, inputText, parentEmail, studentProfileId]);
 
+  const openStudentProfile = useCallback(async () => {
+    setStudentProfileVisible(true);
+    setStudentProfileLoading(true);
+    setExpandedGradeBlocks({});
+    try {
+      const studentId = String(studentProfileId);
+      const res = await fetchParentStudents();
+      const matched =
+        res.body.find((s) => String(s.id) === studentId) ??
+        res.body.find((s) => (studentName?.trim() ? s.studentName === studentName.trim() : false)) ??
+        null;
+      setStudentProfileData(matched);
+    } catch {
+      setStudentProfileData(null);
+    } finally {
+      setStudentProfileLoading(false);
+    }
+  }, [studentName, studentProfileId]);
+
   const renderMessageItem = useCallback(
     ({ item, index }: { item: ChatMessage & { _chronoIndex: number }; index: number }) => {
       const isMine = emailsEqual(item.senderEmail, parentEmail);
@@ -741,12 +770,19 @@ export default function ChatScreen({
               {counsellorName ?? 'Tư vấn'}
             </Text>
             <Text style={[styles.headerStatus, isDark && styles.headerStatusDark]}>
+              {studentName?.trim()
+                ? `Hồ sơ: ${studentName.trim()}`
+                : 'Hồ sơ học sinh'}
+            </Text>
+            <Text style={[styles.headerPresence, isDark && styles.headerStatusDark]}>
               {connected ? 'Online' : 'Last seen recently'}
             </Text>
           </View>
         </View>
 
-        <View style={styles.headerActionsSpacer} />
+        <Pressable onPress={() => void openStudentProfile()} hitSlop={10} style={styles.headerMenuBtn}>
+          <Ionicons name="ellipsis-vertical" size={18} color={isDark ? '#E5E7EB' : '#334155'} />
+        </Pressable>
       </View>
 
       {loadingLatest ? (
@@ -840,6 +876,103 @@ export default function ChatScreen({
           </View>
         </View>
       </KeyboardAvoidingView>
+      <Modal
+        visible={studentProfileVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setStudentProfileVisible(false)}
+      >
+        <View style={styles.profileBackdrop}>
+          <Pressable style={styles.profileBackdropDismiss} onPress={() => setStudentProfileVisible(false)} />
+          <View style={[styles.profileCard, isDark && styles.profileCardDark]}>
+            <View style={styles.profileHeader}>
+              <Text style={[styles.profileTitle, isDark && styles.headerNameDark]}>Hồ sơ học sinh</Text>
+              <Pressable onPress={() => setStudentProfileVisible(false)} hitSlop={8}>
+                <Ionicons name="close" size={20} color={isDark ? '#E5E7EB' : '#475569'} />
+              </Pressable>
+            </View>
+            {studentProfileLoading ? (
+              <View style={styles.profileLoadingWrap}>
+                <ActivityIndicator size="small" color="#1976d2" />
+              </View>
+            ) : studentProfileData ? (
+              <ScrollView showsVerticalScrollIndicator={false} style={styles.profileContent}>
+                <Text style={[styles.profileField, isDark && styles.rowSubDark]}>
+                  Họ tên: {studentProfileData.studentName || 'Đang cập nhật'}
+                </Text>
+                <Text style={[styles.profileField, isDark && styles.rowSubDark]}>
+                  Giới tính: {studentProfileData.gender || 'Đang cập nhật'}
+                </Text>
+                <Text style={[styles.profileField, isDark && styles.rowSubDark]}>
+                  Nhóm tính cách: {studentProfileData.personalityTypeCode || 'Đang cập nhật'}
+                </Text>
+                <Text style={[styles.profileField, isDark && styles.rowSubDark]}>
+                  Ngành yêu thích: {studentProfileData.favouriteJob || 'Đang cập nhật'}
+                </Text>
+                {studentProfileData.academicInfos.length > 0 ? (
+                  <View style={styles.profileScoresWrap}>
+                    <Text style={[styles.profileSubTitle, isDark && styles.headerNameDark]}>Điểm theo từng khối</Text>
+                    {studentProfileData.academicInfos.map((block, idx) => {
+                      const gradeKey = `${block.gradeLevel || 'Khoi'}-${idx}`;
+                      const expanded = !!expandedGradeBlocks[gradeKey];
+                      return (
+                        <View key={gradeKey} style={[styles.gradeBlockCard, isDark && styles.gradeBlockCardDark]}>
+                          <Pressable
+                            onPress={() =>
+                              setExpandedGradeBlocks((prev) => ({
+                                ...prev,
+                                [gradeKey]: !prev[gradeKey],
+                              }))
+                            }
+                            style={styles.gradeBlockHeader}
+                          >
+                            <Text style={[styles.gradeBlockTitle, isDark && styles.headerNameDark]}>
+                              {block.gradeLevel || `Khối ${idx + 1}`}
+                            </Text>
+                            <View style={styles.gradeBlockHeaderRight}>
+                              <Text style={[styles.gradeBlockCount, isDark && styles.rowSubDark]}>
+                                {block.subjectResults.length} môn
+                              </Text>
+                              <Ionicons
+                                name={expanded ? 'chevron-up' : 'chevron-down'}
+                                size={16}
+                                color={isDark ? '#E5E7EB' : '#475569'}
+                              />
+                            </View>
+                          </Pressable>
+                          {expanded ? (
+                            <View style={styles.gradeSubjectsWrap}>
+                              {block.subjectResults.map((subject, sidx) => (
+                                <View key={`${gradeKey}-${subject.subjectName}-${sidx}`} style={styles.gradeSubjectRow}>
+                                  <Text style={[styles.gradeSubjectName, isDark && styles.rowSubDark]}>
+                                    {subject.subjectName}
+                                  </Text>
+                                  <Text style={[styles.gradeSubjectScore, isDark && styles.headerNameDark]}>
+                                    {subject.score}
+                                  </Text>
+                                </View>
+                              ))}
+                            </View>
+                          ) : null}
+                          {expanded && block.subjectResults.length === 0 ? (
+                            <Text style={[styles.profileEmpty, isDark && styles.rowSubDark]}>
+                              Chưa có dữ liệu điểm.
+                            </Text>
+                          ) : null}
+                        </View>
+                      );
+                    })}
+                  </View>
+                ) : null}
+              </ScrollView>
+            ) : (
+              <Text style={[styles.profileEmpty, isDark && styles.rowSubDark]}>
+                Không tải được hồ sơ học sinh. Vui lòng thử lại.
+              </Text>
+            )}
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -875,8 +1008,15 @@ const styles = StyleSheet.create({
   headerName: { fontSize: 16, fontWeight: '900', color: '#0f172a' },
   headerNameDark: { color: '#E5E7EB' },
   headerStatus: { marginTop: 2, fontSize: 12, color: '#64748b' },
+  headerPresence: { marginTop: 2, fontSize: 11, color: '#94a3b8' },
   headerStatusDark: { color: '#94a3b8' },
-  headerActionsSpacer: { width: 20 },
+  headerMenuBtn: {
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
 
   center: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   errorText: {
@@ -964,5 +1104,117 @@ const styles = StyleSheet.create({
   loadingMoreText: { marginTop: 8, color: '#64748b', fontWeight: '700', fontSize: 12 },
   loadingMoreTextDark: { color: '#94a3b8' },
   loadingMoreSpacer: { height: 18 },
+  profileBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(15, 23, 42, 0.45)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 18,
+  },
+  profileBackdropDismiss: {
+    ...StyleSheet.absoluteFillObject,
+  },
+  profileCard: {
+    width: '100%',
+    maxWidth: 420,
+    maxHeight: '65%',
+    backgroundColor: '#fff',
+    borderRadius: 16,
+    padding: 14,
+  },
+  profileCardDark: {
+    backgroundColor: '#0f172a',
+  },
+  profileHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 10,
+  },
+  profileTitle: {
+    fontSize: 16,
+    fontWeight: '800',
+    color: '#0f172a',
+  },
+  profileLoadingWrap: {
+    paddingVertical: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  profileContent: {
+    maxHeight: 320,
+  },
+  profileField: {
+    fontSize: 14,
+    color: '#334155',
+    marginBottom: 8,
+    lineHeight: 20,
+  },
+  profileEmpty: {
+    fontSize: 13,
+    color: '#64748b',
+  },
+  profileScoresWrap: {
+    marginTop: 8,
+    gap: 8,
+  },
+  profileSubTitle: {
+    fontSize: 14,
+    fontWeight: '800',
+    color: '#0f172a',
+  },
+  gradeBlockCard: {
+    borderWidth: 1,
+    borderColor: '#e2e8f0',
+    borderRadius: 12,
+    padding: 10,
+    backgroundColor: '#f8fafc',
+    gap: 8,
+  },
+  gradeBlockCardDark: {
+    backgroundColor: '#111827',
+    borderColor: '#334155',
+  },
+  gradeBlockHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 8,
+  },
+  gradeBlockHeaderRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  gradeBlockTitle: {
+    fontSize: 13,
+    fontWeight: '800',
+    color: '#0f172a',
+    flex: 1,
+  },
+  gradeBlockCount: {
+    fontSize: 12,
+    color: '#64748b',
+    fontWeight: '600',
+  },
+  gradeSubjectsWrap: {
+    gap: 6,
+  },
+  gradeSubjectRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 8,
+  },
+  gradeSubjectName: {
+    flex: 1,
+    fontSize: 13,
+    color: '#334155',
+  },
+  gradeSubjectScore: {
+    fontSize: 13,
+    fontWeight: '800',
+    color: '#1976d2',
+  },
 });
 
