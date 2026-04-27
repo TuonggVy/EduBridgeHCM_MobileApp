@@ -14,6 +14,8 @@ import {
   Animated,
   FlatList,
   Dimensions,
+  TextInput,
+  Alert,
 } from 'react-native';
 import MapView, { Marker } from 'react-native-maps';
 import * as Location from 'expo-location';
@@ -22,6 +24,8 @@ import type { SchoolDetail } from '../types/school';
 import type { SchoolCampaignTemplate } from '../types/school';
 import type { ParentStudentProfile } from '../types/studentProfile';
 import { fetchSchoolCampaignTemplates, fetchSchoolPublicDetail, searchNearbyCampus } from '../api/school';
+import { bookOfflineConsultation, fetchParentConsultationSlots } from '../api/parentConsultation';
+import type { ParentConsultationSlot } from '../types/consultation';
 import {
   badgePillStyle,
   getCurriculumStatusBadgeColors,
@@ -59,6 +63,29 @@ function formatArrayDate(parts: number[]): string {
   if (parts.length < 3) return 'Đang cập nhật';
   const [year, month, day] = parts;
   return `${String(day).padStart(2, '0')}/${String(month).padStart(2, '0')}/${year}`;
+}
+
+function toIsoDate(value: Date): string {
+  const year = value.getFullYear();
+  const month = String(value.getMonth() + 1).padStart(2, '0');
+  const day = String(value.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+function addDays(value: Date, days: number): Date {
+  const date = new Date(value);
+  date.setDate(date.getDate() + days);
+  return date;
+}
+
+function getWeekStart(date: Date): Date {
+  const day = date.getDay();
+  const diff = day === 0 ? -6 : 1 - day;
+  return addDays(date, diff);
+}
+
+function formatSlotTimeRange(startTime: string, endTime: string): string {
+  return `${startTime.slice(0, 5)} - ${endTime.slice(0, 5)}`;
 }
 
 /** BE có thể trả HTML trong mô tả; RN Text không render tag — bỏ tag để hiển thị sạch. */
@@ -101,6 +128,7 @@ type Props = {
   onClose: () => void;
   onToggleFavourite: () => void;
   onContactConsult?: (campusId: number) => void;
+  onOpenConsultBooking?: () => void;
   studentPickerVisible?: boolean;
   studentPickerOptions?: ParentStudentProfile[];
   studentPickerCampusName?: string | null;
@@ -245,12 +273,16 @@ export function SchoolDetailModal({
   onClose,
   onToggleFavourite,
   onContactConsult,
+  onOpenConsultBooking,
   studentPickerVisible = false,
   studentPickerOptions = [],
   studentPickerCampusName = null,
   onCloseStudentPicker,
   onSelectStudent,
 }: Props) {
+  const [shouldRender, setShouldRender] = useState(visible);
+  const modalTranslateY = useRef(new Animated.Value(40)).current;
+  const modalOpacity = useRef(new Animated.Value(0)).current;
   const [expandedDescription, setExpandedDescription] = useState(false);
   const [expandedCampaign, setExpandedCampaign] = useState<Record<number, boolean>>({});
   const [expandedMethod, setExpandedMethod] = useState<Record<string, boolean>>({});
@@ -280,6 +312,19 @@ export function SchoolDetailModal({
   const [facilityViewerImages, setFacilityViewerImages] = useState<FacilityImage[]>([]);
   const [facilityViewerIndex, setFacilityViewerIndex] = useState(0);
   const [campusPickerVisible, setCampusPickerVisible] = useState(false);
+  const [consultCampusPickerVisible, setConsultCampusPickerVisible] = useState(false);
+  const [consultBookingVisible, setConsultBookingVisible] = useState(false);
+  const [consultFormVisible, setConsultFormVisible] = useState(false);
+  const [selectedConsultCampusId, setSelectedConsultCampusId] = useState<number | null>(null);
+  const [consultWeekStart, setConsultWeekStart] = useState<Date>(() => getWeekStart(new Date()));
+  const [selectedConsultDate, setSelectedConsultDate] = useState<string>(() => toIsoDate(new Date()));
+  const [selectedConsultSlot, setSelectedConsultSlot] = useState<ParentConsultationSlot | null>(null);
+  const [consultSlotsLoading, setConsultSlotsLoading] = useState(false);
+  const [consultSlotsError, setConsultSlotsError] = useState<string | null>(null);
+  const [consultSlotsByDate, setConsultSlotsByDate] = useState<Record<string, ParentConsultationSlot[]>>({});
+  const [bookingPhone, setBookingPhone] = useState('');
+  const [bookingQuestion, setBookingQuestion] = useState('');
+  const [bookingSubmitting, setBookingSubmitting] = useState(false);
   const facilityViewerListRef = useRef<FlatList<FacilityImage> | null>(null);
 
   const curriculumList = useMemo(
@@ -288,16 +333,115 @@ export function SchoolDetailModal({
   );
   const campusList = useMemo(() => school?.campusList ?? [], [school?.campusList]);
   const consultCampuses = useMemo(() => campusList, [campusList]);
+  const selectedConsultCampus = useMemo(
+    () => consultCampuses.find((campus) => campus.id === selectedConsultCampusId) ?? null,
+    [consultCampuses, selectedConsultCampusId]
+  );
+  const weekDates = useMemo(() => {
+    return Array.from({ length: 7 }, (_, index) => addDays(consultWeekStart, index));
+  }, [consultWeekStart]);
+  const weekDateKeys = useMemo(() => weekDates.map((date) => toIsoDate(date)), [weekDates]);
+  const selectedDateSlots = useMemo(
+    () => consultSlotsByDate[selectedConsultDate] ?? [],
+    [consultSlotsByDate, selectedConsultDate]
+  );
+  const upcomingSlotsCount = useMemo(
+    () => selectedDateSlots.filter((slot) => slot.status === 'UPCOMING').length,
+    [selectedDateSlots]
+  );
   const displayHotline = apiSchoolContact.hotline ?? school?.hotline ?? null;
   const displayEmailSupport = apiSchoolContact.emailSupport ?? school?.emailSupport ?? null;
   const displayWebsiteUrl = apiSchoolContact.websiteUrl ?? school?.websiteUrl ?? null;
 
   useEffect(() => {
+    if (visible) {
+      setShouldRender(true);
+      modalTranslateY.setValue(40);
+      modalOpacity.setValue(0);
+      Animated.parallel([
+        Animated.timing(modalTranslateY, {
+          toValue: 0,
+          duration: 260,
+          useNativeDriver: true,
+        }),
+        Animated.timing(modalOpacity, {
+          toValue: 1,
+          duration: 220,
+          useNativeDriver: true,
+        }),
+      ]).start();
+      return;
+    }
+    Animated.parallel([
+      Animated.timing(modalTranslateY, {
+        toValue: 20,
+        duration: 180,
+        useNativeDriver: true,
+      }),
+      Animated.timing(modalOpacity, {
+        toValue: 0,
+        duration: 160,
+        useNativeDriver: true,
+      }),
+    ]).start(() => {
+      setShouldRender(false);
+    });
+  }, [visible, modalOpacity, modalTranslateY]);
+
+  useEffect(() => {
     if (!visible) {
       setDistancesKmByCampusId({});
       setCampusPickerVisible(false);
+      setConsultCampusPickerVisible(false);
+      setConsultBookingVisible(false);
+      setConsultFormVisible(false);
+      setSelectedConsultCampusId(null);
+      setSelectedConsultSlot(null);
+      setConsultSlotsByDate({});
+      setConsultSlotsError(null);
+      setBookingPhone('');
+      setBookingQuestion('');
     }
   }, [visible]);
+
+  useEffect(() => {
+    if (!consultBookingVisible || !selectedConsultCampusId) return;
+    let cancelled = false;
+    const startDate = toIsoDate(weekDates[0]);
+    const endDate = toIsoDate(weekDates[6]);
+    setConsultSlotsLoading(true);
+    setConsultSlotsError(null);
+    void fetchParentConsultationSlots(selectedConsultCampusId, startDate, endDate)
+      .then((res) => {
+        if (cancelled) return;
+        const grouped: Record<string, ParentConsultationSlot[]> = {};
+        for (const slot of res.body) {
+          if (!grouped[slot.date]) grouped[slot.date] = [];
+          grouped[slot.date].push(slot);
+        }
+        setConsultSlotsByDate(grouped);
+      })
+      .catch((error: unknown) => {
+        if (cancelled) return;
+        const message =
+          error instanceof Error && error.message ? error.message : 'Không tải được lịch tư vấn. Vui lòng thử lại.';
+        setConsultSlotsByDate({});
+        setConsultSlotsError(message);
+      })
+      .finally(() => {
+        if (!cancelled) setConsultSlotsLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [consultBookingVisible, selectedConsultCampusId, weekDates]);
+
+  useEffect(() => {
+    if (!weekDateKeys.includes(selectedConsultDate)) {
+      setSelectedConsultDate(weekDateKeys[0]);
+      setSelectedConsultSlot(null);
+    }
+  }, [selectedConsultDate, weekDateKeys]);
 
   const openFacilityGallery = (images: FacilityImage[], startIndex = 0) => {
     if (images.length === 0) return;
@@ -407,10 +551,78 @@ export function SchoolDetailModal({
     };
   }, [visible, loading, school?.id]);
 
+  const handleSelectConsultCampus = (campusId: number) => {
+    const today = new Date();
+    setSelectedConsultCampusId(campusId);
+    setConsultWeekStart(getWeekStart(today));
+    setSelectedConsultDate(toIsoDate(today));
+    setSelectedConsultSlot(null);
+    setConsultCampusPickerVisible(false);
+    setConsultBookingVisible(true);
+  };
+
+  const handleSubmitConsultBooking = async () => {
+    if (!selectedConsultSlot) {
+      Alert.alert('Chưa chọn khung giờ', 'Vui lòng chọn khung giờ tư vấn trước khi đặt lịch.');
+      return;
+    }
+    const phone = bookingPhone.trim();
+    const question = bookingQuestion.trim();
+    if (!phone) {
+      Alert.alert('Thiếu số điện thoại', 'Vui lòng nhập số điện thoại để đặt lịch tư vấn.');
+      return;
+    }
+    setBookingSubmitting(true);
+    try {
+      await bookOfflineConsultation({
+        phone,
+        question,
+        appointmentDate: selectedConsultSlot.date,
+        appointmentTime: selectedConsultSlot.startTime,
+      });
+      setConsultFormVisible(false);
+      setBookingPhone('');
+      setBookingQuestion('');
+      Alert.alert('Đặt lịch thành công', 'Nhà trường sẽ liên hệ xác nhận lịch tư vấn với bạn.');
+    } catch (error: unknown) {
+      const message =
+        error instanceof Error && error.message
+          ? error.message
+          : 'Đặt lịch chưa thành công. Vui lòng thử lại sau.';
+      Alert.alert('Không thể đặt lịch', message);
+    } finally {
+      setBookingSubmitting(false);
+    }
+  };
+
+  const handleOpenConsultForm = () => {
+    if (!selectedConsultSlot) {
+      Alert.alert('Chưa chọn khung giờ', 'Vui lòng chọn một slot tư vấn trước khi đặt lịch.');
+      return;
+    }
+    setConsultFormVisible(true);
+  };
+
+  const getWeekdayShortLabel = (date: Date): string => {
+    const weekday = date.getDay();
+    if (weekday === 0) return 'CN';
+    return `T${weekday + 1}`;
+  };
+
+  if (!shouldRender) return null;
+
   return (
-    <>
-      <Modal visible={visible} animationType="slide" presentationStyle="fullScreen" onRequestClose={onClose}>
-      <View style={styles.screen}>
+      <Animated.View
+        pointerEvents={visible ? 'auto' : 'none'}
+        style={[
+          styles.screen,
+          styles.screenOverlay,
+          {
+            opacity: modalOpacity,
+            transform: [{ translateY: modalTranslateY }],
+          },
+        ]}
+      >
         <ScrollView showsVerticalScrollIndicator={false}>
           <View style={styles.banner}>
             {school?.logoUrl ? (
@@ -787,9 +999,16 @@ export function SchoolDetailModal({
                           {formatIsoDateRange(campaign.startDate, campaign.endDate)}
                         </Text>
                         {campaign.description ? (
-                          <Text numberOfLines={expanded ? undefined : 1} style={styles.sectionText}>
-                            Mô tả: {stripBasicHtml(campaign.description)}
-                          </Text>
+                          expanded ? (
+                            <View style={styles.programSection}>
+                              <Text style={styles.programSectionTitle}>Mô tả</Text>
+                              <Text style={styles.sectionText}>{stripBasicHtml(campaign.description)}</Text>
+                            </View>
+                          ) : (
+                            <Text numberOfLines={1} style={styles.sectionText}>
+                              {stripBasicHtml(campaign.description)}
+                            </Text>
+                          )
                         ) : null}
                       </Pressable>
                       {expanded ? (
@@ -862,6 +1081,74 @@ export function SchoolDetailModal({
                               </View>
                             );
                           })}
+                          {campaign.campusProgramOfferings.length > 0 ? (
+                            <View style={styles.programSection}>
+                              <Text style={styles.programSectionTitle}>Chỉ tiêu theo cơ sở</Text>
+                              {campaign.campusProgramOfferings.map((offering, idx) => {
+                                const campusName =
+                                  typeof offering.campusName === 'string' ? offering.campusName : `Cơ sở #${idx + 1}`;
+                                const quota =
+                                  typeof offering.quota === 'number' && Number.isFinite(offering.quota)
+                                    ? offering.quota
+                                    : null;
+                                const remainingQuota =
+                                  typeof offering.remainingQuota === 'number' && Number.isFinite(offering.remainingQuota)
+                                    ? offering.remainingQuota
+                                    : null;
+                                const tuitionFee =
+                                  typeof offering.tuitionFee === 'number' && Number.isFinite(offering.tuitionFee)
+                                    ? offering.tuitionFee
+                                    : null;
+                                const learningMode =
+                                  typeof offering.learningMode === 'string' ? offering.learningMode : null;
+                                const openDate = typeof offering.openDate === 'string' ? offering.openDate : null;
+                                const closeDate = typeof offering.closeDate === 'string' ? offering.closeDate : null;
+                                const programRaw =
+                                  offering.program && typeof offering.program === 'object'
+                                    ? (offering.program as Record<string, unknown>)
+                                    : null;
+                                const programName =
+                                  typeof programRaw?.name === 'string' ? programRaw.name : 'Chương trình';
+                                const statusLabel =
+                                  typeof offering.applicationStatus === 'string'
+                                    ? offering.applicationStatus
+                                    : typeof offering.status === 'string'
+                                      ? offering.status
+                                      : 'UNKNOWN';
+                                const statusPill = badgePillStyle({
+                                  bg: statusLabel.includes('OPEN') ? '#dcfce7' : '#f1f5f9',
+                                  text: statusLabel.includes('OPEN') ? '#15803d' : '#475569',
+                                });
+                                return (
+                                  <View key={`${campaign.id}-offering-${idx}`} style={styles.offeringCard}>
+                                    <View style={styles.programHeaderRow}>
+                                      <Text style={styles.programName}>{campusName}</Text>
+                                      <View style={statusPill.wrap}>
+                                        <Text style={statusPill.text}>{statusLabel}</Text>
+                                      </View>
+                                    </View>
+                                    <Text style={styles.programBodyText}>Chương trình: {programName}</Text>
+                                    {learningMode ? (
+                                      <Text style={styles.programBodyText}>Hình thức học: {learningMode}</Text>
+                                    ) : null}
+                                    {quota != null || remainingQuota != null ? (
+                                      <Text style={styles.programBodyText}>
+                                        Chỉ tiêu: {quota ?? '—'} | Còn lại: {remainingQuota ?? '—'}
+                                      </Text>
+                                    ) : null}
+                                    {tuitionFee != null ? (
+                                      <Text style={styles.programTuition}>
+                                        Học phí: {formatTuitionVnd(tuitionFee) ?? `${tuitionFee} đ`}
+                                      </Text>
+                                    ) : null}
+                                    <Text style={styles.metaSmall}>
+                                      Thời gian nhận hồ sơ: {formatIsoDateRange(openDate, closeDate)}
+                                    </Text>
+                                  </View>
+                                );
+                              })}
+                            </View>
+                          ) : null}
                           {campaign.mandatoryAll.length > 0 ? (
                             <View style={styles.programSection}>
                               <Text style={styles.programSectionTitle}>Hồ sơ bắt buộc</Text>
@@ -882,6 +1169,7 @@ export function SchoolDetailModal({
                               ) : null}
                             </View>
                           ) : null}
+                          
                         </View>
                       ) : null}
                     </View>
@@ -1068,6 +1356,26 @@ export function SchoolDetailModal({
                   );
                 })}
               </View>
+
+              <View style={styles.section}>
+                <Text style={styles.sectionTitle}>Đặt lịch tư vấn</Text>
+                <Text style={styles.sectionText}>
+                  Chọn cơ sở để xem lịch trống theo tuần và đặt lịch tư vấn trực tiếp.
+                </Text>
+                <Pressable
+                  style={styles.consultSectionButton}
+                  onPress={() => {
+                    if (onOpenConsultBooking) {
+                      onOpenConsultBooking();
+                      return;
+                    }
+                    setConsultCampusPickerVisible(true);
+                  }}
+                >
+                  <MaterialIcons name="event-available" size={18} color="#fff" />
+                  <Text style={styles.consultSectionButtonText}>Xem lịch tư vấn</Text>
+                </Pressable>
+              </View>
             </View>
           )}
         </ScrollView>
@@ -1088,7 +1396,7 @@ export function SchoolDetailModal({
             {consultLoading ? (
               <ActivityIndicator size="small" color="#fff" />
             ) : (
-              <MaterialIcons name="phone-in-talk" size={20} color="#fff" style={styles.bottomCtaIcon} />
+              <MaterialIcons name="chat-bubble" size={20} color="#fff" style={styles.bottomCtaIcon} />
             )}
             <Text style={styles.bottomCtaText}>
               {consultLoading ? 'Đang kết nối tư vấn...' : 'Liên hệ tư vấn'}
@@ -1139,6 +1447,238 @@ export function SchoolDetailModal({
                   </Pressable>
                 ))
               )}
+            </Pressable>
+          </Pressable>
+        </Modal>
+        <Modal
+          visible={consultCampusPickerVisible}
+          transparent
+          animationType="fade"
+          onRequestClose={() => setConsultCampusPickerVisible(false)}
+        >
+          <Pressable style={styles.campusPickerBackdrop} onPress={() => setConsultCampusPickerVisible(false)}>
+            <Pressable style={styles.campusPickerCard} onPress={() => {}}>
+              <View style={styles.campusPickerHeader}>
+                <Text style={styles.campusPickerTitle}>Chọn cơ sở để đặt lịch</Text>
+                <Pressable onPress={() => setConsultCampusPickerVisible(false)} hitSlop={8}>
+                  <MaterialIcons name="close" size={20} color="#64748b" />
+                </Pressable>
+              </View>
+              {consultCampuses.length === 0 ? (
+                <Text style={styles.campusPickerEmptyText}>Trường chưa cập nhật danh sách cơ sở.</Text>
+              ) : (
+                consultCampuses.map((campus) => (
+                  <Pressable
+                    key={`booking-campus-${campus.id}`}
+                    style={({ pressed }) => [styles.campusPickerItem, pressed && styles.campusPickerItemPressed]}
+                    onPress={() => handleSelectConsultCampus(campus.id)}
+                  >
+                    <Text style={styles.campusPickerItemName}>{campus.name}</Text>
+                    {campus.address ? (
+                      <Text style={styles.campusPickerItemAddress} numberOfLines={2}>
+                        {campus.address}
+                      </Text>
+                    ) : null}
+                    <Text style={styles.campusPickerItemHint}>Xem lịch trống trong tuần và chọn khung giờ phù hợp</Text>
+                  </Pressable>
+                ))
+              )}
+            </Pressable>
+          </Pressable>
+        </Modal>
+        <Modal
+          visible={consultBookingVisible}
+          transparent
+          animationType="slide"
+          onRequestClose={() => setConsultBookingVisible(false)}
+        >
+          <View style={styles.consultSheetBackdrop}>
+            <View style={styles.consultSheetCard}>
+              <View style={styles.consultSheetHeader}>
+                <View style={styles.consultSheetTitleWrap}>
+                  <Text style={styles.consultSheetTitle}>Lịch tư vấn</Text>
+                  <Text style={styles.consultSheetSubtitle} numberOfLines={1}>
+                    {selectedConsultCampus?.name ?? 'Chưa chọn cơ sở'}
+                  </Text>
+                </View>
+                <Pressable onPress={() => setConsultBookingVisible(false)} hitSlop={8}>
+                  <MaterialIcons name="close" size={20} color="#64748b" />
+                </Pressable>
+              </View>
+
+              <View style={styles.consultWeekNavRow}>
+                <Pressable style={styles.consultWeekNavBtn} onPress={() => setConsultWeekStart((prev) => addDays(prev, -7))}>
+                  <MaterialIcons name="chevron-left" size={20} color="#1d4ed8" />
+                </Pressable>
+                <Text style={styles.consultWeekLabel}>
+                  {toIsoDate(weekDates[0])} - {toIsoDate(weekDates[6])}
+                </Text>
+                <Pressable style={styles.consultWeekNavBtn} onPress={() => setConsultWeekStart((prev) => addDays(prev, 7))}>
+                  <MaterialIcons name="chevron-right" size={20} color="#1d4ed8" />
+                </Pressable>
+              </View>
+
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                style={styles.consultDateScroll}
+                contentContainerStyle={styles.consultDateScrollContent}
+              >
+                {weekDates.map((day) => {
+                  const dayKey = toIsoDate(day);
+                  const isSelected = selectedConsultDate === dayKey;
+                  const isToday = dayKey === toIsoDate(new Date());
+                  const hasSlots = (consultSlotsByDate[dayKey] ?? []).length > 0;
+                  return (
+                    <Pressable
+                      key={dayKey}
+                      style={[
+                        styles.consultDateChip,
+                        isSelected && styles.consultDateChipSelected,
+                        isToday && !isSelected && styles.consultDateChipToday,
+                        !hasSlots && styles.consultDateChipDisabled,
+                      ]}
+                      onPress={() => {
+                        setSelectedConsultDate(dayKey);
+                        setSelectedConsultSlot(null);
+                      }}
+                    >
+                      <Text style={[styles.consultDateChipWeekday, isSelected && styles.consultDateChipWeekdaySelected]}>
+                        {getWeekdayShortLabel(day)}
+                      </Text>
+                      <Text style={[styles.consultDateChipDay, isSelected && styles.consultDateChipDaySelected]}>
+                        {String(day.getDate()).padStart(2, '0')}
+                      </Text>
+                    </Pressable>
+                  );
+                })}
+              </ScrollView>
+
+              <View style={styles.consultSlotsContent}>
+                {consultSlotsLoading ? (
+                  <View style={styles.consultStateBox}>
+                    <ActivityIndicator size="small" color="#1d4ed8" />
+                    <Text style={styles.consultStateText}>Đang tải lịch tư vấn...</Text>
+                  </View>
+                ) : consultSlotsError ? (
+                  <View style={styles.consultStateBox}>
+                    <MaterialIcons name="error-outline" size={18} color="#dc2626" />
+                    <Text style={styles.consultStateText}>{consultSlotsError}</Text>
+                  </View>
+                ) : selectedDateSlots.length === 0 ? (
+                  <View style={styles.consultEmptyState}>
+                    <MaterialIcons name="calendar-today" size={24} color="#94a3b8" />
+                    <Text style={styles.consultEmptyTitle}>Không có lịch tư vấn</Text>
+                    <Text style={styles.consultEmptyText}>Vui lòng chọn ngày khác trong tuần.</Text>
+                  </View>
+                ) : (
+                  <>
+                    <View style={styles.consultSlotMetaRow}>
+                      <Text style={styles.consultSlotMetaText}>Còn {upcomingSlotsCount} slot khả dụng</Text>
+                    </View>
+                    <View style={styles.consultSlotsScrollWrap}>
+                      <ScrollView
+                        style={styles.consultSlotsScroll}
+                        contentContainerStyle={styles.consultSlotsScrollContent}
+                        showsVerticalScrollIndicator={false}
+                      >
+                        <View style={styles.consultSlotGrid}>
+                          {selectedDateSlots.map((slot) => {
+                            const isDisabled = slot.status === 'PAST';
+                            const isSelected = selectedConsultSlot?.campusScheduleTemplateId === slot.campusScheduleTemplateId;
+                            return (
+                              <Pressable
+                                key={`${slot.date}-${slot.campusScheduleTemplateId}`}
+                                disabled={isDisabled}
+                                style={[
+                                  styles.consultSlotCard,
+                                  isDisabled && styles.consultSlotCardDisabled,
+                                  isSelected && styles.consultSlotCardSelected,
+                                ]}
+                                onPress={() => setSelectedConsultSlot(slot)}
+                              >
+                                <Text style={[styles.consultSlotTime, isSelected && styles.consultSlotTimeSelected]}>
+                                  {formatSlotTimeRange(slot.startTime, slot.endTime)}
+                                </Text>
+                                <Text style={[styles.consultSlotStatus, isSelected && styles.consultSlotStatusSelected]}>
+                                  {slot.statusLabel || slot.status}
+                                </Text>
+                              </Pressable>
+                            );
+                          })}
+                        </View>
+                      </ScrollView>
+                    </View>
+                  </>
+                )}
+              </View>
+
+              <Pressable
+                style={[styles.consultBookingButton, !selectedConsultSlot && styles.consultBookingButtonDisabled]}
+                onPress={handleOpenConsultForm}
+              >
+                <Text style={styles.consultBookingButtonText}>Đặt lịch</Text>
+              </Pressable>
+            </View>
+          </View>
+        </Modal>
+        <Modal
+          visible={consultFormVisible}
+          transparent
+          animationType="slide"
+          onRequestClose={() => setConsultFormVisible(false)}
+        >
+          <Pressable style={styles.consultFormBackdrop} onPress={() => setConsultFormVisible(false)}>
+            <Pressable style={styles.consultFormCard} onPress={() => {}}>
+              <View style={styles.consultFormHeader}>
+                <Text style={styles.consultFormTitle}>Đặt lịch tư vấn</Text>
+                <Pressable onPress={() => setConsultFormVisible(false)} hitSlop={8}>
+                  <MaterialIcons name="close" size={20} color="#64748b" />
+                </Pressable>
+              </View>
+
+              <Text style={styles.consultFieldLabel}>Số điện thoại</Text>
+              <TextInput
+                value={bookingPhone}
+                onChangeText={setBookingPhone}
+                placeholder="Nhập số điện thoại"
+                keyboardType="phone-pad"
+                style={styles.consultInput}
+              />
+
+              <Text style={styles.consultFieldLabel}>Câu hỏi</Text>
+              <TextInput
+                value={bookingQuestion}
+                onChangeText={setBookingQuestion}
+                placeholder="Bạn muốn tư vấn điều gì?"
+                multiline
+                textAlignVertical="top"
+                style={[styles.consultInput, styles.consultInputMultiline]}
+              />
+
+              <Text style={styles.consultFieldLabel}>Khung giờ</Text>
+              <View style={styles.consultReadonlyField}>
+                <Text style={styles.consultReadonlyFieldText}>
+                  {selectedConsultSlot ? formatSlotTimeRange(selectedConsultSlot.startTime, selectedConsultSlot.endTime) : '—'}
+                </Text>
+              </View>
+
+              <Text style={styles.consultFieldLabel}>Ngày hẹn</Text>
+              <View style={styles.consultReadonlyField}>
+                <Text style={styles.consultReadonlyFieldText}>{selectedConsultSlot?.date ?? '—'}</Text>
+              </View>
+
+              <Pressable
+                style={[styles.consultSubmitButton, bookingSubmitting && styles.consultSubmitButtonDisabled]}
+                disabled={bookingSubmitting}
+                onPress={handleSubmitConsultBooking}
+              >
+                {bookingSubmitting ? (
+                  <ActivityIndicator size="small" color="#fff" />
+                ) : (
+                  <Text style={styles.consultSubmitButtonText}>Đặt lịch tư vấn</Text>
+                )}
+              </Pressable>
             </Pressable>
           </Pressable>
         </Modal>
@@ -1242,14 +1782,17 @@ export function SchoolDetailModal({
             </View>
           </View>
         ) : null}
-      </View>
-      </Modal>
-    </>
+      </Animated.View>
   );
 }
 
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: '#f8fafc' },
+  screenOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    zIndex: 40,
+    elevation: 40,
+  },
   banner: {
     height: 240,
     backgroundColor: '#e2e8f0',
@@ -1686,7 +2229,7 @@ const styles = StyleSheet.create({
     color: '#334155',
     lineHeight: 18,
   },
-  programSection: { marginTop: 4, gap: 10 },
+  programSection: { marginTop: 10, gap: 10 },
   programSectionTitle: { fontSize: 14, fontWeight: '700', color: '#0f172a' },
   programCard: {
     borderRadius: 10,
@@ -1694,6 +2237,14 @@ const styles = StyleSheet.create({
     backgroundColor: '#f8fafc',
     borderWidth: 1,
     borderColor: '#e2e8f0',
+    gap: 6,
+  },
+  offeringCard: {
+    borderRadius: 10,
+    padding: 12,
+    backgroundColor: '#fff',
+    borderWidth: 1,
+    borderColor: '#dbeafe',
     gap: 6,
   },
   programHeaderRow: {
@@ -1800,6 +2351,221 @@ const styles = StyleSheet.create({
   campusPickerItemName: { fontSize: 15, fontWeight: '700', color: '#0f172a' },
   campusPickerItemAddress: { fontSize: 13, color: '#64748b', lineHeight: 18 },
   campusPickerItemHint: { marginTop: 4, fontSize: 12, color: '#b45309', fontWeight: '600' },
+  consultSectionButton: {
+    marginTop: 12,
+    height: 44,
+    borderRadius: 12,
+    backgroundColor: '#1976d2',
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexDirection: 'row',
+    gap: 8,
+  },
+  consultSectionButtonText: { color: '#fff', fontSize: 15, fontWeight: '700' },
+  consultSheetBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(15, 23, 42, 0.45)',
+    justifyContent: 'flex-end',
+  },
+  consultSheetCard: {
+    backgroundColor: '#fff',
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    padding: 16,
+    paddingBottom: 24,
+    maxHeight: '90%',
+    gap: 10,
+    flexDirection: 'column',
+  },
+  consultSheetHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
+  },
+  consultSheetTitleWrap: { flex: 1 },
+  consultSheetTitle: { fontSize: 18, fontWeight: '700', color: '#0f172a' },
+  consultSheetSubtitle: { marginTop: 2, fontSize: 13, color: '#64748b' },
+  consultWeekNavRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  consultWeekNavBtn: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#e3f2fd',
+  },
+  consultWeekLabel: { fontSize: 13, color: '#334155', fontWeight: '600' },
+  consultDateScroll: { marginHorizontal: -4, height: 78 },
+  consultDateScrollContent: {
+    alignItems: 'flex-start',
+  },
+  consultDateChip: {
+    width: 72,
+    alignSelf: 'flex-start',
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: '#dbeafe',
+    backgroundColor: '#fff',
+    marginHorizontal: 4,
+    paddingVertical: 8,
+    alignItems: 'center',
+    gap: 2,
+  },
+  consultDateChipSelected: {
+    backgroundColor: '#1976d2',
+    borderColor: '#1976d2',
+    shadowColor: '#1976d2',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.2,
+    shadowRadius: 8,
+    elevation: 2,
+  },
+  consultDateChipToday: { borderColor: '#16a34a', borderWidth: 2 },
+  consultDateChipDisabled: { backgroundColor: '#f8fafc', borderColor: '#e2e8f0' },
+  consultDateChipWeekday: { fontSize: 12, fontWeight: '600', color: '#64748b' },
+  consultDateChipWeekdaySelected: { color: '#fff' },
+  consultDateChipDay: { fontSize: 16, fontWeight: '700', color: '#0f172a' },
+  consultDateChipDaySelected: { color: '#fff' },
+  consultSlotsContent: {
+    marginTop: 12,
+    flexShrink: 1,
+  },
+  consultStateBox: {
+    minHeight: 84,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: '#e2e8f0',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    backgroundColor: '#f8fafc',
+  },
+  consultStateText: { fontSize: 13, color: '#475569', textAlign: 'center', paddingHorizontal: 14 },
+  consultEmptyState: {
+    minHeight: 140,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: '#e2e8f0',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#f8fafc',
+    gap: 6,
+  },
+  consultEmptyTitle: { fontSize: 14, color: '#334155', fontWeight: '700' },
+  consultEmptyText: { fontSize: 13, color: '#64748b' },
+  consultSlotMetaRow: { marginTop: 2 },
+  consultSlotMetaText: { fontSize: 12, color: '#16a34a', fontWeight: '600' },
+  consultSlotsScrollWrap: {
+    marginTop: 8,
+    maxHeight: 250,
+    flexShrink: 1,
+  },
+  consultSlotsScroll: {
+    flexShrink: 1,
+  },
+  consultSlotsScrollContent: {
+    paddingBottom: 4,
+  },
+  consultSlotGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'space-between',
+    rowGap: 10,
+  },
+  consultSlotCard: {
+    width: '48.5%',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#dbeafe',
+    paddingVertical: 12,
+    paddingHorizontal: 10,
+    backgroundColor: '#fff',
+    gap: 6,
+  },
+  consultSlotCardSelected: {
+    backgroundColor: '#1976d2',
+    borderColor: '#1976d2',
+    shadowColor: '#1976d2',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.2,
+    shadowRadius: 8,
+    elevation: 2,
+  },
+  consultSlotCardDisabled: {
+    backgroundColor: '#e5e7eb',
+    borderColor: '#d1d5db',
+    opacity: 0.75,
+  },
+  consultSlotTime: { fontSize: 13, fontWeight: '700', color: '#0f172a' },
+  consultSlotTimeSelected: { color: '#fff' },
+  consultSlotStatus: { fontSize: 12, color: '#64748b' },
+  consultSlotStatusSelected: { color: '#dbeafe' },
+  consultBookingButton: {
+    marginTop: 16,
+    height: 48,
+    borderRadius: 14,
+    backgroundColor: '#1976d2',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  consultBookingButtonDisabled: { backgroundColor: '#90caf9' },
+  consultBookingButtonText: { fontSize: 15, fontWeight: '700', color: '#fff' },
+  consultFormBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(15, 23, 42, 0.45)',
+    justifyContent: 'flex-end',
+  },
+  consultFormCard: {
+    backgroundColor: '#fff',
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    padding: 16,
+    paddingBottom: 26,
+    gap: 10,
+  },
+  consultFormHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
+  },
+  consultFormTitle: { fontSize: 17, fontWeight: '700', color: '#0f172a' },
+  consultFieldLabel: { fontSize: 13, fontWeight: '600', color: '#334155' },
+  consultInput: {
+    borderWidth: 1,
+    borderColor: '#dbeafe',
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    fontSize: 14,
+    color: '#0f172a',
+    backgroundColor: '#fff',
+  },
+  consultInputMultiline: { minHeight: 90 },
+  consultReadonlyField: {
+    borderWidth: 1,
+    borderColor: '#e2e8f0',
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 11,
+    backgroundColor: '#f8fafc',
+  },
+  consultReadonlyFieldText: { fontSize: 14, color: '#0f172a', fontWeight: '600' },
+  consultSubmitButton: {
+    marginTop: 6,
+    height: 46,
+    borderRadius: 12,
+    backgroundColor: '#1976d2',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  consultSubmitButtonDisabled: { opacity: 0.8 },
+  consultSubmitButtonText: { color: '#fff', fontSize: 15, fontWeight: '700' },
   studentPickerBackdrop: {
     flex: 1,
     backgroundColor: 'rgba(15, 23, 42, 0.45)',
