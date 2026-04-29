@@ -55,9 +55,8 @@ function categoryLabel(category: string): string {
 function postImages(post: SchoolPost): string[] {
   const imageList = post.imageJson?.imageItemList ?? [];
   const sorted = [...imageList].sort((a, b) => a.position - b.position).map((item) => item.url);
-  if (sorted.length > 0) return sorted;
-  if (post.thumbnail) return [post.thumbnail];
-  return [];
+  const allImages = post.thumbnail ? [post.thumbnail, ...sorted] : sorted;
+  return allImages.filter((url, index, arr) => url && arr.indexOf(url) === index);
 }
 
 function normalizeText(rawText: string): string {
