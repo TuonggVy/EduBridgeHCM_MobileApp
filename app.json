@@ -13,8 +13,10 @@
     },
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.edubridge.hcm",
+      "bundleIdentifier": "com.sp26se041.edubridgehcm.mobile.ios",
+      "googleServicesFile": "./GoogleService-Info.plist",
       "infoPlist": {
+        "NSUserNotificationsUsageDescription": "EduBridge gửi thông báo về hoạt động và cập nhật quan trọng.",
         "NSLocationWhenInUseUsageDescription": "EduBridge cần quyền vị trí để hiển thị các trường gần bạn.",
         "NSCameraUsageDescription": "EduBridge cần quyền camera để chụp ảnh học bạ.",
         "NSPhotoLibraryUsageDescription": "EduBridge cần quyền thư viện ảnh để chọn ảnh học bạ.",
@@ -29,10 +31,12 @@
         "monochromeImage": "./assets/android-icon-monochrome.png"
       },
       "predictiveBackGestureEnabled": false,
-      "package": "com.edubridge.hcm",
+      "package": "com.sp26se041.edubridgehcm.mobile.android",
+      "googleServicesFile": "./google-services.json",
       "permissions": [
         "ACCESS_COARSE_LOCATION",
-        "ACCESS_FINE_LOCATION"
+        "ACCESS_FINE_LOCATION",
+        "android.permission.POST_NOTIFICATIONS"
       ]
     },
     "web": {
@@ -57,7 +61,9 @@
         {
           "locationWhenInUsePermission": "EduBridge cần quyền vị trí để tìm trường gần bạn."
         }
-      ]
+      ],
+      "@react-native-firebase/app",
+      "@react-native-firebase/messaging"
     ]
   }
 }

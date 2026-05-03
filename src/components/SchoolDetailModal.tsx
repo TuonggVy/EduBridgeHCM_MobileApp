@@ -25,7 +25,7 @@ import type { SchoolCampaignTemplate } from '../types/school';
 import type { ParentStudentProfile } from '../types/studentProfile';
 import { fetchSchoolCampaignTemplates, fetchSchoolPublicDetail, searchNearbyCampus } from '../api/school';
 import { bookOfflineConsultation, fetchParentConsultationSlots } from '../api/parentConsultation';
-import type { ParentConsultationSlot } from '../types/consultation';
+import { type ParentConsultationSlot, isParentConsultationSlotSelectable } from '../types/consultation';
 import {
   badgePillStyle,
   getCurriculumStatusBadgeColors,
@@ -346,7 +346,7 @@ export function SchoolDetailModal({
     [consultSlotsByDate, selectedConsultDate]
   );
   const upcomingSlotsCount = useMemo(
-    () => selectedDateSlots.filter((slot) => slot.status === 'UPCOMING').length,
+    () => selectedDateSlots.filter((slot) => isParentConsultationSlotSelectable(slot)).length,
     [selectedDateSlots]
   );
   const displayHotline = apiSchoolContact.hotline ?? school?.hotline ?? null;
@@ -418,6 +418,9 @@ export function SchoolDetailModal({
         for (const slot of res.body) {
           if (!grouped[slot.date]) grouped[slot.date] = [];
           grouped[slot.date].push(slot);
+        }
+        for (const key of Object.keys(grouped)) {
+          grouped[key].sort((a, b) => a.startTime.localeCompare(b.startTime));
         }
         setConsultSlotsByDate(grouped);
       })
@@ -566,6 +569,10 @@ export function SchoolDetailModal({
       Alert.alert('Chưa chọn khung giờ', 'Vui lòng chọn khung giờ tư vấn trước khi đặt lịch.');
       return;
     }
+    if (selectedConsultCampusId == null) {
+      Alert.alert('Chưa chọn cơ sở', 'Vui lòng chọn cơ sở trước khi đặt lịch.');
+      return;
+    }
     const phone = bookingPhone.trim();
     const question = bookingQuestion.trim();
     if (!phone) {
@@ -579,6 +586,7 @@ export function SchoolDetailModal({
         question,
         appointmentDate: selectedConsultSlot.date,
         appointmentTime: selectedConsultSlot.startTime,
+        campusId: selectedConsultCampusId,
       });
       setConsultFormVisible(false);
       setBookingPhone('');
@@ -1528,15 +1536,17 @@ export function SchoolDetailModal({
                   const dayKey = toIsoDate(day);
                   const isSelected = selectedConsultDate === dayKey;
                   const isToday = dayKey === toIsoDate(new Date());
-                  const hasSlots = (consultSlotsByDate[dayKey] ?? []).length > 0;
+                  const daySlots = consultSlotsByDate[dayKey] ?? [];
+                  const hasSelectable = daySlots.some((slot) => isParentConsultationSlotSelectable(slot));
                   return (
                     <Pressable
                       key={dayKey}
+                      disabled={!hasSelectable}
                       style={[
                         styles.consultDateChip,
                         isSelected && styles.consultDateChipSelected,
                         isToday && !isSelected && styles.consultDateChipToday,
-                        !hasSlots && styles.consultDateChipDisabled,
+                        !hasSelectable && styles.consultDateChipDisabled,
                       ]}
                       onPress={() => {
                         setSelectedConsultDate(dayKey);
@@ -1584,7 +1594,7 @@ export function SchoolDetailModal({
                       >
                         <View style={styles.consultSlotGrid}>
                           {selectedDateSlots.map((slot) => {
-                            const isDisabled = slot.status === 'PAST';
+                            const isDisabled = !isParentConsultationSlotSelectable(slot);
                             const isSelected = selectedConsultSlot?.campusScheduleTemplateId === slot.campusScheduleTemplateId;
                             return (
                               <Pressable

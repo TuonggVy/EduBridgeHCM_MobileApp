@@ -41,6 +41,7 @@ export type AccountTabScreenProps = {
   onAddChild: () => void;
   onOpenChild: (s: ParentStudentProfile) => void;
   onOpenFavourites: () => void;
+  onOpenConsultationHistory?: () => void;
 };
 
 export function AccountTabScreen({
@@ -51,6 +52,7 @@ export function AccountTabScreen({
   onAddChild,
   onOpenChild,
   onOpenFavourites,
+  onOpenConsultationHistory,
 }: AccountTabScreenProps) {
   const { user, logout } = useAuth();
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
@@ -188,6 +190,7 @@ export function AccountTabScreen({
         items={PROFILE_MENU_ACTIVITIES}
         onItemPress={(id) => {
           if (id === 'favourites') onOpenFavourites();
+          if (id === 'consultation') onOpenConsultationHistory?.();
         }}
       />
 
