@@ -7,6 +7,7 @@ import React, {
 import { GoogleSignin } from '@react-native-google-signin/google-signin';
 import { logout as apiLogout } from '../api/auth';
 import { registerWithGoogle as registerWithGoogleService, signInWithGoogle } from '../services/AuthService';
+import { unregisterFcmTokenFromBackend } from '../services/PushNotificationService';
 import { clearTokens } from '../services/TokenStorage';
 import type { AuthUser } from '../types/auth';
 
@@ -72,6 +73,7 @@ export function AuthProvider({ children, onRegisterSuccess }: AuthProviderProps)
   }, [onRegisterSuccess]);
 
   const logout = useCallback(async () => {
+    await unregisterFcmTokenFromBackend();
     await GoogleSignin.signOut();
     try {
       await apiLogout();

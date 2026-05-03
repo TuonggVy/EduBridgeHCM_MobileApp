@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "552134784046",
+    "project_id": "edubridgehcm-1fa86",
+    "storage_bucket": "edubridgehcm-1fa86.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:552134784046:android:c3bd28fc8f541ad13edbbf",
+        "android_client_info": {
+          "package_name": "com.sp26se041.edubridgehcm.mobile.android"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDnCsZ1gE-suUxsVIrgyedPDeR5_J1dtKs"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

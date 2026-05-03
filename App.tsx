@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { StatusBar } from 'expo-status-bar';
 import { GoogleSignin } from '@react-native-google-signin/google-signin';
 import { AuthProvider, useAuth } from './src/context/AuthContext';
+import { PushNotificationRuntime } from './src/components/PushNotificationRuntime';
 import { ToastProvider } from './src/components/AppToast';
 import LoginScreen from './src/screens/LoginScreen';
 import RegisterScreen from './src/screens/RegisterScreen';
@@ -48,6 +49,7 @@ export default function App() {
   return (
     <ToastProvider>
       <AuthProvider onRegisterSuccess={() => setAuthView('login')}>
+        <PushNotificationRuntime />
         <AppContent authView={authView} setAuthView={setAuthView} />
       </AuthProvider>
     </ToastProvider>

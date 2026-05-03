@@ -128,6 +128,7 @@ export default function HomeScreen() {
   const [favouriteIdBySchoolId, setFavouriteIdBySchoolId] = useState<Record<number, number>>({});
   const [consultBookingVisible, setConsultBookingVisible] = useState(false);
   const [consultBookingSchool, setConsultBookingSchool] = useState<SchoolDetail | null>(null);
+  const [consultBookingInitialSegment, setConsultBookingInitialSegment] = useState<'book' | 'history'>('book');
 
   const refreshStudents = useCallback(async () => {
     try {
@@ -626,6 +627,11 @@ export default function HomeScreen() {
                   setShowStudentProfile(true);
                 }}
                 onOpenFavourites={() => setFavouriteModalVisible(true)}
+                onOpenConsultationHistory={() => {
+                  setConsultBookingSchool(null);
+                  setConsultBookingInitialSegment('history');
+                  setConsultBookingVisible(true);
+                }}
               />
             )}
             <View style={styles.bottomSpacer} />
@@ -762,6 +768,7 @@ export default function HomeScreen() {
         onOpenConsultBooking={() => {
           if (!selectedSchoolDetail) return;
           setConsultBookingSchool(selectedSchoolDetail);
+          setConsultBookingInitialSegment('book');
           setSchoolDetailVisible(false);
           closeStudentPicker();
           setConsultBookingVisible(true);
@@ -786,9 +793,11 @@ export default function HomeScreen() {
         <ConsultationBookingScreen
           visible={consultBookingVisible}
           school={consultBookingSchool}
+          initialSegment={consultBookingInitialSegment}
           onClose={() => {
             setConsultBookingVisible(false);
             setConsultBookingSchool(null);
+            setConsultBookingInitialSegment('book');
             if (selectedSchoolDetail) setSchoolDetailVisible(true);
           }}
         />
