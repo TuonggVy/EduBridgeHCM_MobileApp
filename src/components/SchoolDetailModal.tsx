@@ -117,10 +117,15 @@ function hasFacilityData(facility: SchoolDetail['campusList'][number]['facility'
   return hasItems || hasCover || hasGallery;
 }
 
-/** Mở Google Maps với lộ trình tới điểm đích (ô tô). Hoạt động trên iOS/Android khi có app hoặc trình duyệt. */
-function openGoogleMapsDirections(lat: number, lng: number) {
-  const dest = encodeURIComponent(`${lat},${lng}`);
-  const url = `https://www.google.com/maps/dir/?api=1&destination=${dest}&travelmode=driving`;
+/** Mở Google Maps: ưu tiên tìm theo địa chỉ text, fallback theo tọa độ. */
+function openGoogleMapsDirections(address?: string | null, lat?: number | null, lng?: number | null) {
+  const addressText = (address ?? '').trim();
+  const query =
+    addressText ||
+    (typeof lat === 'number' && typeof lng === 'number' ? `${lat},${lng}` : '');
+  if (!query) return;
+  const dest = encodeURIComponent(query);
+  const url = `https://www.google.com/maps/search/?api=1&query=${dest}`;
   void Linking.openURL(url);
 }
 
@@ -794,7 +799,9 @@ export function SchoolDetailModal({
 
                             {typeof campus.latitude === 'number' && typeof campus.longitude === 'number' ? (
                               <Pressable
-                                onPress={() => openGoogleMapsDirections(campus.latitude!, campus.longitude!)}
+                                onPress={() =>
+                                  openGoogleMapsDirections(campus.address, campus.latitude!, campus.longitude!)
+                                }
                                 style={styles.campusMiniMapWrap}
                               >
                                 {Platform.OS === 'android' ? (

@@ -1,6 +1,5 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
-  ActivityIndicator,
   KeyboardAvoidingView,
   Modal,
   Platform,
@@ -16,15 +15,12 @@ const MaterialIcons = require('@expo/vector-icons').MaterialIcons;
 import {
   bookOfflineConsultation,
   fetchParentConsultationSlots,
-  fetchParentOfflineConsultations,
 } from '../api/parentConsultation';
-import type { ParentConsultationSlot, ParentOfflineConsultationItem } from '../types/consultation';
+import type { ParentConsultationSlot } from '../types/consultation';
 import {
   isParentConsultationSlotBookable,
   isParentConsultationSlotPressable,
   parentConsultationSlotDisplayLine,
-  parentOfflineConsultationStatusVi,
-  PARENT_OFFLINE_CONSULTATION_STATUS_FILTERS,
 } from '../types/consultation';
 import type { SchoolDetail } from '../types/school';
 import { MessageDialog } from '../components/MessageDialog';
@@ -39,8 +35,6 @@ export type ConsultationBookingScreenProps = {
   visible: boolean;
   school: SchoolDetail | null;
   onClose: () => void;
-  /** Mở thẳng tab lịch đã đặt (ví dụ từ Tài khoản). */
-  initialSegment?: 'book' | 'history';
 };
 
 function toIsoDate(value: Date): string {
@@ -80,22 +74,6 @@ function isSameDay(a: Date, b: Date): boolean {
   );
 }
 
-function formatHistoryTime(t: string): string {
-  if (!t) return '—';
-  return t.length >= 5 ? t.slice(0, 5) : t;
-}
-
-const HISTORY_PAGE_SIZE = 10;
-
-function sortOfflineConsultationsNewestFirst(rows: ParentOfflineConsultationItem[]): ParentOfflineConsultationItem[] {
-  return [...rows].sort((a, b) => {
-    if (b.id !== a.id) return b.id - a.id;
-    const byDate = b.appointmentDate.localeCompare(a.appointmentDate);
-    if (byDate !== 0) return byDate;
-    return b.appointmentTime.localeCompare(a.appointmentTime);
-  });
-}
-
 function BookingSkeleton() {
   return (
     <View style={styles.skeletonWrap}>
@@ -114,9 +92,7 @@ export default function ConsultationBookingScreen({
   visible,
   school,
   onClose,
-  initialSegment = 'book',
 }: ConsultationBookingScreenProps) {
-  const [segment, setSegment] = useState<'book' | 'history'>(initialSegment);
   const [consultFormVisible, setConsultFormVisible] = useState(false);
   const [selectedCampusId, setSelectedCampusId] = useState<number | null>(null);
   const [consultWeekStart, setConsultWeekStart] = useState<Date>(() => getWeekStart(new Date()));
@@ -131,13 +107,6 @@ export default function ConsultationBookingScreen({
   const [bookingQuestion, setBookingQuestion] = useState('');
   const [bookingSubmitting, setBookingSubmitting] = useState(false);
 
-  const [historyRows, setHistoryRows] = useState<ParentOfflineConsultationItem[]>([]);
-  const [historyLoading, setHistoryLoading] = useState(false);
-  const [historyLoadingMore, setHistoryLoadingMore] = useState(false);
-  const [historyError, setHistoryError] = useState<string | null>(null);
-  const [historyHasNext, setHistoryHasNext] = useState(false);
-  const [historyNextPage, setHistoryNextPage] = useState(0);
-  const [historyFilter, setHistoryFilter] = useState<string | null>(null);
   const [bookingNotice, setBookingNotice] = useState<BookingNotice | null>(null);
 
   const campusList = useMemo(() => school?.campusList ?? [], [school?.campusList]);
@@ -168,35 +137,11 @@ export default function ConsultationBookingScreen({
   }, [selectedDateSlots]);
   const today = useMemo(() => new Date(), []);
 
-  const reloadHistory = useCallback(async () => {
-    setHistoryLoading(true);
-    setHistoryError(null);
-    try {
-      const res = await fetchParentOfflineConsultations({
-        status: historyFilter,
-        page: 0,
-        pageSize: HISTORY_PAGE_SIZE,
-      });
-      const b = res.body;
-      setHistoryRows(sortOfflineConsultationsNewestFirst(b.items));
-      setHistoryHasNext(b.hasNext);
-      setHistoryNextPage(b.hasNext ? b.currentPage + 1 : 0);
-    } catch (error: unknown) {
-      setHistoryRows([]);
-      setHistoryHasNext(false);
-      setHistoryNextPage(0);
-      setHistoryError(error instanceof Error ? error.message : 'Không tải được lịch đã đặt.');
-    } finally {
-      setHistoryLoading(false);
-    }
-  }, [historyFilter]);
-
   useEffect(() => {
     if (!visible) {
       setBookingNotice(null);
       return;
     }
-    setSegment(initialSegment);
     const firstCampusId = school?.campusList?.[0]?.id ?? null;
     setSelectedCampusId(firstCampusId);
     setConsultWeekStart(getWeekStart(new Date()));
@@ -205,7 +150,7 @@ export default function ConsultationBookingScreen({
     setSlotsByDate({});
     setSlotsError(null);
     setConsultFormVisible(false);
-  }, [visible, initialSegment, school?.id]);
+  }, [visible, school?.id]);
 
   useEffect(() => {
     if (!visible || !selectedCampusId) return;
@@ -244,31 +189,6 @@ export default function ConsultationBookingScreen({
       setSelectedSlot(null);
     }
   }, [selectedDate, weekDateKeys]);
-
-  useEffect(() => {
-    if (!visible || segment !== 'history') return;
-    void reloadHistory();
-  }, [visible, segment, historyFilter, reloadHistory]);
-
-  const loadMoreHistory = async () => {
-    if (!historyHasNext || historyLoadingMore || historyLoading) return;
-    setHistoryLoadingMore(true);
-    try {
-      const res = await fetchParentOfflineConsultations({
-        status: historyFilter,
-        page: historyNextPage,
-        pageSize: HISTORY_PAGE_SIZE,
-      });
-      const b = res.body;
-      setHistoryRows((prev) => sortOfflineConsultationsNewestFirst([...prev, ...b.items]));
-      setHistoryHasNext(b.hasNext);
-      setHistoryNextPage(b.hasNext ? b.currentPage + 1 : historyNextPage);
-    } catch {
-      // giữ danh sách hiện có
-    } finally {
-      setHistoryLoadingMore(false);
-    }
-  };
 
   const handleOpenForm = () => {
     if (!selectedSlot) {
@@ -319,7 +239,6 @@ export default function ConsultationBookingScreen({
       setBookingQuestion('');
       setSelectedSlot(null);
       setSlotsRefreshTick((t) => t + 1);
-      void reloadHistory();
       setBookingNotice({
         title: 'Đặt lịch thành công',
         message: 'Nhà trường sẽ liên hệ xác nhận lịch tư vấn với bạn.',
@@ -347,36 +266,18 @@ export default function ConsultationBookingScreen({
         <View style={styles.headerTitleWrap}>
           <Text style={styles.headerTitle}>Lịch tư vấn</Text>
           <Text style={styles.headerSubtitle} numberOfLines={1}>
-            {segment === 'book'
-              ? selectedCampus?.name ?? campusList[0]?.name ?? 'Cơ sở'
-              : 'Lịch đã đặt của bạn'}
+            {selectedCampus?.name ?? campusList[0]?.name ?? 'Cơ sở'}
           </Text>
         </View>
       </View>
 
-      <View style={styles.segmentRow}>
-        <Pressable
-          style={[styles.segmentChip, segment === 'book' && styles.segmentChipActive]}
-          onPress={() => setSegment('book')}
-        >
-          <Text style={[styles.segmentChipText, segment === 'book' && styles.segmentChipTextActive]}>Đặt lịch</Text>
-        </Pressable>
-        <Pressable
-          style={[styles.segmentChip, segment === 'history' && styles.segmentChipActive]}
-          onPress={() => setSegment('history')}
-        >
-          <Text style={[styles.segmentChipText, segment === 'history' && styles.segmentChipTextActive]}>Lịch đã đặt</Text>
-        </Pressable>
-      </View>
-
-      {segment === 'book' && !school ? (
+      {!school ? (
         <View style={styles.noSchoolWrap}>
           <MaterialIcons name="school" size={40} color="#94a3b8" />
           <Text style={styles.noSchoolTitle}>Chọn trường để đặt lịch</Text>
           <Text style={styles.noSchoolSub}>Vào chi tiết trường và chọn đặt lịch tư vấn tại cơ sở.</Text>
-          <Text style={styles.noSchoolSub}>Hoặc xem lịch đã đặt ở tab &quot;Lịch đã đặt&quot;.</Text>
         </View>
-      ) : segment === 'book' ? (
+      ) : (
         <>
           <ScrollView style={styles.contentScroll} contentContainerStyle={styles.contentContainer} showsVerticalScrollIndicator={false}>
             <View style={styles.cardSection}>
@@ -507,7 +408,13 @@ export default function ConsultationBookingScreen({
                         <Text style={[styles.slotTime, isSelected && styles.slotSelectedText]}>
                           {formatSlotTimeRange(slot.startTime, slot.endTime)}
                         </Text>
-                        <Text style={[styles.slotStatus, isSelected && styles.slotSelectedSubText]}>
+                        <Text
+                          style={[
+                            styles.slotStatus,
+                            slot.consultationOfflineRequest != null && styles.slotStatusConsultRequest,
+                            isSelected && styles.slotSelectedSubText,
+                          ]}
+                        >
                           {parentConsultationSlotDisplayLine(slot)}
                         </Text>
                       </Pressable>
@@ -538,78 +445,6 @@ export default function ConsultationBookingScreen({
             </Pressable>
           </View>
         </>
-      ) : (
-        <View style={styles.historyBody}>
-          <View style={styles.cardSection}>
-            <Text style={styles.historyFilterTitle}>Trạng thái</Text>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filterScroll}>
-              {PARENT_OFFLINE_CONSULTATION_STATUS_FILTERS.map((f) => {
-                const isActive =
-                  (f.param == null && historyFilter == null) || (f.param != null && historyFilter === f.param);
-                return (
-                  <Pressable
-                    key={f.param ?? 'all'}
-                    style={[styles.filterChip, isActive && styles.filterChipActive]}
-                    onPress={() => setHistoryFilter(f.param)}
-                  >
-                    <Text style={[styles.filterChipText, isActive && styles.filterChipTextActive]}>{f.label}</Text>
-                  </Pressable>
-                );
-              })}
-            </ScrollView>
-          </View>
-
-          {historyLoading ? (
-            <View style={styles.historyLoadingBox}>
-              <ActivityIndicator size="small" color="#1976d2" />
-              <Text style={styles.historyLoadingText}>Đang tải...</Text>
-            </View>
-          ) : historyError ? (
-            <View style={styles.stateBox}>
-              <MaterialIcons name="error-outline" size={20} color="#dc2626" />
-              <Text style={styles.stateText}>{historyError}</Text>
-              <Pressable style={styles.retryBtn} onPress={() => void reloadHistory()}>
-                <Text style={styles.retryBtnText}>Thử lại</Text>
-              </Pressable>
-            </View>
-          ) : historyRows.length === 0 ? (
-            <View style={styles.emptyState}>
-              <MaterialIcons name="event-busy" size={28} color="#94a3b8" />
-              <Text style={styles.emptyTitle}>Chưa có lịch</Text>
-              <Text style={styles.emptySub}>Khi bạn đặt lịch tư vấn, lịch sẽ hiển thị tại đây.</Text>
-            </View>
-          ) : (
-            <ScrollView style={styles.historyListScroll} contentContainerStyle={styles.historyListContent}>
-              {historyRows.map((row) => (
-                <View key={row.id} style={styles.historyCard}>
-                  <View style={styles.historyCardTop}>
-                    <Text style={styles.historyDate}>
-                      {row.appointmentDate} · {formatHistoryTime(row.appointmentTime)}
-                    </Text>
-                    <View style={styles.historyStatusPill}>
-                      <Text style={styles.historyStatusPillText}>{parentOfflineConsultationStatusVi(row.status)}</Text>
-                    </View>
-                  </View>
-                  {row.question ? <Text style={styles.historyQuestion}>{row.question}</Text> : null}
-                  <Text style={styles.historyPhone}>{row.phone}</Text>
-                </View>
-              ))}
-              {historyHasNext ? (
-                <Pressable
-                  style={[styles.loadMoreBtn, historyLoadingMore && styles.loadMoreBtnDisabled]}
-                  disabled={historyLoadingMore}
-                  onPress={() => void loadMoreHistory()}
-                >
-                  {historyLoadingMore ? (
-                    <ActivityIndicator size="small" color="#1976d2" />
-                  ) : (
-                    <Text style={styles.loadMoreText}>Xem thêm</Text>
-                  )}
-                </Pressable>
-              ) : null}
-            </ScrollView>
-          )}
-        </View>
       )}
 
       <Modal visible={consultFormVisible} transparent animationType="slide" onRequestClose={() => setConsultFormVisible(false)}>
@@ -749,8 +584,15 @@ const styles = StyleSheet.create({
   },
   historyCardTop: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8 },
   historyDate: { fontSize: 14, fontWeight: '700', color: '#0f172a', flex: 1 },
-  historyStatusPill: { backgroundColor: '#e8f5e9', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 999 },
-  historyStatusPillText: { fontSize: 11, fontWeight: '700', color: '#2e7d32' },
+  historyStatusPill: {
+    backgroundColor: '#e3f2fd',
+    borderColor: '#bbdefb',
+    borderWidth: 1,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 999,
+  },
+  historyStatusPillText: { fontSize: 11, fontWeight: '700', color: '#1565c0' },
   historyQuestion: { fontSize: 14, color: '#334155' },
   historyPhone: { fontSize: 13, color: '#64748b' },
   loadMoreBtn: {
@@ -874,6 +716,7 @@ const styles = StyleSheet.create({
   },
   slotTime: { fontSize: 13, fontWeight: '700', color: '#0f172a' },
   slotStatus: { fontSize: 12, color: '#64748b' },
+  slotStatusConsultRequest: { color: '#1976d2', fontWeight: '700' },
   slotSelectedText: { color: '#fff' },
   slotSelectedSubText: { color: '#dbeafe' },
   bottomCtaWrap: {

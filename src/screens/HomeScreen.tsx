@@ -52,6 +52,7 @@ import FavouriteSchoolsScreen from './FavouriteSchoolsScreen';
 import PostFeedScreen from './PostFeedScreen';
 import AiAssistantChatScreen from './AiAssistantChatScreen';
 import ConsultationBookingScreen from './ConsultationBookingScreen';
+import ConsultationHistoryScreen from './ConsultationHistoryScreen';
 import SchoolCompareScreen from './SchoolCompareScreen';
 
 const HEADER_TOP_PADDING =
@@ -127,8 +128,8 @@ export default function HomeScreen() {
   const [favouriteModalVisible, setFavouriteModalVisible] = useState(false);
   const [favouriteIdBySchoolId, setFavouriteIdBySchoolId] = useState<Record<number, number>>({});
   const [consultBookingVisible, setConsultBookingVisible] = useState(false);
+  const [consultHistoryVisible, setConsultHistoryVisible] = useState(false);
   const [consultBookingSchool, setConsultBookingSchool] = useState<SchoolDetail | null>(null);
-  const [consultBookingInitialSegment, setConsultBookingInitialSegment] = useState<'book' | 'history'>('book');
 
   const refreshStudents = useCallback(async () => {
     try {
@@ -607,6 +608,7 @@ export default function HomeScreen() {
                 onToggleFavourite={toggleSchoolFavourite}
                 onViewAllFeaturedSchools={() => setActiveTab('schools')}
                 onOpenConsult={() => setActiveTab('consult')}
+                onOpenConsultationHistory={() => setConsultHistoryVisible(true)}
                 onOpenCompare={() => setCompareVisible(true)}
                 onOpenPosts={() => setPostFeedVisible(true)}
                 onOpenAiAssistant={() => setAiAssistantVisible(true)}
@@ -628,9 +630,7 @@ export default function HomeScreen() {
                 }}
                 onOpenFavourites={() => setFavouriteModalVisible(true)}
                 onOpenConsultationHistory={() => {
-                  setConsultBookingSchool(null);
-                  setConsultBookingInitialSegment('history');
-                  setConsultBookingVisible(true);
+                  setConsultHistoryVisible(true);
                 }}
                 onOpenCompare={() => setCompareVisible(true)}
               />
@@ -769,7 +769,6 @@ export default function HomeScreen() {
         onOpenConsultBooking={() => {
           if (!selectedSchoolDetail) return;
           setConsultBookingSchool(selectedSchoolDetail);
-          setConsultBookingInitialSegment('book');
           setSchoolDetailVisible(false);
           closeStudentPicker();
           setConsultBookingVisible(true);
@@ -794,13 +793,23 @@ export default function HomeScreen() {
         <ConsultationBookingScreen
           visible={consultBookingVisible}
           school={consultBookingSchool}
-          initialSegment={consultBookingInitialSegment}
           onClose={() => {
             setConsultBookingVisible(false);
             setConsultBookingSchool(null);
-            setConsultBookingInitialSegment('book');
             if (selectedSchoolDetail) setSchoolDetailVisible(true);
           }}
+        />
+      </Modal>
+
+      <Modal
+        visible={consultHistoryVisible}
+        animationType="slide"
+        presentationStyle="fullScreen"
+        onRequestClose={() => setConsultHistoryVisible(false)}
+      >
+        <ConsultationHistoryScreen
+          visible={consultHistoryVisible}
+          onClose={() => setConsultHistoryVisible(false)}
         />
       </Modal>
 

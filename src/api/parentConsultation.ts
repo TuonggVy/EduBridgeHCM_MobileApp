@@ -104,6 +104,11 @@ function normalizeOfflineItem(row: unknown): ParentOfflineConsultationItem | nul
     appointmentDate: o.appointmentDate,
     phone: typeof o.phone === 'string' ? o.phone : '',
     status: typeof o.status === 'string' ? o.status : 'pending',
+    note: typeof o.note === 'string' ? o.note : null,
+    address: typeof o.address === 'string' ? o.address : null,
+    campusName: typeof o.campusName === 'string' ? o.campusName : null,
+    schoolName: typeof o.schoolName === 'string' ? o.schoolName : null,
+    cancelReason: typeof o.cancelReason === 'string' ? o.cancelReason : null,
   };
 }
 

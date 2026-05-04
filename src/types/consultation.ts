@@ -81,6 +81,11 @@ export type ParentOfflineConsultationItem = {
   appointmentDate: string;
   phone: string;
   status: ParentOfflineConsultationStatus;
+  note: string | null;
+  address: string | null;
+  campusName: string | null;
+  schoolName: string | null;
+  cancelReason: string | null;
 };
 
 export type ParentOfflineConsultationListBody = {
@@ -153,18 +158,20 @@ export function parentConsultationSlotDisplayLine(slot: ParentConsultationSlot):
   return `Còn ${remaining} chỗ`;
 }
 
-const OFFLINE_STATUS_VI: Record<string, string> = {
-  pending: 'Chờ xác nhận',
-  confirmed: 'Đã xác nhận',
-  'in-progress': 'Đang diễn ra',
-  completed: 'Hoàn thành',
-  cancelled: 'Đã hủy',
-  'no-show': 'Không đến',
+const LEGACY_OFFLINE_TO_CONSULT_REQUEST_STATUS: Record<string, string> = {
+  pending: 'CONSULTATION_PENDING',
+  confirmed: 'CONSULTATION_CONFIRMED',
+  'in-progress': 'CONSULTATION_APPROVED',
+  completed: 'CONSULTATION_COMPLETED',
+  cancelled: 'CONSULTATION_CANCELLED',
+  'no-show': 'CONSULTATION_NO_SHOW',
 };
 
 export function parentOfflineConsultationStatusVi(status: string): string {
   const key = status.trim().toLowerCase();
-  return OFFLINE_STATUS_VI[key] ?? status;
+  const mapped = LEGACY_OFFLINE_TO_CONSULT_REQUEST_STATUS[key];
+  if (mapped) return offlineConsultRequestStatusVi(mapped);
+  return status;
 }
 
 export const PARENT_OFFLINE_CONSULTATION_STATUS_FILTERS: {

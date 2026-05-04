@@ -16,7 +16,7 @@ const BANNER_IMAGE = require('../../../assets/Banner.png');
 const QUICK_ACTIONS: { id: string; label: string; icon: string }[] = [
   { id: 'posts', label: 'Bài đăng', icon: 'dynamic-feed' },
   { id: 'consult', label: 'Tư vấn', icon: 'chat-bubble-outline' },
-  { id: 'compare', label: 'So sánh', icon: 'compare-arrows' },
+  { id: 'history', label: 'Lịch đã đặt', icon: 'event-note' },
   { id: 'ai', label: 'Trợ lý AI', icon: 'psychology' },
 ];
 
@@ -26,6 +26,7 @@ export type HomeTabScreenProps = {
   onToggleFavourite: (schoolId: number) => void;
   onViewAllFeaturedSchools: () => void;
   onOpenConsult: () => void;
+  onOpenConsultationHistory: () => void;
   onOpenCompare: () => void;
   onOpenPosts: () => void;
   onOpenAiAssistant: () => void;
@@ -37,6 +38,7 @@ export function HomeTabScreen({
   onToggleFavourite,
   onViewAllFeaturedSchools,
   onOpenConsult,
+  onOpenConsultationHistory,
   onOpenCompare,
   onOpenPosts,
   onOpenAiAssistant,
@@ -56,7 +58,7 @@ export function HomeTabScreen({
             onPress={() => {
               if (action.id === 'posts') onOpenPosts();
               if (action.id === 'consult') onOpenConsult();
-              if (action.id === 'compare') onOpenCompare();
+              if (action.id === 'history') onOpenConsultationHistory();
               if (action.id === 'ai') onOpenAiAssistant();
             }}
             style={({ pressed }) => [
