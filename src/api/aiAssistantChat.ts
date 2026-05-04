@@ -23,6 +23,21 @@ function normalizeDetails(raw: unknown): AiChatDetailItem[] {
   return out;
 }
 
+/** n8n có thể trả `source` là một chuỗi hoặc mảng chuỗi (URL). */
+function normalizeSources(raw: unknown): string[] {
+  if (typeof raw === 'string') {
+    const t = raw.trim();
+    return t ? [t] : [];
+  }
+  if (!Array.isArray(raw)) return [];
+  const out: string[] = [];
+  for (const it of raw) {
+    const s = asString(it)?.trim();
+    if (s) out.push(s);
+  }
+  return out;
+}
+
 function unwrapBody(raw: unknown): Record<string, unknown> {
   let cur: unknown = raw;
   if (Array.isArray(cur) && cur.length > 0) cur = cur[0];
@@ -72,10 +87,12 @@ export async function postAiAssistantChat(payload: {
 
   const body = unwrapBody(raw);
   const summary = asString(body.summary) ?? '';
+  const sources = normalizeSources(body.source);
 
   return {
     summary,
     details: normalizeDetails(body.details),
-    source: asString(body.source),
+    source: sources[0] ?? null,
+    sources: sources.length > 0 ? sources : undefined,
   };
 }

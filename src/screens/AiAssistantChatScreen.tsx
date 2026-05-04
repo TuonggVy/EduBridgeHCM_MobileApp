@@ -72,7 +72,8 @@ function buildCopyText(m: AiChatAssistantMessage): string {
   for (const row of m.details) {
     lines.push(`${row.label}: ${row.value}`);
   }
-  if (m.source?.trim()) lines.push(m.source.trim());
+  const urls = m.sources?.length ? m.sources : m.source?.trim() ? [m.source.trim()] : [];
+  for (const u of urls) lines.push(u);
   return lines.filter(Boolean).join('\n');
 }
 
@@ -213,12 +214,17 @@ export default function AiAssistantChatScreen({ sessionId, onBack }: AiAssistant
 
       try {
         const res = await postAiAssistantChat({ chatInput: text, sessionId: trimmedSession });
+        const sourcesList =
+          res.sources?.filter((u) => typeof u === 'string' && u.trim().length > 0) ?? [];
+        const primary =
+          sourcesList[0] ?? (res.source?.trim() ? res.source.trim() : null);
         const assistant: AiChatAssistantMessage = {
           id: newId('a'),
           role: 'assistant',
           summary: res.summary?.trim() || 'Chưa có nội dung phản hồi.',
           details: Array.isArray(res.details) ? res.details : [],
-          source: res.source?.trim() ? res.source.trim() : null,
+          source: primary,
+          sources: sourcesList.length > 1 ? sourcesList : undefined,
           createdAt: new Date().toISOString(),
         };
         setMessages((prev) => [...prev, assistant]);
@@ -313,15 +319,31 @@ export default function AiAssistantChatScreen({ sessionId, onBack }: AiAssistant
                   ))}
                 </View>
               ) : null}
-              {assistant.source ? (
-                <Pressable
-                  onPress={() => handleOpenSource(assistant.source!)}
-                  style={({ pressed }) => [styles.sourceBtn, pressed && { opacity: 0.9 }]}
-                >
-                  <Ionicons name="open-outline" size={16} color={COLORS.primary} />
-                  <Text style={styles.sourceBtnText}>Xem nguồn</Text>
-                </Pressable>
-              ) : null}
+              {(() => {
+                const urls =
+                  assistant.sources?.length ?
+                    assistant.sources
+                  : assistant.source ?
+                    [assistant.source]
+                  : [];
+                if (urls.length === 0) return null;
+                return (
+                  <View style={styles.sourceBtnsWrap}>
+                    {urls.map((url, i) => (
+                      <Pressable
+                        key={`${url}-${i}`}
+                        onPress={() => handleOpenSource(url)}
+                        style={({ pressed }) => [styles.sourceBtn, pressed && { opacity: 0.9 }]}
+                      >
+                        <Ionicons name="open-outline" size={16} color={COLORS.primary} />
+                        <Text style={styles.sourceBtnText}>
+                          {urls.length > 1 ? `Nguồn ${i + 1}` : 'Xem nguồn'}
+                        </Text>
+                      </Pressable>
+                    ))}
+                  </View>
+                );
+              })()}
               <Text style={styles.aiHint}>Giữ để sao chép</Text>
               <Text style={styles.aiTime}>{formatTime(assistant.createdAt)}</Text>
             </View>
@@ -726,8 +748,14 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: COLORS.text,
   },
-  sourceBtn: {
+  sourceBtnsWrap: {
     marginTop: 12,
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    alignItems: 'center',
+  },
+  sourceBtn: {
     alignSelf: 'flex-start',
     flexDirection: 'row',
     alignItems: 'center',
