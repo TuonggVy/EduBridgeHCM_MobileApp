@@ -6,7 +6,9 @@ export type AiChatDetailItem = {
 export type AiChatResponse = {
   summary: string;
   details?: AiChatDetailItem[];
+  /** Một URL (chuỗi) hoặc danh sách URL — n8n có thể trả `source` dạng mảng */
   source?: string | null;
+  sources?: string[];
 };
 
 export type AiChatUserMessage = {
@@ -22,6 +24,8 @@ export type AiChatAssistantMessage = {
   summary: string;
   details: AiChatDetailItem[];
   source: string | null;
+  /** Khi BE trả nhiều URL trong `source` */
+  sources?: string[];
   createdAt: string;
 };
 
