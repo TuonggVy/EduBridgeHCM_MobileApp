@@ -25,7 +25,12 @@ import type { SchoolCampaignTemplate } from '../types/school';
 import type { ParentStudentProfile } from '../types/studentProfile';
 import { fetchSchoolCampaignTemplates, fetchSchoolPublicDetail, searchNearbyCampus } from '../api/school';
 import { bookOfflineConsultation, fetchParentConsultationSlots } from '../api/parentConsultation';
-import { type ParentConsultationSlot, isParentConsultationSlotSelectable } from '../types/consultation';
+import {
+  type ParentConsultationSlot,
+  isParentConsultationSlotBookable,
+  isParentConsultationSlotPressable,
+  parentConsultationSlotDisplayLine,
+} from '../types/consultation';
 import {
   badgePillStyle,
   getCurriculumStatusBadgeColors,
@@ -322,6 +327,7 @@ export function SchoolDetailModal({
   const [consultSlotsLoading, setConsultSlotsLoading] = useState(false);
   const [consultSlotsError, setConsultSlotsError] = useState<string | null>(null);
   const [consultSlotsByDate, setConsultSlotsByDate] = useState<Record<string, ParentConsultationSlot[]>>({});
+  const [consultSlotsRefreshTick, setConsultSlotsRefreshTick] = useState(0);
   const [bookingPhone, setBookingPhone] = useState('');
   const [bookingQuestion, setBookingQuestion] = useState('');
   const [bookingSubmitting, setBookingSubmitting] = useState(false);
@@ -346,8 +352,15 @@ export function SchoolDetailModal({
     [consultSlotsByDate, selectedConsultDate]
   );
   const upcomingSlotsCount = useMemo(
-    () => selectedDateSlots.filter((slot) => isParentConsultationSlotSelectable(slot)).length,
+    () => selectedDateSlots.filter((slot) => isParentConsultationSlotBookable(slot, selectedDateSlots)).length,
     [selectedDateSlots]
+  );
+  const selectedConsultSlotBookable = useMemo(
+    () =>
+      selectedConsultSlot != null
+        ? isParentConsultationSlotBookable(selectedConsultSlot, selectedDateSlots)
+        : false,
+    [selectedConsultSlot, selectedDateSlots]
   );
   const displayHotline = apiSchoolContact.hotline ?? school?.hotline ?? null;
   const displayEmailSupport = apiSchoolContact.emailSupport ?? school?.emailSupport ?? null;
@@ -437,7 +450,7 @@ export function SchoolDetailModal({
     return () => {
       cancelled = true;
     };
-  }, [consultBookingVisible, selectedConsultCampusId, weekDates]);
+  }, [consultBookingVisible, selectedConsultCampusId, weekDates, consultSlotsRefreshTick]);
 
   useEffect(() => {
     if (!weekDateKeys.includes(selectedConsultDate)) {
@@ -569,6 +582,9 @@ export function SchoolDetailModal({
       Alert.alert('Chưa chọn khung giờ', 'Vui lòng chọn khung giờ tư vấn trước khi đặt lịch.');
       return;
     }
+    if (!isParentConsultationSlotBookable(selectedConsultSlot, selectedDateSlots)) {
+      return;
+    }
     if (selectedConsultCampusId == null) {
       Alert.alert('Chưa chọn cơ sở', 'Vui lòng chọn cơ sở trước khi đặt lịch.');
       return;
@@ -591,6 +607,8 @@ export function SchoolDetailModal({
       setConsultFormVisible(false);
       setBookingPhone('');
       setBookingQuestion('');
+      setSelectedConsultSlot(null);
+      setConsultSlotsRefreshTick((t) => t + 1);
       Alert.alert('Đặt lịch thành công', 'Nhà trường sẽ liên hệ xác nhận lịch tư vấn với bạn.');
     } catch (error: unknown) {
       const message =
@@ -606,6 +624,15 @@ export function SchoolDetailModal({
   const handleOpenConsultForm = () => {
     if (!selectedConsultSlot) {
       Alert.alert('Chưa chọn khung giờ', 'Vui lòng chọn một slot tư vấn trước khi đặt lịch.');
+      return;
+    }
+    if (!isParentConsultationSlotBookable(selectedConsultSlot, selectedDateSlots)) {
+      Alert.alert(
+        'Không thể đặt thêm',
+        selectedConsultSlot.consultationOfflineRequest != null
+          ? 'Đây là lịch tư vấn bạn đã đặt trong ngày này.'
+          : 'Bạn chỉ có thể đặt một lịch tư vấn mỗi ngày. Vui lòng chọn ngày khác.'
+      );
       return;
     }
     setConsultFormVisible(true);
@@ -1531,7 +1558,7 @@ export function SchoolDetailModal({
                   const isSelected = selectedConsultDate === dayKey;
                   const isToday = dayKey === toIsoDate(new Date());
                   const daySlots = consultSlotsByDate[dayKey] ?? [];
-                  const hasSelectable = daySlots.some((slot) => isParentConsultationSlotSelectable(slot));
+                  const hasSelectable = daySlots.some((slot) => isParentConsultationSlotPressable(slot, daySlots));
                   return (
                     <Pressable
                       key={dayKey}
@@ -1588,7 +1615,7 @@ export function SchoolDetailModal({
                       >
                         <View style={styles.consultSlotGrid}>
                           {selectedDateSlots.map((slot) => {
-                            const isDisabled = !isParentConsultationSlotSelectable(slot);
+                            const isDisabled = !isParentConsultationSlotPressable(slot, selectedDateSlots);
                             const isSelected = selectedConsultSlot?.campusScheduleTemplateId === slot.campusScheduleTemplateId;
                             return (
                               <Pressable
@@ -1605,7 +1632,7 @@ export function SchoolDetailModal({
                                   {formatSlotTimeRange(slot.startTime, slot.endTime)}
                                 </Text>
                                 <Text style={[styles.consultSlotStatus, isSelected && styles.consultSlotStatusSelected]}>
-                                  {slot.statusLabel || slot.status}
+                                  {parentConsultationSlotDisplayLine(slot)}
                                 </Text>
                               </Pressable>
                             );
@@ -1618,7 +1645,10 @@ export function SchoolDetailModal({
               </View>
 
               <Pressable
-                style={[styles.consultBookingButton, !selectedConsultSlot && styles.consultBookingButtonDisabled]}
+                style={[
+                  styles.consultBookingButton,
+                  (!selectedConsultSlot || !selectedConsultSlotBookable) && styles.consultBookingButtonDisabled,
+                ]}
                 onPress={handleOpenConsultForm}
               >
                 <Text style={styles.consultBookingButtonText}>Đặt lịch</Text>

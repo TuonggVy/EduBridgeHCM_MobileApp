@@ -2,6 +2,7 @@ import { apiRequest } from './client';
 import type {
   BookOfflineConsultationRequest,
   BookOfflineConsultationResponse,
+  ConsultationOfflineRequestSummary,
   ParentConsultationSlot,
   ParentConsultationSlotsResponse,
   ParentOfflineConsultationItem,
@@ -18,6 +19,18 @@ function asNumber(value: unknown): number | null {
   return null;
 }
 
+function normalizeConsultationOfflineRequest(raw: unknown): ConsultationOfflineRequestSummary | null {
+  if (raw == null || typeof raw !== 'object') return null;
+  const o = raw as Record<string, unknown>;
+  const id = asNumber(o.id);
+  const status = typeof o.status === 'string' ? o.status.trim() : '';
+  if (status === '') return null;
+  return {
+    id: id ?? 0,
+    status,
+  };
+}
+
 function normalizeSlot(slot: unknown): ParentConsultationSlot | null {
   if (!slot || typeof slot !== 'object') return null;
   const row = slot as Record<string, unknown>;
@@ -32,6 +45,9 @@ function normalizeSlot(slot: unknown): ParentConsultationSlot | null {
   ) {
     return null;
   }
+  const maxBooking = asNumber(row.maxBookingPerSlot);
+  const totalReq = asNumber(row.totalRequests);
+  const allowBefore = asNumber(row.allowBookingBeforeHours);
   return {
     date: row.date,
     dayOfWeek: row.dayOfWeek,
@@ -41,6 +57,10 @@ function normalizeSlot(slot: unknown): ParentConsultationSlot | null {
     endTime: row.endTime,
     statusLabel: typeof row.statusLabel === 'string' ? row.statusLabel : '',
     status: typeof row.status === 'string' ? row.status : 'UPCOMING',
+    consultationOfflineRequest: normalizeConsultationOfflineRequest(row.consultationOfflineRequest),
+    maxBookingPerSlot: maxBooking != null && maxBooking > 0 ? maxBooking : 1,
+    allowBookingBeforeHours: allowBefore != null && allowBefore >= 0 ? allowBefore : 0,
+    totalRequests: totalReq != null && totalReq >= 0 ? totalReq : 0,
   };
 }
 
