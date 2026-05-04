@@ -8,7 +8,6 @@ type SchoolCardProps = {
   name: string;
   description?: string | null;
   imageUrl?: string | null;
-  rating?: number | null;
   totalCampus?: number;
   isFavourite?: boolean;
   onToggleFavourite?: () => void;
@@ -22,7 +21,6 @@ export function SchoolCard({
   name,
   description,
   imageUrl,
-  rating,
   totalCampus,
   isFavourite,
   onToggleFavourite,
@@ -61,12 +59,6 @@ export function SchoolCard({
               {description}
             </Text>
           ) : null}
-          <View style={styles.metaRow}>
-            <MaterialIcons name="star" size={14} color="#f59e0b" />
-            <Text style={styles.metaText}>
-              {typeof rating === 'number' ? rating.toFixed(1) : 'Chưa có đánh giá'}
-            </Text>
-          </View>
           <View style={styles.metaRow}>
             <MaterialIcons name="business" size={14} color="#64748b" />
             <Text style={styles.metaText}>{`${totalCampus ?? 0} cơ sở`}</Text>

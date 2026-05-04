@@ -17,11 +17,10 @@ import { SchoolCard } from '../../components/SchoolCard';
 import type { SchoolSummary } from '../../types/school';
 import { MaterialIcons, sp, radius } from './tabConstants';
 
-type SchoolFilter = 'all' | 'topRated' | 'international' | 'nearby' | 'saved';
+type SchoolFilter = 'all' | 'international' | 'nearby' | 'saved';
 
 const SCHOOL_FILTER_OPTIONS: { id: SchoolFilter; label: string }[] = [
   { id: 'all', label: 'Tất cả' },
-  { id: 'topRated', label: 'Đánh giá cao' },
   { id: 'international', label: 'Chương trình quốc tế' },
   { id: 'nearby', label: 'Gần bạn' },
   { id: 'saved', label: 'Đã lưu' },
@@ -64,8 +63,6 @@ export function SchoolsTabScreen({
       if (!matchesQuery) return false;
 
       if (activeFilter === 'saved') return school.isFavourite;
-      if (activeFilter === 'topRated')
-        return typeof school.averageRating === 'number' && school.averageRating >= 4;
       if (activeFilter === 'international') {
         const d = (school.description ?? '').toLowerCase();
         return d.includes('quốc tế') || d.includes('quoc te') || d.includes('international');
@@ -187,7 +184,6 @@ export function SchoolsTabScreen({
                 name={item.name}
                 description={item.description}
                 imageUrl={item.logoUrl}
-                rating={item.averageRating}
                 totalCampus={item.totalCampus}
                 isFavourite={item.isFavourite}
                 onToggleFavourite={() => onToggleFavourite(item.id)}

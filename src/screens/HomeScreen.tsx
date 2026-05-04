@@ -17,7 +17,6 @@ import SearchScreen from './SearchScreen';
 import {
   HomeTabScreen,
   SchoolsTabScreen,
-  NewsTabScreen,
   AccountTabScreen,
   sp,
   radius,
@@ -53,6 +52,7 @@ import FavouriteSchoolsScreen from './FavouriteSchoolsScreen';
 import PostFeedScreen from './PostFeedScreen';
 import AiAssistantChatScreen from './AiAssistantChatScreen';
 import ConsultationBookingScreen from './ConsultationBookingScreen';
+import SchoolCompareScreen from './SchoolCompareScreen';
 
 const HEADER_TOP_PADDING =
   Platform.OS === 'ios' ? 50 : (StatusBar.currentHeight ?? 24) + 8;
@@ -100,9 +100,9 @@ export default function HomeScreen() {
   const [showProfileSheet, setShowProfileSheet] = useState(false);
   const [showProfileForm, setShowProfileForm] = useState(false);
   const [chatView, setChatView] = useState<'app' | 'chat'>('app');
-  const [newsModalVisible, setNewsModalVisible] = useState(false);
   const [postFeedVisible, setPostFeedVisible] = useState(false);
   const [aiAssistantVisible, setAiAssistantVisible] = useState(false);
+  const [compareVisible, setCompareVisible] = useState(false);
   const [selectedConversation, setSelectedConversation] = useState<ParentConversationsItem | null>(null);
 
   const [students, setStudents] = useState<ParentStudentProfile[]>([]);
@@ -607,7 +607,7 @@ export default function HomeScreen() {
                 onToggleFavourite={toggleSchoolFavourite}
                 onViewAllFeaturedSchools={() => setActiveTab('schools')}
                 onOpenConsult={() => setActiveTab('consult')}
-                onOpenNews={() => setNewsModalVisible(true)}
+                onOpenCompare={() => setCompareVisible(true)}
                 onOpenPosts={() => setPostFeedVisible(true)}
                 onOpenAiAssistant={() => setAiAssistantVisible(true)}
               />
@@ -632,6 +632,7 @@ export default function HomeScreen() {
                   setConsultBookingInitialSegment('history');
                   setConsultBookingVisible(true);
                 }}
+                onOpenCompare={() => setCompareVisible(true)}
               />
             )}
             <View style={styles.bottomSpacer} />
@@ -661,6 +662,26 @@ export default function HomeScreen() {
       </View>
 
       <Modal
+        visible={compareVisible}
+        animationType="slide"
+        presentationStyle="fullScreen"
+        onRequestClose={() => setCompareVisible(false)}
+      >
+        <SchoolCompareScreen
+          onClose={() => setCompareVisible(false)}
+          allSchools={schools}
+          onOpenSchoolDetail={(schoolId) => {
+            setCompareVisible(false);
+            void openSchoolDetail(schoolId);
+          }}
+          onToggleFavourite={toggleSchoolFavourite}
+          getIsFavourite={(schoolId) =>
+            schools.find((s) => s.id === schoolId)?.isFavourite ?? false
+          }
+        />
+      </Modal>
+
+      <Modal
         visible={postFeedVisible}
         animationType="slide"
         presentationStyle="fullScreen"
@@ -679,26 +700,6 @@ export default function HomeScreen() {
           sessionId={user?.email ?? ''}
           onBack={() => setAiAssistantVisible(false)}
         />
-      </Modal>
-
-      <Modal
-        visible={newsModalVisible}
-        animationType="slide"
-        presentationStyle="fullScreen"
-        onRequestClose={() => setNewsModalVisible(false)}
-      >
-        <View style={styles.newsModalScreen}>
-          <View style={[styles.newsModalHeader, { paddingTop: HEADER_TOP_PADDING }]}>
-            <Pressable onPress={() => setNewsModalVisible(false)} hitSlop={12} style={styles.newsModalBack}>
-              <MaterialIcons name="arrow-back" size={24} color="#0f172a" />
-            </Pressable>
-            <Text style={styles.newsModalTitle}>Tin tức</Text>
-            <View style={styles.newsModalHeaderSpacer} />
-          </View>
-          <View style={styles.newsModalBody}>
-            <NewsTabScreen />
-          </View>
-        </View>
       </Modal>
 
       <Modal
@@ -945,37 +946,5 @@ const styles = StyleSheet.create({
   },
   tabLabelActive: {
     color: '#1976d2',
-  },
-  newsModalScreen: {
-    flex: 1,
-    backgroundColor: '#f8fafc',
-  },
-  newsModalHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: sp.lg,
-    paddingBottom: sp.md,
-    backgroundColor: '#fff',
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: '#e2e8f0',
-  },
-  newsModalBack: {
-    width: 40,
-    height: 40,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  newsModalTitle: {
-    flex: 1,
-    fontSize: 20,
-    fontWeight: '700',
-    color: '#0f172a',
-    textAlign: 'center',
-  },
-  newsModalHeaderSpacer: {
-    width: 40,
-  },
-  newsModalBody: {
-    flex: 1,
   },
 });
