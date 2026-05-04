@@ -20,7 +20,9 @@ import {
 } from '../api/parentConsultation';
 import type { ParentConsultationSlot, ParentOfflineConsultationItem } from '../types/consultation';
 import {
-  isParentConsultationSlotSelectable,
+  isParentConsultationSlotBookable,
+  isParentConsultationSlotPressable,
+  parentConsultationSlotDisplayLine,
   parentOfflineConsultationStatusVi,
   PARENT_OFFLINE_CONSULTATION_STATUS_FILTERS,
 } from '../types/consultation';
@@ -85,6 +87,15 @@ function formatHistoryTime(t: string): string {
 
 const HISTORY_PAGE_SIZE = 10;
 
+function sortOfflineConsultationsNewestFirst(rows: ParentOfflineConsultationItem[]): ParentOfflineConsultationItem[] {
+  return [...rows].sort((a, b) => {
+    if (b.id !== a.id) return b.id - a.id;
+    const byDate = b.appointmentDate.localeCompare(a.appointmentDate);
+    if (byDate !== 0) return byDate;
+    return b.appointmentTime.localeCompare(a.appointmentTime);
+  });
+}
+
 function BookingSkeleton() {
   return (
     <View style={styles.skeletonWrap}>
@@ -114,6 +125,8 @@ export default function ConsultationBookingScreen({
   const [slotsLoading, setSlotsLoading] = useState(false);
   const [slotsError, setSlotsError] = useState<string | null>(null);
   const [slotsByDate, setSlotsByDate] = useState<Record<string, ParentConsultationSlot[]>>({});
+  /** Tăng sau khi đặt lịch thành công để fetch lại slot tuần hiện tại. */
+  const [slotsRefreshTick, setSlotsRefreshTick] = useState(0);
   const [bookingPhone, setBookingPhone] = useState('');
   const [bookingQuestion, setBookingQuestion] = useState('');
   const [bookingSubmitting, setBookingSubmitting] = useState(false);
@@ -136,9 +149,23 @@ export default function ConsultationBookingScreen({
   const weekDateKeys = useMemo(() => weekDates.map((date) => toIsoDate(date)), [weekDates]);
   const selectedDateSlots = useMemo(() => slotsByDate[selectedDate] ?? [], [slotsByDate, selectedDate]);
   const availableSlotsCount = useMemo(
-    () => selectedDateSlots.filter((slot) => isParentConsultationSlotSelectable(slot)).length,
+    () => selectedDateSlots.filter((slot) => isParentConsultationSlotBookable(slot, selectedDateSlots)).length,
     [selectedDateSlots]
   );
+  const selectedSlotBookable = useMemo(
+    () =>
+      selectedSlot != null ? isParentConsultationSlotBookable(selectedSlot, selectedDateSlots) : false,
+    [selectedSlot, selectedDateSlots]
+  );
+  /** Hiển thị quy định đặt trước bao nhiêu giờ (lấy max trong các slot ngày đang chọn nếu API khác nhau). */
+  const displayAllowBookingBeforeHours = useMemo(() => {
+    if (selectedDateSlots.length === 0) return null;
+    const values = selectedDateSlots
+      .map((s) => s.allowBookingBeforeHours)
+      .filter((h): h is number => typeof h === 'number' && Number.isFinite(h) && h > 0);
+    if (values.length === 0) return null;
+    return Math.max(...values);
+  }, [selectedDateSlots]);
   const today = useMemo(() => new Date(), []);
 
   const reloadHistory = useCallback(async () => {
@@ -151,7 +178,7 @@ export default function ConsultationBookingScreen({
         pageSize: HISTORY_PAGE_SIZE,
       });
       const b = res.body;
-      setHistoryRows(b.items);
+      setHistoryRows(sortOfflineConsultationsNewestFirst(b.items));
       setHistoryHasNext(b.hasNext);
       setHistoryNextPage(b.hasNext ? b.currentPage + 1 : 0);
     } catch (error: unknown) {
@@ -209,7 +236,7 @@ export default function ConsultationBookingScreen({
     return () => {
       cancelled = true;
     };
-  }, [visible, selectedCampusId, weekDates]);
+  }, [visible, selectedCampusId, weekDates, slotsRefreshTick]);
 
   useEffect(() => {
     if (!weekDateKeys.includes(selectedDate)) {
@@ -233,7 +260,7 @@ export default function ConsultationBookingScreen({
         pageSize: HISTORY_PAGE_SIZE,
       });
       const b = res.body;
-      setHistoryRows((prev) => [...prev, ...b.items]);
+      setHistoryRows((prev) => sortOfflineConsultationsNewestFirst([...prev, ...b.items]));
       setHistoryHasNext(b.hasNext);
       setHistoryNextPage(b.hasNext ? b.currentPage + 1 : historyNextPage);
     } catch {
@@ -252,11 +279,23 @@ export default function ConsultationBookingScreen({
       });
       return;
     }
+    if (!isParentConsultationSlotBookable(selectedSlot, selectedDateSlots)) {
+      setBookingNotice({
+        title: 'Không thể đặt thêm',
+        message:
+          selectedSlot.consultationOfflineRequest != null
+            ? 'Đây là lịch tư vấn bạn đã đặt trong ngày này.'
+            : 'Bạn chỉ có thể đặt một lịch tư vấn mỗi ngày. Vui lòng chọn ngày khác hoặc xem lịch đã đặt.',
+        variant: 'info',
+      });
+      return;
+    }
     setConsultFormVisible(true);
   };
 
   const handleSubmit = async () => {
     if (!selectedSlot || selectedCampusId == null) return;
+    if (!isParentConsultationSlotBookable(selectedSlot, selectedDateSlots)) return;
     const phone = bookingPhone.trim();
     if (!phone) {
       setBookingNotice({
@@ -278,6 +317,9 @@ export default function ConsultationBookingScreen({
       setConsultFormVisible(false);
       setBookingPhone('');
       setBookingQuestion('');
+      setSelectedSlot(null);
+      setSlotsRefreshTick((t) => t + 1);
+      void reloadHistory();
       setBookingNotice({
         title: 'Đặt lịch thành công',
         message: 'Nhà trường sẽ liên hệ xác nhận lịch tư vấn với bạn.',
@@ -389,7 +431,7 @@ export default function ConsultationBookingScreen({
                   const dayKey = toIsoDate(day);
                   const isSelected = selectedDate === dayKey;
                   const daySlots = slotsByDate[dayKey] ?? [];
-                  const hasSelectable = daySlots.some((slot) => isParentConsultationSlotSelectable(slot));
+                  const hasSelectable = daySlots.some((slot) => isParentConsultationSlotPressable(slot, daySlots));
                   const isToday = isSameDay(day, today);
                   return (
                     <Pressable
@@ -421,11 +463,16 @@ export default function ConsultationBookingScreen({
 
             <View style={styles.cardSection}>
               <View style={styles.slotHeaderRow}>
-                <Text style={styles.slotHeaderTitle}>Khung giờ khả dụng</Text>
+                <Text style={styles.slotHeaderTitle}>Khung giờ tư vấn</Text>
                 <View style={styles.slotBadge}>
                   <Text style={styles.slotBadgeText}>Còn {availableSlotsCount} slot</Text>
                 </View>
               </View>
+              {displayAllowBookingBeforeHours != null ? (
+                <Text style={styles.slotPolicyHint}>
+                  Phụ huynh vui lòng đặt lịch trước {displayAllowBookingBeforeHours} giờ
+                </Text>
+              ) : null}
 
               {slotsLoading ? (
                 <BookingSkeleton />
@@ -443,7 +490,7 @@ export default function ConsultationBookingScreen({
               ) : (
                 <View style={styles.slotGrid}>
                   {selectedDateSlots.map((slot) => {
-                    const isDisabled = !isParentConsultationSlotSelectable(slot);
+                    const isDisabled = !isParentConsultationSlotPressable(slot, selectedDateSlots);
                     const isSelected = selectedSlot?.campusScheduleTemplateId === slot.campusScheduleTemplateId;
                     return (
                       <Pressable
@@ -461,7 +508,7 @@ export default function ConsultationBookingScreen({
                           {formatSlotTimeRange(slot.startTime, slot.endTime)}
                         </Text>
                         <Text style={[styles.slotStatus, isSelected && styles.slotSelectedSubText]}>
-                          {slot.statusLabel || slot.status}
+                          {parentConsultationSlotDisplayLine(slot)}
                         </Text>
                       </Pressable>
                     );
@@ -473,10 +520,10 @@ export default function ConsultationBookingScreen({
 
           <View style={styles.bottomCtaWrap}>
             <Pressable
-              style={[styles.bookBtn, !selectedSlot && styles.bookBtnDisabled]}
+              style={[styles.bookBtn, (!selectedSlot || !selectedSlotBookable) && styles.bookBtnDisabled]}
               onPress={handleOpenForm}
             >
-              {selectedSlot ? (
+              {selectedSlot && selectedSlotBookable ? (
                 <LinearGradient
                   colors={['#1976d2', '#42a5f5']}
                   start={{ x: 0, y: 0.5 }}
@@ -774,7 +821,13 @@ const styles = StyleSheet.create({
   dateWeekday: { fontSize: 12, fontWeight: '600', color: '#64748b' },
   dateDay: { fontSize: 16, fontWeight: '700', color: '#0f172a' },
   dateSelectedText: { color: '#fff' },
-  slotHeaderRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 },
+  slotHeaderRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 },
+  slotPolicyHint: {
+    fontSize: 13,
+    lineHeight: 18,
+    color: '#64748b',
+    marginBottom: 12,
+  },
   slotHeaderTitle: { fontSize: 16, fontWeight: '700', color: '#0f172a' },
   slotBadge: { borderRadius: 999, backgroundColor: '#e8f5e9', paddingHorizontal: 10, paddingVertical: 4 },
   slotBadgeText: { fontSize: 12, fontWeight: '700', color: '#2e7d32' },
