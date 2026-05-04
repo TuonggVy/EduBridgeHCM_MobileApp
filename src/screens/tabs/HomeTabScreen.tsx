@@ -16,7 +16,7 @@ const BANNER_IMAGE = require('../../../assets/Banner.png');
 const QUICK_ACTIONS: { id: string; label: string; icon: string }[] = [
   { id: 'posts', label: 'Bài đăng', icon: 'dynamic-feed' },
   { id: 'consult', label: 'Tư vấn', icon: 'chat-bubble-outline' },
-  { id: 'news', label: 'Tin tức', icon: 'article' },
+  { id: 'compare', label: 'So sánh', icon: 'compare-arrows' },
   { id: 'ai', label: 'Trợ lý AI', icon: 'psychology' },
 ];
 
@@ -26,7 +26,7 @@ export type HomeTabScreenProps = {
   onToggleFavourite: (schoolId: number) => void;
   onViewAllFeaturedSchools: () => void;
   onOpenConsult: () => void;
-  onOpenNews: () => void;
+  onOpenCompare: () => void;
   onOpenPosts: () => void;
   onOpenAiAssistant: () => void;
 };
@@ -37,7 +37,7 @@ export function HomeTabScreen({
   onToggleFavourite,
   onViewAllFeaturedSchools,
   onOpenConsult,
-  onOpenNews,
+  onOpenCompare,
   onOpenPosts,
   onOpenAiAssistant,
 }: HomeTabScreenProps) {
@@ -56,7 +56,7 @@ export function HomeTabScreen({
             onPress={() => {
               if (action.id === 'posts') onOpenPosts();
               if (action.id === 'consult') onOpenConsult();
-              if (action.id === 'news') onOpenNews();
+              if (action.id === 'compare') onOpenCompare();
               if (action.id === 'ai') onOpenAiAssistant();
             }}
             style={({ pressed }) => [
@@ -93,7 +93,6 @@ export function HomeTabScreen({
                 name={school.name}
                 description={school.description}
                 imageUrl={school.logoUrl}
-                rating={school.averageRating}
                 totalCampus={school.totalCampus}
                 isFavourite={school.isFavourite}
                 onToggleFavourite={() => onToggleFavourite(school.id)}
@@ -107,22 +106,22 @@ export function HomeTabScreen({
 
       <View style={styles.section}>
         <View style={styles.sectionRow}>
-          <Text style={styles.sectionTitle}>Tin tức</Text>
-          <Pressable hitSlop={sp.sm} onPress={onOpenNews}>
+          <Text style={styles.sectionTitle}>Bài đăng</Text>
+          <Pressable hitSlop={sp.sm} onPress={onOpenPosts}>
             <Text style={styles.sectionLink}>Xem tất cả</Text>
           </Pressable>
         </View>
         <Pressable
-          onPress={onOpenNews}
-          style={({ pressed }) => [styles.newsCard, pressed && styles.newsCardPressed]}
+          onPress={onOpenPosts}
+          style={({ pressed }) => [styles.postsCard, pressed && styles.postsCardPressed]}
         >
-          <View style={styles.newsIconWrap}>
-            <MaterialIcons name="article" size={28} color="#1976d2" />
+          <View style={styles.postsIconWrap}>
+            <MaterialIcons name="dynamic-feed" size={28} color="#1976d2" />
           </View>
-          <View style={styles.newsBody}>
-            <Text style={styles.newsTitle}>Tin tức tuyển sinh</Text>
-            <Text style={styles.newsSub} numberOfLines={2}>
-              Cập nhật lịch tuyển sinh, hướng dẫn hồ sơ và thông tin hữu ích cho phụ huynh — sắp ra mắt.
+          <View style={styles.postsBody}>
+            <Text style={styles.postsTitle}>Cộng đồng phụ huynh</Text>
+            <Text style={styles.postsSub} numberOfLines={2}>
+              Xem bài đăng, chia sẻ kinh nghiệm và cập nhật từ các trường và phụ huynh khác.
             </Text>
           </View>
           <MaterialIcons name="chevron-right" size={22} color="#cbd5e1" />
@@ -220,7 +219,7 @@ const styles = StyleSheet.create({
   featuredCardWrap: {
     marginRight: sp.xs,
   },
-  newsCard: {
+  postsCard: {
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: '#fff',
@@ -233,10 +232,10 @@ const styles = StyleSheet.create({
     shadowRadius: 8,
     elevation: 3,
   },
-  newsCardPressed: {
+  postsCardPressed: {
     opacity: 0.96,
   },
-  newsIconWrap: {
+  postsIconWrap: {
     width: 52,
     height: 52,
     borderRadius: radius.lg,
@@ -244,16 +243,16 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  newsBody: {
+  postsBody: {
     flex: 1,
   },
-  newsTitle: {
+  postsTitle: {
     fontSize: 16,
     fontWeight: '700',
     color: '#0f172a',
     marginBottom: sp.xxs,
   },
-  newsSub: {
+  postsSub: {
     fontSize: 13,
     color: '#64748b',
     lineHeight: 18,

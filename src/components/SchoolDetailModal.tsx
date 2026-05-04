@@ -659,12 +659,6 @@ export function SchoolDetailModal({
               <View style={styles.card}>
                 <Text style={styles.name}>{school.name}</Text>
                 <View style={styles.metaRow}>
-                  <MaterialIcons name="star" size={16} color="#f59e0b" />
-                  <Text style={styles.meta}>
-                    {typeof school.averageRating === 'number' ? school.averageRating.toFixed(1) : 'Chưa có đánh giá'}
-                  </Text>
-                </View>
-                <View style={styles.metaRow}>
                   <MaterialIcons name="event" size={16} color="#64748b" />
                   <Text style={styles.meta}>{school.foundingDate ?? 'Đang cập nhật'}</Text>
                 </View>
