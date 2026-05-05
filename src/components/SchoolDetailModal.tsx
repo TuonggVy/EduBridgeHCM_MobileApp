@@ -129,6 +129,14 @@ function openGoogleMapsDirections(address?: string | null, lat?: number | null, 
   void Linking.openURL(url);
 }
 
+function getBoardingTypeLabel(boardingType?: string | null): string {
+  const normalized = (boardingType ?? '').trim().toUpperCase();
+  if (normalized === 'FULL_BOARDING') return 'Nội trú';
+  if (normalized === 'SEMI_BOARDING') return 'Bán trú';
+  if (normalized === 'BOTH') return 'Cả hai (Nội trú & Bán trú)';
+  return boardingType?.trim() || 'Đang cập nhật';
+}
+
 type Props = {
   visible: boolean;
   loading: boolean;
@@ -793,6 +801,15 @@ export function SchoolDetailModal({
                                 <MaterialIcons name="location-city" size={16} color="#64748b" />
                                 <Text style={styles.meta}>
                                   {[campus.ward, campus.district, campus.city].filter(Boolean).join(', ')}
+                                </Text>
+                              </View>
+                            ) : null}
+
+                            {campus.boardingType ? (
+                              <View style={styles.metaRow}>
+                                <MaterialIcons name="hotel" size={16} color="#64748b" />
+                                <Text style={styles.meta}>
+                                  Loại nội trú: {getBoardingTypeLabel(campus.boardingType)}
                                 </Text>
                               </View>
                             ) : null}
