@@ -9,6 +9,7 @@ import {
   StatusBar,
   Modal,
   Alert,
+  AppState,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 const MaterialIcons = require('@expo/vector-icons').MaterialIcons;
@@ -54,6 +55,12 @@ import AiAssistantChatScreen from './AiAssistantChatScreen';
 import ConsultationBookingScreen from './ConsultationBookingScreen';
 import ConsultationHistoryScreen from './ConsultationHistoryScreen';
 import SchoolCompareScreen from './SchoolCompareScreen';
+import NotificationsScreen from './NotificationsScreen';
+import { fetchUnreadNotificationCount } from '../api/notifications';
+import {
+  subscribeNotificationInboxChanged,
+  subscribeNotificationRoute,
+} from '../services/NotificationNavigationBus';
 
 const HEADER_TOP_PADDING =
   Platform.OS === 'ios' ? 50 : (StatusBar.currentHeight ?? 24) + 8;
@@ -129,6 +136,8 @@ export default function HomeScreen() {
   const [favouriteIdBySchoolId, setFavouriteIdBySchoolId] = useState<Record<number, number>>({});
   const [consultBookingVisible, setConsultBookingVisible] = useState(false);
   const [consultHistoryVisible, setConsultHistoryVisible] = useState(false);
+  const [notificationsVisible, setNotificationsVisible] = useState(false);
+  const [unreadNotificationCount, setUnreadNotificationCount] = useState(0);
   const [consultBookingSchool, setConsultBookingSchool] = useState<SchoolDetail | null>(null);
 
   const refreshStudents = useCallback(async () => {
@@ -440,6 +449,95 @@ export default function HomeScreen() {
     refreshSchools();
   }, [refreshSchools]);
 
+  const refreshUnreadNotificationCount = useCallback(async () => {
+    if (!user?.email) {
+      setUnreadNotificationCount(0);
+      return;
+    }
+    try {
+      const count = await fetchUnreadNotificationCount();
+      setUnreadNotificationCount(count);
+    } catch {
+      // Bỏ qua lỗi lấy badge count.
+    }
+  }, [user?.email]);
+
+  const openRouteFromNotification = useCallback((route: string | null) => {
+    const normalized = (route ?? '').trim().toLowerCase();
+    if (normalized === '/parent/consultation') {
+      setConsultHistoryVisible(true);
+      return;
+    }
+    if (normalized === '/posts') {
+      setPostFeedVisible(true);
+      return;
+    }
+    setActiveTab('home');
+  }, []);
+
+  useEffect(() => {
+    void refreshUnreadNotificationCount();
+  }, [refreshUnreadNotificationCount]);
+
+  useEffect(() => {
+    const unsubscribe = subscribeNotificationRoute((route) => {
+      openRouteFromNotification(route);
+      void refreshUnreadNotificationCount();
+    });
+    return unsubscribe;
+  }, [openRouteFromNotification, refreshUnreadNotificationCount]);
+
+  useEffect(() => {
+    const unsubscribe = subscribeNotificationInboxChanged(() => {
+      void refreshUnreadNotificationCount();
+    });
+    return unsubscribe;
+  }, [refreshUnreadNotificationCount]);
+
+  useEffect(() => {
+    if (!user?.email) return;
+    let mounted = true;
+    let inFlight = false;
+    const tick = async () => {
+      if (!mounted || inFlight) return;
+      inFlight = true;
+      try {
+        await refreshUnreadNotificationCount();
+      } finally {
+        inFlight = false;
+      }
+    };
+
+    const startPolling = () => {
+      void tick();
+      return setInterval(() => {
+        void tick();
+      }, 2000);
+    };
+
+    let intervalId: ReturnType<typeof setInterval> | null = null;
+    let appState = AppState.currentState;
+    if (appState === 'active') {
+      intervalId = startPolling();
+    }
+
+    const sub = AppState.addEventListener('change', (nextState) => {
+      appState = nextState;
+      if (nextState === 'active') {
+        if (!intervalId) intervalId = startPolling();
+      } else if (intervalId) {
+        clearInterval(intervalId);
+        intervalId = null;
+      }
+    });
+
+    return () => {
+      mounted = false;
+      if (intervalId) clearInterval(intervalId);
+      sub.remove();
+    };
+  }, [refreshUnreadNotificationCount, user?.email]);
+
   useEffect(() => {
     if (activeTab !== 'account' || !user) return;
     let cancelled = false;
@@ -552,8 +650,18 @@ export default function HomeScreen() {
                   Tìm trường, địa điểm...
                 </Text>
               </Pressable>
-              <Pressable style={styles.notifButton}>
+              <Pressable
+                style={styles.notifButton}
+                onPress={() => setNotificationsVisible(true)}
+              >
                 <MaterialIcons name="notifications-none" size={24} color="#fff" />
+                {unreadNotificationCount > 0 ? (
+                  <View style={styles.notifBadge}>
+                    <Text style={styles.notifBadgeText}>
+                      {unreadNotificationCount > 99 ? '99+' : unreadNotificationCount}
+                    </Text>
+                  </View>
+                ) : null}
               </Pressable>
             </View>
           </View>
@@ -719,6 +827,25 @@ export default function HomeScreen() {
           onToggleFavourite={toggleSchoolFavourite}
           onClearRecent={() => setRecentSearches([])}
           onAddRecent={addRecent}
+        />
+      </Modal>
+
+      <Modal
+        visible={notificationsVisible}
+        animationType="slide"
+        presentationStyle="fullScreen"
+        onRequestClose={() => setNotificationsVisible(false)}
+      >
+        <NotificationsScreen
+          visible={notificationsVisible}
+          onClose={() => {
+            setNotificationsVisible(false);
+            void refreshUnreadNotificationCount();
+          }}
+          onOpenRoute={openRouteFromNotification}
+          onUnreadCountChanged={() => {
+            void refreshUnreadNotificationCount();
+          }}
         />
       </Modal>
 
@@ -911,6 +1038,24 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(255,255,255,0.22)',
     alignItems: 'center',
     justifyContent: 'center',
+    position: 'relative',
+  },
+  notifBadge: {
+    position: 'absolute',
+    right: -2,
+    top: -2,
+    minWidth: 18,
+    height: 18,
+    borderRadius: 9,
+    paddingHorizontal: 4,
+    backgroundColor: '#ef4444',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  notifBadgeText: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: '#fff',
   },
   scroll: {
     flex: 1,

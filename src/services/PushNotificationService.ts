@@ -84,6 +84,13 @@ function showForegroundAlert(remoteMessage: FirebaseMessagingTypes.RemoteMessage
 export function attachForegroundMessageListener(): () => void {
   const unsub = messaging().onMessage(async remoteMessage => {
     showForegroundAlert(remoteMessage);
+    if (__DEV__) {
+      console.log(
+        '[FCM] Foreground message:',
+        remoteMessage?.messageId,
+        remoteMessage?.data
+      );
+    }
   });
   return unsub;
 }

@@ -99,6 +99,7 @@ export function HomeTabScreen({
                 isFavourite={school.isFavourite}
                 onToggleFavourite={() => onToggleFavourite(school.id)}
                 showFooter={false}
+                containerStyle={styles.featuredSchoolCard}
                 onPress={() => onOpenSchool(school.id)}
               />
             </View>
@@ -220,6 +221,9 @@ const styles = StyleSheet.create({
   },
   featuredCardWrap: {
     marginRight: sp.xs,
+  },
+  featuredSchoolCard: {
+    height: 134,
   },
   postsCard: {
     flexDirection: 'row',

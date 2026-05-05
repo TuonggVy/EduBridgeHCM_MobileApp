@@ -31,18 +31,17 @@ const FILTERS: FilterItem[] = [
 const TOP_SAFE_PADDING = Platform.OS === 'ios' ? 56 : (StatusBar.currentHeight ?? 24) + 12;
 const SCREEN_WIDTH = Dimensions.get('window').width;
 
-function relativeTime(isoDate: string | null): string {
-  if (!isoDate) return 'Vừa đăng';
+function formatPublishedDate(isoDate: string | null): string {
+  if (!isoDate) return 'Chưa có thời gian';
   const date = new Date(isoDate);
-  if (Number.isNaN(date.getTime())) return 'Vừa đăng';
-  const diffMs = Date.now() - date.getTime();
-  if (diffMs < 0) return 'Vừa đăng';
-  const mins = Math.floor(diffMs / 60000);
-  if (mins < 60) return `${Math.max(mins, 1)} phút trước`;
-  const hours = Math.floor(mins / 60);
-  if (hours < 24) return `${hours} giờ trước`;
-  const days = Math.floor(hours / 24);
-  return `${days} ngày trước`;
+  if (Number.isNaN(date.getTime())) return isoDate;
+  return new Intl.DateTimeFormat('vi-VN', {
+    hour: '2-digit',
+    minute: '2-digit',
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+  }).format(date);
 }
 
 function categoryLabel(category: string): string {
@@ -187,7 +186,7 @@ export default function PostFeedScreen({ onOpenPostDetail, onClose }: PostFeedSc
             <Text style={styles.schoolName} numberOfLines={1}>
               {item.author?.name ?? 'Trường học'}
             </Text>
-            <Text style={styles.publishedTime}>{relativeTime(item.publishedDate)}</Text>
+            <Text style={styles.publishedTime}>{formatPublishedDate(item.publishedDate)}</Text>
           </View>
           <View style={styles.badge}>
             <Text style={styles.badgeText}>{categoryLabel(item.categoryPost)}</Text>
@@ -209,21 +208,6 @@ export default function PostFeedScreen({ onOpenPostDetail, onClose }: PostFeedSc
             ))}
           </View>
         )}
-
-        <View style={styles.actionRow}>
-          <Pressable style={styles.actionButton}>
-            <MaterialIcons name="favorite-border" size={18} color="#64748b" />
-          </Pressable>
-          <Pressable style={styles.actionButton}>
-            <MaterialIcons name="chat-bubble-outline" size={18} color="#64748b" />
-          </Pressable>
-          <Pressable style={styles.actionButton}>
-            <MaterialIcons name="share" size={18} color="#64748b" />
-          </Pressable>
-          <Pressable style={styles.actionButton}>
-            <MaterialIcons name="bookmark-border" size={18} color="#64748b" />
-          </Pressable>
-        </View>
       </Pressable>
     );
   };
@@ -237,14 +221,7 @@ export default function PostFeedScreen({ onOpenPostDetail, onClose }: PostFeedSc
           </Pressable>
         </View>
         <Text style={styles.title}>Bài viết từ Trường</Text>
-        <View style={styles.rightWrap}>
-          <Pressable style={styles.iconButton}>
-            <MaterialIcons name="notifications-none" size={22} color="#0f172a" />
-          </Pressable>
-          <View style={styles.profileAvatar}>
-            <MaterialIcons name="person" size={18} color="#475569" />
-          </View>
-        </View>
+        <View style={styles.rightWrap} />
       </View>
 
       <View style={styles.searchWrap}>
@@ -329,8 +306,19 @@ export default function PostFeedScreen({ onOpenPostDetail, onClose }: PostFeedSc
           </View>
           {selectedPost && (
             <ScrollView contentContainerStyle={styles.detailContent} showsVerticalScrollIndicator={false}>
-              <Text style={styles.detailSchoolName}>{selectedPost.author?.name ?? 'Trường học'}</Text>
-              <Text style={styles.detailPublishedTime}>{relativeTime(selectedPost.publishedDate)}</Text>
+              <View style={styles.detailAuthorRow}>
+                <View style={styles.detailAvatarWrap}>
+                  <MaterialIcons name="school" size={20} color="#2563eb" />
+                </View>
+                <View style={styles.detailAuthorTextWrap}>
+                  <Text style={styles.detailSchoolName}>
+                    {selectedPost.author?.name ?? 'Trường học'}
+                  </Text>
+                  <Text style={styles.detailPublishedTime}>
+                    {formatPublishedDate(selectedPost.publishedDate)}
+                  </Text>
+                </View>
+              </View>
               <Text style={styles.detailDescription}>
                 {selectedPost.content?.shortDescription ??
                   normalizeText(selectedPost.content?.contentDataList?.[0]?.text ?? '')}
@@ -436,23 +424,11 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
   rightWrap: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'flex-end',
     width: 96,
-    gap: 8,
   },
   iconButton: {
     width: 34,
     height: 34,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  profileAvatar: {
-    width: 30,
-    height: 30,
-    borderRadius: radius.full,
-    backgroundColor: '#e2e8f0',
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -684,8 +660,24 @@ const styles = StyleSheet.create({
     padding: sp.lg,
     gap: sp.sm,
   },
+  detailAuthorRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: sp.sm,
+  },
+  detailAvatarWrap: {
+    width: 40,
+    height: 40,
+    borderRadius: radius.full,
+    backgroundColor: '#dbeafe',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  detailAuthorTextWrap: {
+    flex: 1,
+  },
   detailSchoolName: {
-    fontSize: 18,
+    fontSize: 16,
     fontWeight: '700',
     color: '#0f172a',
   },

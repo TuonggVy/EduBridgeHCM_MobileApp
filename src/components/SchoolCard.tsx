@@ -1,5 +1,6 @@
 import React from 'react';
 import { View, Text, StyleSheet, Pressable, Image } from 'react-native';
+import type { StyleProp, ViewStyle } from 'react-native';
 const MaterialIcons = require('@expo/vector-icons').MaterialIcons;
 
 const radius = { xl: 20 } as const;
@@ -15,6 +16,7 @@ type SchoolCardProps = {
   showFooter?: boolean;
   ctaLabel?: string;
   onPress: () => void;
+  containerStyle?: StyleProp<ViewStyle>;
 };
 
 export function SchoolCard({
@@ -27,10 +29,11 @@ export function SchoolCard({
   showFooter = true,
   ctaLabel = 'Xem chi tiết',
   onPress,
+  containerStyle,
 }: SchoolCardProps) {
   return (
     <Pressable
-      style={({ pressed }) => [styles.card, pressed && styles.cardPressed]}
+      style={({ pressed }) => [styles.card, containerStyle, pressed && styles.cardPressed]}
       onPress={onPress}
     >
       <View style={styles.favoriteWrap}>
