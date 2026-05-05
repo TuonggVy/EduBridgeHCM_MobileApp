@@ -4,7 +4,7 @@
     "slug": "EduBridgeHCM_MobileApp",
     "version": "1.0.0",
     "orientation": "portrait",
-    "icon": "./assets/icon.png",
+    "icon": "./assets/LogoEdu2-removebg-preview.png",
     "userInterfaceStyle": "light",
     "splash": {
       "image": "./assets/splash-icon.png",
@@ -25,10 +25,8 @@
     },
     "android": {
       "adaptiveIcon": {
-        "backgroundColor": "#E6F4FE",
-        "foregroundImage": "./assets/android-icon-foreground.png",
-        "backgroundImage": "./assets/android-icon-background.png",
-        "monochromeImage": "./assets/android-icon-monochrome.png"
+        "backgroundColor": "#ffffff",
+        "foregroundImage": "./assets/LogoEdu2-removebg-preview.png"
       },
       "predictiveBackGestureEnabled": false,
       "package": "com.sp26se041.edubridgehcm.mobile.android",
