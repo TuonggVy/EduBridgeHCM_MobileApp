@@ -12,7 +12,20 @@
           "package_name": "com.sp26se041.edubridgehcm.mobile.android"
         }
       },
-      "oauth_client": [],
+      "oauth_client": [
+        {
+          "client_id": "552134784046-k9oknb5gglhnluqmfqps7n7kdcra5ee5.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.sp26se041.edubridgehcm.mobile.android",
+            "certificate_hash": "eb8031719bcc0c9dbab0d1c88ceba486fdde6e7e"
+          }
+        },
+        {
+          "client_id": "552134784046-epckgrmjkr7jql057ednt7tes48qblfo.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
       "api_key": [
         {
           "current_key": "AIzaSyDnCsZ1gE-suUxsVIrgyedPDeR5_J1dtKs"
@@ -20,7 +33,19 @@
       ],
       "services": {
         "appinvite_service": {
-          "other_platform_oauth_client": []
+          "other_platform_oauth_client": [
+            {
+              "client_id": "552134784046-epckgrmjkr7jql057ednt7tes48qblfo.apps.googleusercontent.com",
+              "client_type": 3
+            },
+            {
+              "client_id": "552134784046-48l3bhbcdqo2mp8c7te1q53f4feri00o.apps.googleusercontent.com",
+              "client_type": 2,
+              "ios_info": {
+                "bundle_id": "com.sp26se041.edubridgehcm.mobile.ios"
+              }
+            }
+          ]
         }
       }
     }
