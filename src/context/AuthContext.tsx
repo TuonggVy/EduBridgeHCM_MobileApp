@@ -3,17 +3,20 @@ import React, {
   useContext,
   useState,
   useCallback,
+  useEffect,
 } from 'react';
 import { GoogleSignin } from '@react-native-google-signin/google-signin';
 import { logout as apiLogout } from '../api/auth';
+import { getProfile } from '../api/profile';
 import { registerWithGoogle as registerWithGoogleService, signInWithGoogle } from '../services/AuthService';
 import { unregisterFcmTokenFromBackend } from '../services/PushNotificationService';
-import { clearTokens } from '../services/TokenStorage';
+import { clearTokens, getAccessToken, getRefreshToken } from '../services/TokenStorage';
 import type { AuthUser } from '../types/auth';
 
 type AuthContextType = {
   user: AuthUser | null;
   isLoading: boolean;
+  isBootstrapping: boolean;
   error: string | null;
   loginWithGoogle: () => Promise<void>;
   registerWithGoogle: () => Promise<void>;
@@ -31,7 +34,46 @@ type AuthProviderProps = {
 export function AuthProvider({ children, onRegisterSuccess }: AuthProviderProps) {
   const [user, setUser] = useState<AuthUser | null>(null);
   const [isLoading, setIsLoading] = useState(false);
+  const [isBootstrapping, setIsBootstrapping] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let mounted = true;
+
+    const bootstrapSession = async () => {
+      try {
+        const [accessToken, refreshToken] = await Promise.all([
+          getAccessToken(),
+          getRefreshToken(),
+        ]);
+        if (!accessToken && !refreshToken) {
+          if (mounted) setUser(null);
+          return;
+        }
+
+        const profileRes = await getProfile();
+        if (!mounted) return;
+        const profileBody = profileRes.body;
+        const rawRegisterDate = (profileBody as { registerDate?: unknown }).registerDate;
+        setUser({
+          ...profileBody,
+          registerDate: typeof rawRegisterDate === 'string' ? rawRegisterDate : '',
+        });
+        setError(null);
+      } catch {
+        if (!mounted) return;
+        setUser(null);
+        await clearTokens().catch(() => {});
+      } finally {
+        if (mounted) setIsBootstrapping(false);
+      }
+    };
+
+    void bootstrapSession();
+    return () => {
+      mounted = false;
+    };
+  }, []);
 
   const loginWithGoogle = useCallback(async () => {
     setIsLoading(true);
@@ -91,6 +133,7 @@ export function AuthProvider({ children, onRegisterSuccess }: AuthProviderProps)
       value={{
         user,
         isLoading,
+        isBootstrapping,
         error,
         loginWithGoogle,
         registerWithGoogle,

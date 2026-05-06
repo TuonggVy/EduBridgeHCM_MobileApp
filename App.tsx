@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { StatusBar } from 'expo-status-bar';
+import { ActivityIndicator, StyleSheet, View } from 'react-native';
 import { GoogleSignin } from '@react-native-google-signin/google-signin';
 import { AuthProvider, useAuth } from './src/context/AuthContext';
 import { PushNotificationRuntime } from './src/components/PushNotificationRuntime';
@@ -22,7 +23,16 @@ function AppContent({
   authView: 'login' | 'register';
   setAuthView: (v: 'login' | 'register') => void;
 }) {
-  const { user } = useAuth();
+  const { user, isBootstrapping } = useAuth();
+
+  if (isBootstrapping) {
+    return (
+      <View style={styles.bootstrapWrap}>
+        <ActivityIndicator size="large" color="#1976d2" />
+        <StatusBar style="auto" />
+      </View>
+    );
+  }
 
   if (user) {
     return (
@@ -55,3 +65,12 @@ export default function App() {
     </ToastProvider>
   );
 }
+
+const styles = StyleSheet.create({
+  bootstrapWrap: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#fff',
+  },
+});

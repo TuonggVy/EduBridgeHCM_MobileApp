@@ -41,10 +41,22 @@ export async function syncFcmTokenWithBackend(userEmail: string): Promise<void> 
     return;
   }
 
-  try {
-    await messaging().registerDeviceForRemoteMessages();
-  } catch {
-    // Một số nền tảng / trạng thái có thể không cần hoặc đã đăng ký
+  if (!messaging().isDeviceRegisteredForRemoteMessages) {
+    try {
+      await messaging().registerDeviceForRemoteMessages();
+    } catch (e) {
+      if (__DEV__) {
+        console.warn('[FCM] Không thể register device cho remote messages:', e);
+      }
+      return;
+    }
+  }
+
+  if (!messaging().isDeviceRegisteredForRemoteMessages) {
+    if (__DEV__) {
+      console.warn('[FCM] Device chưa đăng ký remote messages, bỏ qua sync token');
+    }
+    return;
   }
 
   const token = await messaging().getToken();
