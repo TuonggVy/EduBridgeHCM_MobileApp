@@ -1052,9 +1052,7 @@ export function SchoolDetailModal({
                           </View>
                         </View>
                         <Text style={styles.metaSmall}>Năm: {campaign.year}</Text>
-                        <Text style={styles.metaSmall}>
-                          {formatIsoDateRange(campaign.startDate, campaign.endDate)}
-                        </Text>
+                        <Text style={styles.metaSmall}>Thời gian: {formatIsoDateRange(campaign.startDate, campaign.endDate)}</Text>
                         {campaign.description ? (
                           expanded ? (
                             <View style={styles.programSection}>
