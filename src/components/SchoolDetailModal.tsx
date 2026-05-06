@@ -45,6 +45,7 @@ import {
 
 const HEADER_TOP = Platform.OS === 'ios' ? 50 : (StatusBar.currentHeight ?? 24) + 8;
 const SCREEN_WIDTH = Dimensions.get('window').width;
+const FACILITY_COLLAPSED_COUNT = 4;
 
 /** Bán kính gọi nearby đủ rộng để vẫn nhận được các cơ sở của trường (km). */
 const NEARBY_SEARCH_RADIUS_KM = 50;
@@ -312,6 +313,7 @@ export function SchoolDetailModal({
   const [expandedProgram, setExpandedProgram] = useState<Record<string, boolean>>({});
   const [expandedProgramGraduation, setExpandedProgramGraduation] = useState<Record<string, boolean>>({});
   const [expandedCampus, setExpandedCampus] = useState<Record<number, boolean>>({});
+  const [expandedFacility, setExpandedFacility] = useState<Record<number, boolean>>({});
   const [distancesKmByCampusId, setDistancesKmByCampusId] = useState<Record<number, number>>({});
   const [campaignTemplates, setCampaignTemplates] = useState<SchoolCampaignTemplate[]>([]);
   const [campaignLoading, setCampaignLoading] = useState(false);
@@ -417,6 +419,7 @@ export function SchoolDetailModal({
   useEffect(() => {
     if (!visible) {
       setDistancesKmByCampusId({});
+      setExpandedFacility({});
       setCampusPickerVisible(false);
       setConsultCampusPickerVisible(false);
       setConsultBookingVisible(false);
@@ -889,125 +892,126 @@ export function SchoolDetailModal({
                                 </View>
 
                                 {(() => {
+                                  const facilityExpanded = !!expandedFacility[campus.id];
+                                  const facilityItems = Array.isArray(campus.facility?.itemList)
+                                    ? campus.facility.itemList
+                                        .filter(
+                                          (item): item is FacilityItem =>
+                                            !!item &&
+                                            typeof item === 'object' &&
+                                            (typeof item.name === 'string' || typeof item.category === 'string')
+                                        )
+                                        .sort((a, b) => {
+                                          const aUsage = a.isUsage ? 1 : 0;
+                                          const bUsage = b.isUsage ? 1 : 0;
+                                          return bUsage - aUsage;
+                                        })
+                                    : [];
+                                  const visibleItems = facilityExpanded
+                                    ? facilityItems
+                                    : facilityItems.slice(0, FACILITY_COLLAPSED_COUNT);
                                   const galleryImages = Array.isArray(campus.facility?.imageData?.imageList)
                                     ? campus.facility.imageData.imageList.filter(
                                         (img): img is FacilityImage => typeof img?.url === 'string' && img.url.length > 0
                                       )
                                     : [];
-                                  const totalImages = galleryImages.length;
-                                  const overflowCount = Math.max(0, totalImages - 2);
-                                  const previewImages = galleryImages.slice(0, 4);
+                                  const usedImageIndexes = new Set<number>();
 
-                                  if (totalImages === 0) return null;
-
-                                  if (totalImages === 1) {
+                                  if (facilityItems.length === 0) {
                                     return (
-                                      <Pressable
-                                        onPress={() => openFacilityGallery(galleryImages, 0)}
-                                        style={({ pressed }) => [styles.facilityGallerySingle, pressed && styles.facilityCardPressed]}
-                                      >
-                                        <FacilityImageBlock imageUrl={galleryImages[0].url} height={210} />
-                                        <View style={styles.facilityImageNameOverlay}>
-                                          <Text numberOfLines={1} style={styles.facilityImageNameText}>
-                                            {getFacilityImageLabel(galleryImages[0], 0)}
-                                          </Text>
-                                        </View>
-                                        <View style={styles.facilityImageBadge}>
-                                          <MaterialIcons name="photo-library" size={14} color="#fff" />
-                                          <Text style={styles.facilityImageBadgeText}>{`${totalImages} ảnh`}</Text>
-                                        </View>
-                                      </Pressable>
-                                    );
-                                  }
-
-                                  if (totalImages === 2) {
-                                    return (
-                                      <View style={styles.facilityGalleryGridTwo}>
-                                        {galleryImages.map((image, idx) => (
-                                          <Pressable
-                                            key={`${campus.id}-gallery-${image.url ?? idx}`}
-                                            onPress={() => openFacilityGallery(galleryImages, idx)}
-                                            style={({ pressed }) => [
-                                              styles.facilityGalleryGridTwoItem,
-                                              pressed && styles.facilityCardPressed,
-                                            ]}
-                                          >
-                                            <FacilityImageBlock imageUrl={image.url} height={132} />
-                                            <View style={styles.facilityImageNameOverlay}>
-                                              <Text numberOfLines={1} style={styles.facilityImageNameText}>
-                                                {getFacilityImageLabel(image, idx)}
-                                              </Text>
-                                            </View>
-                                            {idx === 0 ? (
-                                              <View style={styles.facilityImageBadge}>
-                                                <MaterialIcons name="photo-library" size={14} color="#fff" />
-                                                <Text style={styles.facilityImageBadgeText}>{`${totalImages} ảnh`}</Text>
-                                              </View>
-                                            ) : null}
-                                          </Pressable>
-                                        ))}
+                                      <View style={styles.facilityEmptyState}>
+                                        <MaterialIcons name="apartment" size={18} color="#64748b" />
+                                        <Text style={styles.facilityEmptyText}>
+                                          Cơ sở này chưa cập nhật danh mục cơ sở vật chất.
+                                        </Text>
                                       </View>
                                     );
                                   }
 
                                   return (
-                                    <View style={styles.facilityGalleryGridFour}>
-                                      {previewImages.map((image, idx) => {
-                                        const isOverflowTile = overflowCount > 0 && idx === previewImages.length - 1;
+                                    <>
+                                      <View style={styles.facilityGrid}>
+                                        {visibleItems.map((item, idx) => {
+                                          const globalIndex = facilityExpanded ? idx : idx;
+                                        const matchedImage = matchFacilityImageByItem(
+                                          item,
+                                          galleryImages,
+                                          usedImageIndexes,
+                                          globalIndex
+                                        );
+                                        const valueLabel = getFacilityItemValueLabel(item);
+                                        const itemLabel = item.name?.trim() || item.category?.trim() || 'Tiện ích';
                                         return (
                                           <Pressable
-                                            key={`${campus.id}-gallery-${image.url ?? idx}`}
-                                            onPress={() => openFacilityGallery(galleryImages, idx)}
+                                            key={`${campus.id}-facility-${item.facilityCode ?? itemLabel}-${idx}`}
+                                            onPress={() => {
+                                              if (!matchedImage?.url) return;
+                                              const targetIndex = galleryImages.findIndex(
+                                                (image) => image.url === matchedImage.url
+                                              );
+                                              openFacilityGallery(
+                                                galleryImages,
+                                                targetIndex >= 0 ? targetIndex : 0
+                                              );
+                                            }}
+                                            disabled={!matchedImage?.url}
                                             style={({ pressed }) => [
-                                              styles.facilityGalleryGridFourItem,
-                                              pressed && styles.facilityCardPressed,
+                                              styles.facilityItemCard,
+                                              matchedImage?.url && pressed && styles.facilityCardPressed,
                                             ]}
                                           >
-                                            <FacilityImageBlock imageUrl={image.url} height={110} />
-                                            <View style={styles.facilityImageNameOverlay}>
-                                              <Text numberOfLines={1} style={styles.facilityImageNameText}>
-                                                {getFacilityImageLabel(image, idx)}
-                                              </Text>
+                                            <FacilityImageBlock imageUrl={matchedImage?.url} height={110} />
+                                            <View style={styles.facilityItemBody}>
+                                              <View style={styles.facilityItemTitleRow}>
+                                                <MaterialIcons
+                                                  name={getFacilityItemIcon(item)}
+                                                  size={16}
+                                                  color="#2563eb"
+                                                />
+                                                <Text numberOfLines={2} style={styles.facilityItemTitle}>
+                                                  {itemLabel}
+                                                </Text>
+                                              </View>
+                                              {valueLabel ? (
+                                                <Text style={styles.facilityItemValue}>{valueLabel}</Text>
+                                              ) : null}
+                                              {item.category ? (
+                                                <View style={styles.facilityHighlightBadge}>
+                                                  <Text numberOfLines={1} style={styles.facilityHighlightBadgeText}>
+                                                    {item.category}
+                                                  </Text>
+                                                </View>
+                                              ) : null}
                                             </View>
-                                            {idx === 0 ? (
-                                              <View style={styles.facilityImageBadge}>
-                                                <MaterialIcons name="photo-library" size={14} color="#fff" />
-                                                <Text style={styles.facilityImageBadgeText}>{`${totalImages} ảnh`}</Text>
-                                              </View>
-                                            ) : null}
-                                            {isOverflowTile ? (
-                                              <View style={styles.facilityImageOverflowOverlay}>
-                                                <MaterialIcons name="photo-library" size={16} color="#fff" />
-                                                <Text style={styles.facilityImageOverflowText}>{`+${overflowCount}`}</Text>
-                                              </View>
-                                            ) : null}
                                           </Pressable>
                                         );
-                                      })}
-                                    </View>
+                                        })}
+                                      </View>
+                                      {facilityItems.length > FACILITY_COLLAPSED_COUNT ? (
+                                        <Pressable
+                                          onPress={() =>
+                                            setExpandedFacility((prev) => ({
+                                              ...prev,
+                                              [campus.id]: !prev[campus.id],
+                                            }))
+                                          }
+                                          style={styles.facilityViewAllPhotosBtn}
+                                        >
+                                          <MaterialIcons
+                                            name={facilityExpanded ? 'expand-less' : 'expand-more'}
+                                            size={16}
+                                            color="#1976d2"
+                                          />
+                                          <Text style={styles.facilityViewAllPhotosText}>
+                                            {facilityExpanded
+                                              ? 'Thu gọn'
+                                              : `Mở rộng (${facilityItems.length - FACILITY_COLLAPSED_COUNT} mục)`}
+                                          </Text>
+                                        </Pressable>
+                                      ) : null}
+                                    </>
                                   );
                                 })()}
-                                {Array.isArray(campus.facility?.imageData?.imageList) &&
-                                campus.facility.imageData.imageList.length === 0 &&
-                                campus.facility?.imageData?.coverUrl ? (
-                                  <Pressable
-                                    onPress={() =>
-                                      openFacilityGallery([{ url: campus.facility!.imageData!.coverUrl!, name: 'Ảnh cơ sở' }])
-                                    }
-                                    style={({ pressed }) => [styles.facilityGallerySingle, pressed && styles.facilityCardPressed]}
-                                  >
-                                    <FacilityImageBlock imageUrl={campus.facility.imageData.coverUrl} height={210} />
-                                    <View style={styles.facilityImageNameOverlay}>
-                                      <Text numberOfLines={1} style={styles.facilityImageNameText}>
-                                        Ảnh cơ sở
-                                      </Text>
-                                    </View>
-                                    <View style={styles.facilityImageBadge}>
-                                      <MaterialIcons name="photo" size={14} color="#fff" />
-                                      <Text style={styles.facilityImageBadgeText}>Ảnh cơ sở</Text>
-                                    </View>
-                                  </Pressable>
-                                ) : null}
                               </View>
                             ) : null}
                           </>
@@ -1425,7 +1429,7 @@ export function SchoolDetailModal({
                     setConsultCampusPickerVisible(true);
                   }}
                 >
-                  <MaterialIcons name="event-available" size={18} color="#fff" />
+                  <MaterialIcons name="event-available" size={18} color="#1976d2" />
                   <Text style={styles.consultSectionButtonText}>Xem lịch tư vấn</Text>
                 </Pressable>
               </View>
@@ -2413,13 +2417,15 @@ const styles = StyleSheet.create({
     marginTop: 12,
     height: 44,
     borderRadius: 12,
-    backgroundColor: '#1976d2',
+    backgroundColor: '#fff',
+    borderWidth: 1,
+    borderColor: '#e2e8f0',
     alignItems: 'center',
     justifyContent: 'center',
     flexDirection: 'row',
     gap: 8,
   },
-  consultSectionButtonText: { color: '#fff', fontSize: 15, fontWeight: '700' },
+  consultSectionButtonText: { color: '#1976d2', fontSize: 15, fontWeight: '700' },
   consultSheetBackdrop: {
     flex: 1,
     backgroundColor: 'rgba(15, 23, 42, 0.45)',
