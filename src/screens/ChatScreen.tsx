@@ -106,11 +106,11 @@ function formatDayLabel(date: Date): string {
   const dKey = dayKey(date);
   const tKey = dayKey(today);
 
-  if (dKey === tKey) return 'Today';
+  if (dKey === tKey) return 'Hôm nay';
 
   const y = new Date(today);
   y.setDate(today.getDate() - 1);
-  if (dayKey(y) === dKey) return 'Yesterday';
+  if (dayKey(y) === dKey) return 'Hôm qua';
 
   return `${date.getDate()}/${date.getMonth() + 1}/${date.getFullYear()}`;
 }
@@ -329,6 +329,35 @@ export default function ChatScreen({
       campusId,
     };
   }, [activeConversationId, parentEmail, counsellorEmail, studentProfileId, campusId]);
+
+  /**
+   * Lần đầu mở chat, prop `studentName` có thể chưa có (BE conversations không trả tên).
+   * Fetch hồ sơ học sinh sớm để header hiển thị đúng tên ngay, và tận dụng cache cho modal hồ sơ.
+   */
+  useEffect(() => {
+    if (studentProfileData) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const res = await fetchParentStudents();
+        if (cancelled) return;
+        const studentId = String(studentProfileId);
+        const matched =
+          res.body.find((s) => String(s.id) === studentId) ??
+          res.body.find((s) => (studentName?.trim() ? s.studentName === studentName.trim() : false)) ??
+          null;
+        if (matched) setStudentProfileData(matched);
+      } catch {
+        // Best-effort; header sẽ fallback về prop hoặc nhãn mặc định.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [studentProfileId, studentName, studentProfileData]);
+
+  const displayStudentName =
+    studentName?.trim() || studentProfileData?.studentName?.trim() || '';
 
   const displayMessages = useMemo(() => {
     // For inverted FlatList: we want newest at bottom, so reverse data.
@@ -671,8 +700,10 @@ export default function ChatScreen({
 
   const openStudentProfile = useCallback(async () => {
     setStudentProfileVisible(true);
-    setStudentProfileLoading(true);
     setExpandedGradeBlocks({});
+    // Đã có sẵn dữ liệu từ effect trên thì hiển thị ngay, chỉ refetch khi rỗng.
+    if (studentProfileData) return;
+    setStudentProfileLoading(true);
     try {
       const studentId = String(studentProfileId);
       const res = await fetchParentStudents();
@@ -686,7 +717,7 @@ export default function ChatScreen({
     } finally {
       setStudentProfileLoading(false);
     }
-  }, [studentName, studentProfileId]);
+  }, [studentName, studentProfileData, studentProfileId]);
 
   const renderMessageItem = useCallback(
     ({ item, index }: { item: ChatMessage & { _chronoIndex: number }; index: number }) => {
@@ -738,7 +769,7 @@ export default function ChatScreen({
                 <Text style={[styles.metaTime, isDark && styles.metaTimeDark]}>{formatTime(created)}</Text>
                 {isMine && item.status ? (
                   <Text style={[styles.metaStatus, isDark && styles.metaTimeDark]}>
-                    {item.status === 'seen' ? 'Seen' : item.status === 'sent' ? 'Delivered' : 'Sending'}
+                    {item.status === 'seen' ? 'Đã xem' : item.status === 'sent' ? 'Đã gửi' : 'Đang gửi'}
                   </Text>
                 ) : null}
               </View>
@@ -770,12 +801,10 @@ export default function ChatScreen({
               {counsellorName ?? 'Tư vấn'}
             </Text>
             <Text style={[styles.headerStatus, isDark && styles.headerStatusDark]}>
-              {studentName?.trim()
-                ? `Hồ sơ: ${studentName.trim()}`
-                : 'Hồ sơ học sinh'}
+              {displayStudentName ? `Hồ sơ: ${displayStudentName}` : 'Hồ sơ học sinh'}
             </Text>
             <Text style={[styles.headerPresence, isDark && styles.headerStatusDark]}>
-              {connected ? 'Online' : 'Last seen recently'}
+              {connected ? 'Đang hoạt động' : 'Vừa hoạt động'}
             </Text>
           </View>
         </View>
@@ -798,7 +827,7 @@ export default function ChatScreen({
         <View style={styles.empty}>
           <Ionicons name="chatbubble-ellipses-outline" size={56} color={isDark ? '#475569' : '#94a3b8'} />
           <Text style={[styles.emptyTitle, isDark && styles.emptyTitleDark]}>
-            Start your conversation with a counsellor
+            Bắt đầu cuộc trò chuyện với tư vấn viên
           </Text>
         </View>
       ) : (
@@ -823,7 +852,7 @@ export default function ChatScreen({
                 <View style={styles.loadingMore}>
                   <ActivityIndicator size="small" color={isDark ? '#90caf9' : '#1976d2'} />
                   <Text style={[styles.loadingMoreText, isDark && styles.loadingMoreTextDark]}>
-                    Loading more...
+                    Đang tải thêm...
                   </Text>
                 </View>
               ) : (
@@ -848,17 +877,9 @@ export default function ChatScreen({
         style={[styles.inputWrap, isDark && styles.inputWrapDark]}
       >
         <View style={[styles.inputRow, isDark && styles.inputRowDark]}>
-          <Pressable style={styles.leftIcon} hitSlop={10} onPress={() => {}}>
-            <Ionicons
-              name="attach-outline"
-              size={INPUT_BAR_ICON_SIZE}
-              color={isDark ? '#E5E7EB' : '#334155'}
-            />
-          </Pressable>
-
           <TextInput
             style={[styles.input, isDark && styles.inputDark]}
-            placeholder="Type a message..."
+            placeholder="Nhập tin nhắn..."
             placeholderTextColor={isDark ? '#64748b' : '#94a3b8'}
             value={inputText}
             onChangeText={(t) => setInputText(t)}

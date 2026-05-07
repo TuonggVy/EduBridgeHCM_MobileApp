@@ -289,7 +289,7 @@ export default function ConversationsScreen({
             <View style={styles.empty}>
               <Ionicons name="chatbubble-ellipses-outline" size={44} color={isDark ? '#475569' : '#94a3b8'} />
               <Text style={[styles.emptyTitle, isDark && styles.emptyTitleDark]}>
-                Start your conversation with a counsellor
+              Bắt đầu cuộc trò chuyện với tư vấn viên
               </Text>
             </View>
           }
