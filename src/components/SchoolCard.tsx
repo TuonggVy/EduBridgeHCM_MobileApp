@@ -133,6 +133,8 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: '#0f172a',
     lineHeight: 21,
+    // Chừa chỗ cho icon tim ở góc trên bên phải để tên trường không bị che.
+    paddingRight: 36,
   },
   description: {
     marginTop: 4,
