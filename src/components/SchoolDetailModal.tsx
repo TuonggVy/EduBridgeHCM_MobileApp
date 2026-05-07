@@ -138,6 +138,104 @@ function getBoardingTypeLabel(boardingType?: string | null): string {
   return boardingType?.trim() || 'Đang cập nhật';
 }
 
+function buildCurriculumListFromCampaignTemplates(
+  campaigns: SchoolCampaignTemplate[]
+): SchoolDetail['curriculumList'] {
+  const byGroupCode = new Map<string, SchoolDetail['curriculumList'][number]>();
+
+  campaigns.forEach((campaign, campaignIdx) => {
+    campaign.campusProgramOfferings.forEach((offering, offeringIdx) => {
+      const offeringRaw = offering as Record<string, unknown>;
+      const programRaw =
+        offeringRaw.program && typeof offeringRaw.program === 'object'
+          ? (offeringRaw.program as Record<string, unknown>)
+          : null;
+      const curriculumRaw =
+        offeringRaw.curriculum && typeof offeringRaw.curriculum === 'object'
+          ? (offeringRaw.curriculum as Record<string, unknown>)
+          : programRaw?.curriculum && typeof programRaw.curriculum === 'object'
+            ? (programRaw.curriculum as Record<string, unknown>)
+            : null;
+      if (!curriculumRaw && !programRaw) return;
+
+      const fallbackName =
+        typeof programRaw?.name === 'string' && programRaw.name.trim()
+          ? programRaw.name.trim()
+          : `Chương trình ${offeringIdx + 1}`;
+      const curriculumName =
+        typeof curriculumRaw?.name === 'string' && curriculumRaw.name.trim()
+          ? curriculumRaw.name.trim()
+          : fallbackName;
+      const groupCode =
+        typeof curriculumRaw?.groupCode === 'string' && curriculumRaw.groupCode.trim()
+          ? curriculumRaw.groupCode.trim()
+          : `campaign-${campaign.id ?? campaignIdx}-curriculum-${offeringIdx}`;
+
+      const existing = byGroupCode.get(groupCode);
+      const subjectsJsonb = Array.isArray(curriculumRaw?.subjectOptions)
+        ? curriculumRaw.subjectOptions
+            .filter((subject): subject is Record<string, unknown> => !!subject && typeof subject === 'object')
+            .map((subject) => ({
+              name: typeof subject.name === 'string' ? subject.name : 'Môn học',
+              description: typeof subject.description === 'string' ? subject.description : null,
+              isMandatory: Boolean(subject.isMandatory),
+            }))
+        : [];
+      const methodLearningList = Array.isArray(curriculumRaw?.methodLearnings)
+        ? curriculumRaw.methodLearnings.filter((method): method is string => typeof method === 'string')
+        : [];
+
+      const base =
+        existing ??
+        ({
+          curriculumStatus:
+            typeof curriculumRaw?.status === 'string' && curriculumRaw.status ? curriculumRaw.status : 'UNKNOWN',
+          methodLearningList,
+          applicationYear:
+            typeof curriculumRaw?.applicationYear === 'number'
+              ? curriculumRaw.applicationYear
+              : typeof campaign.year === 'number'
+                ? campaign.year
+                : new Date().getFullYear(),
+          name: curriculumName,
+          description: typeof curriculumRaw?.description === 'string' ? curriculumRaw.description : null,
+          programList: [],
+          subjectsJsonb,
+          curriculumType:
+            typeof curriculumRaw?.curriculumType === 'string' && curriculumRaw.curriculumType
+              ? curriculumRaw.curriculumType
+              : 'UNKNOWN',
+          groupCode,
+        } satisfies SchoolDetail['curriculumList'][number]);
+
+      const programName =
+        typeof programRaw?.name === 'string' && programRaw.name.trim() ? programRaw.name.trim() : curriculumName;
+      const existingProgram = base.programList.find((program) => program.name === programName);
+      if (existingProgram) {
+        existingProgram.campusProgramOfferingList.push(offeringRaw);
+      } else {
+        base.programList.push({
+          baseTuitionFee:
+            typeof programRaw?.baseTuitionFee === 'number' && Number.isFinite(programRaw.baseTuitionFee)
+              ? programRaw.baseTuitionFee
+              : null,
+          targetStudentDescription:
+            typeof programRaw?.targetStudentDescription === 'string' ? programRaw.targetStudentDescription : null,
+          name: programName,
+          campusProgramOfferingList: [offeringRaw],
+          graduationStandard:
+            typeof programRaw?.graduationStandard === 'string' ? programRaw.graduationStandard : null,
+          isActive: typeof programRaw?.status === 'string' ? programRaw.status : null,
+        });
+      }
+
+      byGroupCode.set(groupCode, base);
+    });
+  });
+
+  return Array.from(byGroupCode.values());
+}
+
 type Props = {
   visible: boolean;
   loading: boolean;
@@ -148,6 +246,11 @@ type Props = {
   onToggleFavourite: () => void;
   onContactConsult?: (campusId: number) => void;
   onOpenConsultBooking?: () => void;
+  onOpenAdmissionSubmission?: (payload: {
+    campusProgramOfferingId: number;
+    campusName: string;
+    programName: string;
+  }) => void;
   studentPickerVisible?: boolean;
   studentPickerOptions?: ParentStudentProfile[];
   studentPickerCampusName?: string | null;
@@ -293,6 +396,7 @@ export function SchoolDetailModal({
   onToggleFavourite,
   onContactConsult,
   onOpenConsultBooking,
+  onOpenAdmissionSubmission,
   studentPickerVisible = false,
   studentPickerOptions = [],
   studentPickerCampusName = null,
@@ -347,10 +451,19 @@ export function SchoolDetailModal({
   const [bookingQuestion, setBookingQuestion] = useState('');
   const [bookingSubmitting, setBookingSubmitting] = useState(false);
   const facilityViewerListRef = useRef<FlatList<FacilityImage> | null>(null);
+  const curriculumFromCampaigns = useMemo(
+    () => buildCurriculumListFromCampaignTemplates(campaignTemplates),
+    [campaignTemplates]
+  );
 
   const curriculumList = useMemo(
-    () => (apiCurriculumList.length > 0 ? apiCurriculumList : school?.curriculumList ?? []),
-    [apiCurriculumList, school?.curriculumList]
+    () =>
+      curriculumFromCampaigns.length > 0
+        ? curriculumFromCampaigns
+        : apiCurriculumList.length > 0
+          ? apiCurriculumList
+          : school?.curriculumList ?? [],
+    [curriculumFromCampaigns, apiCurriculumList, school?.curriculumList]
   );
   const campusList = useMemo(() => school?.campusList ?? [], [school?.campusList]);
   const consultCampuses = useMemo(() => campusList, [campusList]);
@@ -1039,198 +1152,211 @@ export function SchoolDetailModal({
                   const mandatoryItems = mandatoryExpanded ? campaign.mandatoryAll : campaign.mandatoryAll.slice(0, 3);
                   return (
                     <View key={campaign.id} style={styles.campaignCard}>
-                      <Pressable
-                        onPress={() => setExpandedCampaign((prev) => ({ ...prev, [campaign.id]: !prev[campaign.id] }))}
-                      >
-                        <View style={styles.curriculumHeaderRow}>
-                          <Text style={styles.curriculumName}>{campaign.name}</Text>
-                          <MaterialIcons name={expanded ? 'expand-less' : 'expand-more'} size={22} color="#64748b" />
-                        </View>
-                        <View style={styles.badgeRow}>
-                          <View style={statusPill.wrap}>
-                            <Text style={statusPill.text}>{isOpen ? 'ĐANG MỞ' : 'ĐÃ ĐÓNG'}</Text>
+                        <Pressable
+                          onPress={() => setExpandedCampaign((prev) => ({ ...prev, [campaign.id]: !prev[campaign.id] }))}
+                        >
+                          <View style={styles.curriculumHeaderRow}>
+                            <Text style={styles.curriculumName}>{campaign.name}</Text>
+                            <MaterialIcons name={expanded ? 'expand-less' : 'expand-more'} size={22} color="#64748b" />
                           </View>
-                        </View>
-                        <Text style={styles.metaSmall}>Năm: {campaign.year}</Text>
-                        <Text style={styles.metaSmall}>Thời gian: {formatIsoDateRange(campaign.startDate, campaign.endDate)}</Text>
-                        {campaign.description ? (
-                          expanded ? (
-                            <View style={styles.programSection}>
-                              <Text style={styles.programSectionTitle}>Mô tả</Text>
-                              <Text style={styles.sectionText}>{stripBasicHtml(campaign.description)}</Text>
+                          <View style={styles.badgeRow}>
+                            <View style={statusPill.wrap}>
+                              <Text style={statusPill.text}>{isOpen ? 'ĐANG MỞ' : 'ĐÃ ĐÓNG'}</Text>
                             </View>
-                          ) : (
-                            <Text numberOfLines={1} style={styles.sectionText}>
-                              {stripBasicHtml(campaign.description)}
-                            </Text>
-                          )
-                        ) : null}
-                      </Pressable>
-                      {expanded ? (
-                        <View style={styles.curriculumBody}>
-                          <Text style={styles.programSectionTitle}>Phương thức tuyển sinh</Text>
-                          {campaign.admissionMethodDetails.map((method) => {
-                            const methodKey = `${campaign.id}-${method.methodCode}`;
-                            const methodExpanded = !!expandedMethod[methodKey];
-                            return (
-                              <View key={methodKey} style={styles.methodCard}>
-                                <Pressable
-                                  onPress={() => setExpandedMethod((prev) => ({ ...prev, [methodKey]: !prev[methodKey] }))}
-                                >
-                                  <View style={styles.programHeaderRow}>
-                                    <Text style={styles.programName}>{method.displayName}</Text>
-                                    <MaterialIcons
-                                      name={methodExpanded ? 'expand-less' : 'expand-more'}
-                                      size={20}
-                                      color="#64748b"
-                                    />
-                                  </View>
-                                  <Text style={styles.metaSmall}>
-                                    {formatArrayDate(method.startDate)} - {formatArrayDate(method.endDate)}
-                                  </Text>
-                                  {method.allowReservationSubmission ? (
-                                    <Text style={styles.methodReservationTag}>Cho phép giữ chỗ</Text>
-                                  ) : null}
-                                </Pressable>
-                                {methodExpanded ? (
-                                  <View style={styles.methodBody}>
-                                    {method.description ? <Text style={styles.sectionText}>{method.description}</Text> : null}
-                                    {method.admissionProcessSteps.length > 0 ? (
-                                      <View style={styles.stepsWrap}>
-                                        <Text style={styles.programSubLabel}>Quy trình</Text>
-                                        {method.admissionProcessSteps
-                                          .slice()
-                                          .sort((a, b) => a.stepOrder - b.stepOrder)
-                                          .map((step) => (
-                                            <View key={`${methodKey}-step-${step.stepOrder}`} style={styles.stepItem}>
-                                              <View style={styles.stepDot} />
-                                              <View style={styles.stepContent}>
-                                                <Text style={styles.stepTitle}>
-                                                  Bước {step.stepOrder}: {step.stepName}
-                                                </Text>
-                                                {step.description ? (
-                                                  <Text style={styles.subjectDesc}>{step.description}</Text>
-                                                ) : null}
+                          </View>
+                          <Text style={styles.metaSmall}>Năm: {campaign.year}</Text>
+                          <Text style={styles.metaSmall}>
+                            Thời gian: {formatIsoDateRange(campaign.startDate, campaign.endDate)}
+                          </Text>
+                          {campaign.description ? (
+                            expanded ? (
+                              <View style={styles.programSection}>
+                                <Text style={styles.programSectionTitle}>Mô tả</Text>
+                                <Text style={styles.sectionText}>{stripBasicHtml(campaign.description)}</Text>
+                              </View>
+                            ) : (
+                              <Text numberOfLines={1} style={styles.sectionText}>
+                                {stripBasicHtml(campaign.description)}
+                              </Text>
+                            )
+                          ) : null}
+                        </Pressable>
+                        {expanded ? (
+                          <View style={styles.curriculumBody}>
+                            <Text style={styles.programSectionTitle}>Phương thức tuyển sinh</Text>
+                            {campaign.admissionMethodDetails.map((method) => {
+                              const methodKey = `${campaign.id}-${method.methodCode}`;
+                              const methodExpanded = !!expandedMethod[methodKey];
+                              return (
+                                <View key={methodKey} style={styles.methodCard}>
+                                  <Pressable
+                                    onPress={() => setExpandedMethod((prev) => ({ ...prev, [methodKey]: !prev[methodKey] }))}
+                                  >
+                                    <View style={styles.programHeaderRow}>
+                                      <Text style={styles.programName}>{method.displayName}</Text>
+                                      <MaterialIcons
+                                        name={methodExpanded ? 'expand-less' : 'expand-more'}
+                                        size={20}
+                                        color="#64748b"
+                                      />
+                                    </View>
+                                    <Text style={styles.metaSmall}>
+                                      {formatArrayDate(method.startDate)} - {formatArrayDate(method.endDate)}
+                                    </Text>
+                                    {method.allowReservationSubmission ? (
+                                      <Text style={styles.methodReservationTag}>Cho phép giữ chỗ</Text>
+                                    ) : null}
+                                  </Pressable>
+                                  {methodExpanded ? (
+                                    <View style={styles.methodBody}>
+                                      {method.description ? <Text style={styles.sectionText}>{method.description}</Text> : null}
+                                      {method.admissionProcessSteps.length > 0 ? (
+                                        <View style={styles.stepsWrap}>
+                                          <Text style={styles.programSubLabel}>Quy trình</Text>
+                                          {method.admissionProcessSteps
+                                            .slice()
+                                            .sort((a, b) => a.stepOrder - b.stepOrder)
+                                            .map((step) => (
+                                              <View key={`${methodKey}-step-${step.stepOrder}`} style={styles.stepItem}>
+                                                <View style={styles.stepDot} />
+                                                <View style={styles.stepContent}>
+                                                  <Text style={styles.stepTitle}>
+                                                    Bước {step.stepOrder}: {step.stepName}
+                                                  </Text>
+                                                  {step.description ? (
+                                                    <Text style={styles.subjectDesc}>{step.description}</Text>
+                                                  ) : null}
+                                                </View>
                                               </View>
+                                            ))}
+                                        </View>
+                                      ) : null}
+                                      {method.methodDocumentRequirements.length > 0 ? (
+                                        <View style={styles.programSection}>
+                                          <Text style={styles.programSubLabel}>Hồ sơ theo phương thức</Text>
+                                          {method.methodDocumentRequirements.map((doc) => (
+                                            <View key={`${methodKey}-doc-${doc.code}`} style={styles.docItemRow}>
+                                              <MaterialIcons
+                                                name={doc.required ? 'check-circle' : 'radio-button-unchecked'}
+                                                size={16}
+                                                color={doc.required ? '#dc2626' : '#94a3b8'}
+                                              />
+                                              <Text style={styles.docItemText}>{doc.name}</Text>
                                             </View>
                                           ))}
-                                      </View>
-                                    ) : null}
-                                    {method.methodDocumentRequirements.length > 0 ? (
-                                      <View style={styles.programSection}>
-                                        <Text style={styles.programSubLabel}>Hồ sơ theo phương thức</Text>
-                                        {method.methodDocumentRequirements.map((doc) => (
-                                          <View key={`${methodKey}-doc-${doc.code}`} style={styles.docItemRow}>
-                                            <MaterialIcons
-                                              name={doc.required ? 'check-circle' : 'radio-button-unchecked'}
-                                              size={16}
-                                              color={doc.required ? '#dc2626' : '#94a3b8'}
-                                            />
-                                            <Text style={styles.docItemText}>{doc.name}</Text>
-                                          </View>
-                                        ))}
-                                      </View>
-                                    ) : null}
+                                        </View>
+                                      ) : null}
+                                    </View>
+                                  ) : null}
+                                </View>
+                              );
+                            })}
+                            {campaign.mandatoryAll.length > 0 ? (
+                              <View style={styles.programSection}>
+                                <Text style={styles.programSectionTitle}>Hồ sơ bắt buộc</Text>
+                                {mandatoryItems.map((doc) => (
+                                  <View key={`${campaign.id}-mandatory-${doc.code}`} style={styles.docItemRow}>
+                                    <MaterialIcons name="description" size={16} color="#ef4444" />
+                                    <Text style={styles.docItemText}>{doc.name}</Text>
                                   </View>
+                                ))}
+                                {campaign.mandatoryAll.length > 3 ? (
+                                  <Pressable
+                                    onPress={() =>
+                                      setExpandedMandatoryDocs((prev) => ({ ...prev, [campaign.id]: !prev[campaign.id] }))
+                                    }
+                                  >
+                                    <Text style={styles.expandText}>{mandatoryExpanded ? 'Thu gọn' : 'Xem thêm'}</Text>
+                                  </Pressable>
                                 ) : null}
                               </View>
-                            );
-                          })}
-                          {campaign.campusProgramOfferings.length > 0 ? (
-                            <View style={styles.programSection}>
-                              <Text style={styles.programSectionTitle}>Chỉ tiêu theo cơ sở</Text>
-                              {campaign.campusProgramOfferings.map((offering, idx) => {
-                                const campusName =
-                                  typeof offering.campusName === 'string' ? offering.campusName : `Cơ sở #${idx + 1}`;
-                                const quota =
-                                  typeof offering.quota === 'number' && Number.isFinite(offering.quota)
-                                    ? offering.quota
-                                    : null;
-                                const remainingQuota =
-                                  typeof offering.remainingQuota === 'number' && Number.isFinite(offering.remainingQuota)
-                                    ? offering.remainingQuota
-                                    : null;
-                                const tuitionFee =
-                                  typeof offering.tuitionFee === 'number' && Number.isFinite(offering.tuitionFee)
-                                    ? offering.tuitionFee
-                                    : null;
-                                const learningMode =
-                                  typeof offering.learningMode === 'string' ? offering.learningMode : null;
-                                const openDate = typeof offering.openDate === 'string' ? offering.openDate : null;
-                                const closeDate = typeof offering.closeDate === 'string' ? offering.closeDate : null;
-                                const programRaw =
-                                  offering.program && typeof offering.program === 'object'
-                                    ? (offering.program as Record<string, unknown>)
-                                    : null;
-                                const programName =
-                                  typeof programRaw?.name === 'string' ? programRaw.name : 'Chương trình';
-                                const statusLabel =
-                                  typeof offering.applicationStatus === 'string'
-                                    ? offering.applicationStatus
-                                    : typeof offering.status === 'string'
-                                      ? offering.status
-                                      : 'UNKNOWN';
-                                const statusPill = badgePillStyle({
-                                  bg: statusLabel.includes('OPEN') ? '#dcfce7' : '#f1f5f9',
-                                  text: statusLabel.includes('OPEN') ? '#15803d' : '#475569',
-                                });
-                                return (
-                                  <View key={`${campaign.id}-offering-${idx}`} style={styles.offeringCard}>
-                                    <View style={styles.programHeaderRow}>
-                                      <Text style={styles.programName}>{campusName}</Text>
-                                      <View style={statusPill.wrap}>
-                                        <Text style={statusPill.text}>{statusLabel}</Text>
-                                      </View>
-                                    </View>
-                                    <Text style={styles.programBodyText}>Chương trình: {programName}</Text>
-                                    {learningMode ? (
-                                      <Text style={styles.programBodyText}>Hình thức học: {learningMode}</Text>
-                                    ) : null}
-                                    {quota != null || remainingQuota != null ? (
-                                      <Text style={styles.programBodyText}>
-                                        Chỉ tiêu: {quota ?? '—'} | Còn lại: {remainingQuota ?? '—'}
-                                      </Text>
-                                    ) : null}
-                                    {tuitionFee != null ? (
-                                      <Text style={styles.programTuition}>
-                                        Học phí: {formatTuitionVnd(tuitionFee) ?? `${tuitionFee} đ`}
-                                      </Text>
-                                    ) : null}
-                                    <Text style={styles.metaSmall}>
-                                      Thời gian nhận hồ sơ: {formatIsoDateRange(openDate, closeDate)}
-                                    </Text>
-                                  </View>
-                                );
-                              })}
-                            </View>
-                          ) : null}
-                          {campaign.mandatoryAll.length > 0 ? (
-                            <View style={styles.programSection}>
-                              <Text style={styles.programSectionTitle}>Hồ sơ bắt buộc</Text>
-                              {mandatoryItems.map((doc) => (
-                                <View key={`${campaign.id}-mandatory-${doc.code}`} style={styles.docItemRow}>
-                                  <MaterialIcons name="description" size={16} color="#ef4444" />
-                                  <Text style={styles.docItemText}>{doc.name}</Text>
-                                </View>
-                              ))}
-                              {campaign.mandatoryAll.length > 3 ? (
-                                <Pressable
-                                  onPress={() =>
-                                    setExpandedMandatoryDocs((prev) => ({ ...prev, [campaign.id]: !prev[campaign.id] }))
-                                  }
-                                >
-                                  <Text style={styles.expandText}>{mandatoryExpanded ? 'Thu gọn' : 'Xem thêm'}</Text>
-                                </Pressable>
-                              ) : null}
-                            </View>
-                          ) : null}
-                          
-                        </View>
-                      ) : null}
-                    </View>
+                            ) : null}
+                          </View>
+                        ) : null}
+                      </View>
                   );
                 })}
               </View>
+              {campaignTemplates.some((campaign) => campaign.campusProgramOfferings.length > 0) ? (
+                <View style={styles.section}>
+                  <Text style={styles.sectionTitle}>Gói tuyển sinh</Text>
+                  <View style={styles.programSection}>
+                    {campaignTemplates.map((campaign) =>
+                      campaign.campusProgramOfferings.map((offering, idx) => {
+                        const campusName =
+                          typeof offering.campusName === 'string' ? offering.campusName : `Cơ sở #${idx + 1}`;
+                        const quota =
+                          typeof offering.quota === 'number' && Number.isFinite(offering.quota) ? offering.quota : null;
+                        const remainingQuota =
+                          typeof offering.remainingQuota === 'number' && Number.isFinite(offering.remainingQuota)
+                            ? offering.remainingQuota
+                            : null;
+                        const tuitionFee =
+                          typeof offering.tuitionFee === 'number' && Number.isFinite(offering.tuitionFee)
+                            ? offering.tuitionFee
+                            : null;
+                        const learningMode = typeof offering.learningMode === 'string' ? offering.learningMode : null;
+                        const openDate = typeof offering.openDate === 'string' ? offering.openDate : null;
+                        const closeDate = typeof offering.closeDate === 'string' ? offering.closeDate : null;
+                        const programRaw =
+                          offering.program && typeof offering.program === 'object'
+                            ? (offering.program as Record<string, unknown>)
+                            : null;
+                        const programName = typeof programRaw?.name === 'string' ? programRaw.name : 'Chương trình';
+                        const statusLabel =
+                          typeof offering.applicationStatus === 'string'
+                            ? offering.applicationStatus
+                            : typeof offering.status === 'string'
+                              ? offering.status
+                              : 'UNKNOWN';
+                        const offeringStatusPill = badgePillStyle({
+                          bg: statusLabel.includes('OPEN') ? '#dcfce7' : '#f1f5f9',
+                          text: statusLabel.includes('OPEN') ? '#15803d' : '#475569',
+                        });
+                        return (
+                          <View key={`${campaign.id}-offering-${idx}`} style={styles.offeringCard}>
+                            <Text style={styles.metaSmall}>Chiến dịch: {campaign.name}</Text>
+                            <View style={styles.programHeaderRow}>
+                              <Text style={styles.programName}>{campusName}</Text>
+                              <View style={offeringStatusPill.wrap}>
+                                <Text style={offeringStatusPill.text}>{statusLabel}</Text>
+                              </View>
+                            </View>
+                            <Text style={styles.programBodyText}>Chương trình: {programName}</Text>
+                            {learningMode ? <Text style={styles.programBodyText}>Hình thức học: {learningMode}</Text> : null}
+                            {quota != null || remainingQuota != null ? (
+                              <Text style={styles.programBodyText}>
+                                Chỉ tiêu: {quota ?? '—'} | Còn lại: {remainingQuota ?? '—'}
+                              </Text>
+                            ) : null}
+                            {tuitionFee != null ? (
+                              <Text style={styles.programTuition}>Học phí: {formatTuitionVnd(tuitionFee) ?? `${tuitionFee} đ`}</Text>
+                            ) : null}
+                            <Text style={styles.metaSmall}>
+                              Thời gian nhận hồ sơ: {formatIsoDateRange(openDate, closeDate)}
+                            </Text>
+                            {typeof offering.id === 'number' && onOpenAdmissionSubmission ? (
+                              <Pressable
+                                style={styles.submitProfileBtn}
+                                onPress={() =>
+                                  onOpenAdmissionSubmission({
+                                    campusProgramOfferingId: offering.id as number,
+                                    campusName,
+                                    programName,
+                                  })
+                                }
+                              >
+                                <MaterialIcons name="upload-file" size={16} color="#1976d2" />
+                                <Text style={styles.submitProfileBtnText}>Nộp hồ sơ</Text>
+                              </Pressable>
+                            ) : null}
+                          </View>
+                        );
+                      })
+                    )}
+                  </View>
+                </View>
+              ) : null}
 
               <View style={styles.section}>
                 <Text style={styles.sectionTitle}>Chương trình học</Text>
@@ -2320,6 +2446,24 @@ const styles = StyleSheet.create({
   },
   programName: { fontSize: 14, fontWeight: '700', color: '#0f172a', flex: 1 },
   programTuition: { fontSize: 13, fontWeight: '600', color: '#0369a1' },
+  submitProfileBtn: {
+    marginTop: 8,
+    alignSelf: 'flex-start',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: '#fff',
+    borderWidth: 1,
+    borderColor: '#bfdbfe',
+    borderRadius: 999,
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+  },
+  submitProfileBtnText: {
+    color: '#1976d2',
+    fontSize: 13,
+    fontWeight: '700',
+  },
   graduationHeader: {
     marginTop: 4,
     flexDirection: 'row',
