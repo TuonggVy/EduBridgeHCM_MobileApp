@@ -56,6 +56,8 @@ import ConsultationBookingScreen from './ConsultationBookingScreen';
 import ConsultationHistoryScreen from './ConsultationHistoryScreen';
 import SchoolCompareScreen from './SchoolCompareScreen';
 import NotificationsScreen from './NotificationsScreen';
+import AdmissionReservationFormScreen from './AdmissionReservationFormScreen';
+import AdmissionReservationListScreen from './AdmissionReservationListScreen';
 import { fetchUnreadNotificationCount } from '../api/notifications';
 import {
   subscribeNotificationInboxChanged,
@@ -139,6 +141,9 @@ export default function HomeScreen() {
   const [notificationsVisible, setNotificationsVisible] = useState(false);
   const [unreadNotificationCount, setUnreadNotificationCount] = useState(0);
   const [consultBookingSchool, setConsultBookingSchool] = useState<SchoolDetail | null>(null);
+  const [reservationFormVisible, setReservationFormVisible] = useState(false);
+  const [selectedCampusProgramOfferingId, setSelectedCampusProgramOfferingId] = useState<number | null>(null);
+  const [reservationListVisible, setReservationListVisible] = useState(false);
 
   const refreshStudents = useCallback(async () => {
     try {
@@ -741,6 +746,7 @@ export default function HomeScreen() {
                   setConsultHistoryVisible(true);
                 }}
                 onOpenCompare={() => setCompareVisible(true)}
+                onOpenReservationForms={() => setReservationListVisible(true)}
               />
             )}
             <View style={styles.bottomSpacer} />
@@ -900,6 +906,11 @@ export default function HomeScreen() {
           closeStudentPicker();
           setConsultBookingVisible(true);
         }}
+        onOpenAdmissionSubmission={({ campusProgramOfferingId }) => {
+          setSelectedCampusProgramOfferingId(campusProgramOfferingId);
+          setSchoolDetailVisible(false);
+          setReservationFormVisible(true);
+        }}
         onToggleFavourite={() => {
           if (selectedSchoolId != null) toggleSchoolFavourite(selectedSchoolId);
         }}
@@ -924,6 +935,47 @@ export default function HomeScreen() {
             setConsultBookingVisible(false);
             setConsultBookingSchool(null);
             if (selectedSchoolDetail) setSchoolDetailVisible(true);
+          }}
+        />
+      </Modal>
+
+      <Modal
+        visible={reservationFormVisible}
+        animationType="slide"
+        presentationStyle="fullScreen"
+        onRequestClose={() => {
+          setReservationFormVisible(false);
+          setSelectedCampusProgramOfferingId(null);
+          if (selectedSchoolDetail) setSchoolDetailVisible(true);
+        }}
+      >
+        <AdmissionReservationFormScreen
+          visible={reservationFormVisible}
+          campusProgramOfferingId={selectedCampusProgramOfferingId}
+          onClose={() => {
+            setReservationFormVisible(false);
+            setSelectedCampusProgramOfferingId(null);
+            if (selectedSchoolDetail) setSchoolDetailVisible(true);
+          }}
+          onViewSubmittedForms={() => {
+            setReservationFormVisible(false);
+            setSelectedCampusProgramOfferingId(null);
+            setSchoolDetailVisible(false);
+            setReservationListVisible(true);
+          }}
+        />
+      </Modal>
+
+      <Modal
+        visible={reservationListVisible}
+        animationType="slide"
+        presentationStyle="fullScreen"
+        onRequestClose={() => setReservationListVisible(false)}
+      >
+        <AdmissionReservationListScreen
+          visible={reservationListVisible}
+          onClose={() => {
+            setReservationListVisible(false);
           }}
         />
       </Modal>
