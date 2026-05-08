@@ -101,18 +101,18 @@ function offeringFeeUnit(o: Record<string, unknown>): string | null {
 
 function tuitionSummary(detail: SchoolDetail | null, campaign: SchoolCampaignTemplate | null): string {
   const fees: number[] = [];
+  const offerings = campaign?.campusProgramOfferings ?? [];
+  for (const raw of offerings) {
+    if (!raw || typeof raw !== 'object') continue;
+    const t = offeringTuition(raw as Record<string, unknown>);
+    if (t != null) fees.push(t);
+  }
   if (detail?.curriculumList) {
     for (const cur of detail.curriculumList) {
       for (const p of cur.programList ?? []) {
         if (typeof p.baseTuitionFee === 'number' && p.baseTuitionFee > 0) fees.push(p.baseTuitionFee);
       }
     }
-  }
-  const offerings = campaign?.campusProgramOfferings ?? [];
-  for (const raw of offerings) {
-    if (!raw || typeof raw !== 'object') continue;
-    const t = offeringTuition(raw as Record<string, unknown>);
-    if (t != null) fees.push(t);
   }
   if (fees.length === 0) return '—';
   const min = Math.min(...fees);
@@ -126,20 +126,77 @@ function tuitionSummary(detail: SchoolDetail | null, campaign: SchoolCampaignTem
   return `${formatVnd(min)} – ${formatVnd(max)}${suffix}`;
 }
 
-function programNamesLine(detail: SchoolDetail | null): string {
+function programNamesLine(detail: SchoolDetail | null, campaign: SchoolCampaignTemplate | null): string {
+  const namesFromCampaign = new Set<string>();
+  for (const raw of campaign?.campusProgramOfferings ?? []) {
+    if (!raw || typeof raw !== 'object') continue;
+    const o = raw as Record<string, unknown>;
+    const programObj = o.program && typeof o.program === 'object' ? (o.program as Record<string, unknown>) : null;
+    const curriculumObj = o.curriculum && typeof o.curriculum === 'object' ? (o.curriculum as Record<string, unknown>) : null;
+    if (typeof programObj?.name === 'string' && programObj.name.trim()) namesFromCampaign.add(programObj.name.trim());
+    if (typeof curriculumObj?.name === 'string' && curriculumObj.name.trim()) namesFromCampaign.add(curriculumObj.name.trim());
+  }
+  if (namesFromCampaign.size > 0) {
+    const names = [...namesFromCampaign];
+    return names.slice(0, 3).join('\n') + (names.length > 3 ? '…' : '');
+  }
   if (!detail?.curriculumList?.length) return '—';
   const names = detail.curriculumList.map((c) => c.name?.trim()).filter(Boolean) as string[];
   return names.length ? names.slice(0, 3).join('\n') + (names.length > 3 ? '…' : '') : '—';
 }
 
-function curriculumTypesLine(detail: SchoolDetail | null): string {
+function curriculumTypesLine(detail: SchoolDetail | null, campaign: SchoolCampaignTemplate | null): string {
+  const campaignTypes = new Set<string>();
+  for (const raw of campaign?.campusProgramOfferings ?? []) {
+    if (!raw || typeof raw !== 'object') continue;
+    const o = raw as Record<string, unknown>;
+    const curriculumObj = o.curriculum && typeof o.curriculum === 'object' ? (o.curriculum as Record<string, unknown>) : null;
+    const programObj = o.program && typeof o.program === 'object' ? (o.program as Record<string, unknown>) : null;
+    const nestedCur =
+      programObj?.curriculum && typeof programObj.curriculum === 'object'
+        ? (programObj.curriculum as Record<string, unknown>)
+        : null;
+    const type =
+      (typeof curriculumObj?.curriculumType === 'string' && curriculumObj.curriculumType) ||
+      (typeof nestedCur?.curriculumType === 'string' && nestedCur.curriculumType) ||
+      null;
+    if (type) campaignTypes.add(curriculumTypeVi(type));
+  }
+  if (campaignTypes.size > 0) return [...campaignTypes].join(' · ');
   if (!detail?.curriculumList?.length) return '—';
   const types = [...new Set(detail.curriculumList.map((c) => curriculumTypeVi(c.curriculumType)))];
   return types.join(' · ');
 }
 
-function mergeSubjects(detail: SchoolDetail | null): SubjectJsonb[] {
+function mergeSubjects(detail: SchoolDetail | null, campaign: SchoolCampaignTemplate | null): SubjectJsonb[] {
   const map = new Map<string, SubjectJsonb>();
+  for (const raw of campaign?.campusProgramOfferings ?? []) {
+    if (!raw || typeof raw !== 'object') continue;
+    const o = raw as Record<string, unknown>;
+    const curriculumObj =
+      o.curriculum && typeof o.curriculum === 'object' ? (o.curriculum as Record<string, unknown>) : null;
+    const programObj =
+      o.program && typeof o.program === 'object' ? (o.program as Record<string, unknown>) : null;
+    const nestedCurriculum =
+      programObj?.curriculum && typeof programObj.curriculum === 'object'
+        ? (programObj.curriculum as Record<string, unknown>)
+        : null;
+    const subjectOptions =
+      (Array.isArray(curriculumObj?.subjectOptions) ? curriculumObj?.subjectOptions : null) ??
+      (Array.isArray(nestedCurriculum?.subjectOptions) ? nestedCurriculum?.subjectOptions : null);
+    if (!subjectOptions) continue;
+    for (const rawSubject of subjectOptions) {
+      if (!rawSubject || typeof rawSubject !== 'object') continue;
+      const subject = rawSubject as Record<string, unknown>;
+      const name = typeof subject.name === 'string' ? subject.name : null;
+      if (!name || map.has(name)) continue;
+      map.set(name, {
+        name,
+        description: typeof subject.description === 'string' ? subject.description : null,
+        isMandatory: Boolean(subject.isMandatory),
+      });
+    }
+  }
   for (const cur of detail?.curriculumList ?? []) {
     const list = cur.subjectsJsonb ?? [];
     for (const s of list) {
@@ -178,6 +235,11 @@ function admissionMethodLine(campaign: SchoolCampaignTemplate | null): string {
   const m = campaign?.admissionMethodDetails ?? [];
   if (!m.length) return '—';
   return m.map((x) => x.displayName).join(' · ');
+}
+
+function campaignNameLine(campaign: SchoolCampaignTemplate | null): string {
+  if (!campaign?.name) return '—';
+  return campaign.name;
 }
 
 function admissionWindowLine(campaign: SchoolCampaignTemplate | null): string {
@@ -322,41 +384,32 @@ export default function SchoolCompareScreen({
           error: null,
         },
       }));
-      try {
-        const detailRes = await fetchSchoolPublicDetail(id);
-        const detail = detailRes.body ?? null;
-        const year = pickComparisonYear(detail);
-        let campaigns: SchoolCampaignTemplate[] = [];
-        try {
-          const campRes = await fetchSchoolCampaignTemplates(id, year);
-          campaigns = campRes.body ?? [];
-        } catch {
-          campaigns = [];
-        }
-        if (cancelled) return;
-        setBundles((prev) => ({
-          ...prev,
-          [id]: {
-            id,
-            detail,
-            campaign: pickPrimaryCampaign(campaigns),
-            loading: false,
-            error: null,
-          },
-        }));
-      } catch (err) {
-        if (cancelled) return;
-        setBundles((prev) => ({
-          ...prev,
-          [id]: {
-            id,
-            detail: null,
-            campaign: null,
-            loading: false,
-            error: err instanceof Error ? err.message : 'Lỗi tải',
-          },
-        }));
-      }
+      const currentYear = new Date().getFullYear();
+      const [detailResult, campaignResult] = await Promise.allSettled([
+        fetchSchoolPublicDetail(id),
+        fetchSchoolCampaignTemplates(id, currentYear),
+      ]);
+
+      if (cancelled) return;
+      const detail = detailResult.status === 'fulfilled' ? detailResult.value.body ?? null : null;
+      const campaigns = campaignResult.status === 'fulfilled' ? campaignResult.value.body ?? [] : [];
+      const error =
+        detailResult.status === 'rejected' && campaignResult.status === 'rejected'
+          ? detailResult.reason instanceof Error
+            ? detailResult.reason.message
+            : 'Lỗi tải'
+          : null;
+
+      setBundles((prev) => ({
+        ...prev,
+        [id]: {
+          id,
+          detail,
+          campaign: pickPrimaryCampaign(campaigns),
+          loading: false,
+          error,
+        },
+      }));
     };
 
     selectedIds.forEach((id) => {
@@ -422,9 +475,11 @@ export default function SchoolCompareScreen({
   };
 
   const buildProgramRows = () => {
-    const types = orderedBundles.map((b) => curriculumTypesLine(b.detail));
-    const names = orderedBundles.map((b) => programNamesLine(b.detail));
+    const campaignNames = orderedBundles.map((b) => campaignNameLine(b.campaign));
+    const types = orderedBundles.map((b) => curriculumTypesLine(b.detail, b.campaign));
+    const names = orderedBundles.map((b) => programNamesLine(b.detail, b.campaign));
     return [
+      { label: 'Chiến dịch tuyển sinh', values: campaignNames },
       { label: 'Loại chương trình', values: types },
       { label: 'Tên chương trình', values: names },
     ];
@@ -738,7 +793,7 @@ export default function SchoolCompareScreen({
             >
               <View style={{ flexDirection: 'row' }}>
                 {orderedBundles.map((b) => {
-                  const subs = mergeSubjects(b.detail);
+                  const subs = mergeSubjects(b.detail, b.campaign);
                   const expanded = expandedSubjects[b.id] ?? false;
                   const shown = expanded ? subs : subs.slice(0, 8);
                   return (
