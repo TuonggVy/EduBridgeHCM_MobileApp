@@ -32,6 +32,7 @@ export type SchoolPost = {
   id: number;
   imageJson: PostImageJson | null;
   thumbnail: string | null;
+  fileUrl: string | null;
   author: PostAuthor | null;
   categoryPost: PostCategory;
   totalPosition: number | null;

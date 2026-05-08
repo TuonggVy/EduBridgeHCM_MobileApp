@@ -138,6 +138,39 @@ function getBoardingTypeLabel(boardingType?: string | null): string {
   return boardingType?.trim() || 'Đang cập nhật';
 }
 
+function getLearningModeLabel(learningMode?: string | null): string {
+  const normalized = (learningMode ?? '').trim().toUpperCase().replace(/[\s-]+/g, '_');
+  if (normalized === 'DAY_SCHOOL') return 'Học ban ngày';
+  if (normalized === 'BOARDING') return 'Nội trú';
+  if (normalized === 'SEMI_BOARDING') return 'Bán trú';
+  if (normalized === 'HALF_DAY') return 'Bán ngày';
+  return learningMode?.trim() || 'Đang cập nhật';
+}
+
+function getOfferingStatusLabel(status?: string | null): string {
+  const normalized = (status ?? '').trim().toUpperCase().replace(/[\s-]+/g, '_');
+  if (normalized === 'OPEN') return 'Đang mở';
+  if (normalized === 'UPCOMING_OFFERING' || normalized === 'UPCOMING') return 'Sắp mở';
+  if (normalized === 'DRAFT') return 'Nháp';
+  if (normalized === 'CLOSED') return 'Đã đóng';
+  if (normalized === 'PAUSED') return 'Tạm dừng';
+  if (normalized === 'FULL' || normalized === 'FULLED') return 'Hết chỉ tiêu';
+  if (normalized === 'EXPIRED') return 'Hết hạn';
+  return status?.trim() || 'Đang cập nhật';
+}
+
+function getOfferingStatusColors(status?: string | null): { bg: string; text: string } {
+  const normalized = (status ?? '').trim().toUpperCase().replace(/[\s-]+/g, '_');
+  if (normalized === 'OPEN') return { bg: '#dcfce7', text: '#15803d' };
+  if (normalized === 'UPCOMING_OFFERING' || normalized === 'UPCOMING') return { bg: '#ede9fe', text: '#6d28d9' };
+  if (normalized === 'DRAFT') return { bg: '#f1f5f9', text: '#475569' };
+  if (normalized === 'CLOSED' || normalized === 'PAUSED' || normalized === 'FULL' || normalized === 'FULLED') {
+    return { bg: '#fee2e2', text: '#b91c1c' };
+  }
+  if (normalized === 'EXPIRED') return { bg: '#fef3c7', text: '#b45309' };
+  return { bg: '#f1f5f9', text: '#475569' };
+}
+
 function buildCurriculumListFromCampaignTemplates(
   campaigns: SchoolCampaignTemplate[]
 ): SchoolDetail['curriculumList'] {
@@ -1303,16 +1336,14 @@ export function SchoolDetailModal({
                             ? (offering.program as Record<string, unknown>)
                             : null;
                         const programName = typeof programRaw?.name === 'string' ? programRaw.name : 'Chương trình';
-                        const statusLabel =
+                        const statusRaw =
                           typeof offering.applicationStatus === 'string'
                             ? offering.applicationStatus
                             : typeof offering.status === 'string'
                               ? offering.status
                               : 'UNKNOWN';
-                        const offeringStatusPill = badgePillStyle({
-                          bg: statusLabel.includes('OPEN') ? '#dcfce7' : '#f1f5f9',
-                          text: statusLabel.includes('OPEN') ? '#15803d' : '#475569',
-                        });
+                        const statusLabel = getOfferingStatusLabel(statusRaw);
+                        const offeringStatusPill = badgePillStyle(getOfferingStatusColors(statusRaw));
                         return (
                           <View key={`${campaign.id}-offering-${idx}`} style={styles.offeringCard}>
                             <Text style={styles.metaSmall}>Chiến dịch: {campaign.name}</Text>
@@ -1323,7 +1354,9 @@ export function SchoolDetailModal({
                               </View>
                             </View>
                             <Text style={styles.programBodyText}>Chương trình: {programName}</Text>
-                            {learningMode ? <Text style={styles.programBodyText}>Hình thức học: {learningMode}</Text> : null}
+                            {learningMode ? (
+                              <Text style={styles.programBodyText}>Hình thức học: {getLearningModeLabel(learningMode)}</Text>
+                            ) : null}
                             {quota != null || remainingQuota != null ? (
                               <Text style={styles.programBodyText}>
                                 Chỉ tiêu: {quota ?? '—'} | Còn lại: {remainingQuota ?? '—'}

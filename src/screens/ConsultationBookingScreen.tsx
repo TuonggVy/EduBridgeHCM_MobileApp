@@ -16,6 +16,7 @@ import {
   bookOfflineConsultation,
   fetchParentConsultationSlots,
 } from '../api/parentConsultation';
+import { getProfile } from '../api/profile';
 import type { ParentConsultationSlot } from '../types/consultation';
 import {
   isParentConsultationSlotBookable,
@@ -184,6 +185,23 @@ export default function ConsultationBookingScreen({
   }, [visible, selectedCampusId, weekDates, slotsRefreshTick]);
 
   useEffect(() => {
+    if (!visible) return;
+    let cancelled = false;
+    void getProfile()
+      .then((res) => {
+        if (cancelled) return;
+        setBookingPhone(res.body.parent?.phone?.trim() ?? '');
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setBookingPhone('');
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [visible]);
+
+  useEffect(() => {
     if (!weekDateKeys.includes(selectedDate)) {
       setSelectedDate(weekDateKeys[0]);
       setSelectedSlot(null);
@@ -220,7 +238,7 @@ export default function ConsultationBookingScreen({
     if (!phone) {
       setBookingNotice({
         title: 'Thiếu số điện thoại',
-        message: 'Vui lòng nhập số điện thoại để đặt lịch tư vấn.',
+        message: 'Không tìm thấy số điện thoại trong hồ sơ. Vui lòng cập nhật hồ sơ tài khoản trước khi đặt lịch.',
         variant: 'info',
       });
       return;
@@ -235,7 +253,6 @@ export default function ConsultationBookingScreen({
         campusId: selectedCampusId,
       });
       setConsultFormVisible(false);
-      setBookingPhone('');
       setBookingQuestion('');
       setSelectedSlot(null);
       setSlotsRefreshTick((t) => t + 1);
@@ -468,7 +485,14 @@ export default function ConsultationBookingScreen({
                   </Pressable>
                 </View>
                 <Text style={styles.formLabel}>Số điện thoại</Text>
-                <TextInput value={bookingPhone} onChangeText={setBookingPhone} placeholder="Nhập số điện thoại" keyboardType="phone-pad" style={styles.input} />
+                <TextInput
+                  value={bookingPhone}
+                  editable={false}
+                  selectTextOnFocus={false}
+                  showSoftInputOnFocus={false}
+                  placeholder="Chưa có số điện thoại"
+                  style={[styles.input, styles.inputReadonly]}
+                />
                 <Text style={styles.formLabel}>Câu hỏi</Text>
                 <TextInput
                   value={bookingQuestion}
@@ -777,6 +801,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#fff',
   },
   textarea: { minHeight: 90 },
+  inputReadonly: { backgroundColor: '#f8fafc', color: '#475569' },
   readonlyField: { borderWidth: 1, borderColor: '#e2e8f0', borderRadius: 12, paddingHorizontal: 12, paddingVertical: 11, backgroundColor: '#f8fafc' },
   readonlyText: { fontSize: 14, color: '#0f172a', fontWeight: '600' },
   submitBtn: { marginTop: 6, height: 46, borderRadius: 12, backgroundColor: '#1976d2', alignItems: 'center', justifyContent: 'center' },

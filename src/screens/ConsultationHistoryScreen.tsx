@@ -309,18 +309,11 @@ export default function ConsultationHistoryScreen({ visible, onClose }: Consulta
             ) : null}
           </ScrollView>
 
-          {(normalizeStatusForUi(selectedItem.status) === 'pending' ||
-            normalizeStatusForUi(selectedItem.status) === 'confirmed') && (
+          {normalizeStatusForUi(selectedItem.status) === 'pending' && (
             <View style={styles.bottomActionBar}>
-              {normalizeStatusForUi(selectedItem.status) === 'pending' ? (
-                <Pressable style={styles.cancelBtn}>
-                  <Text style={styles.cancelBtnText}>Hủy lịch</Text>
-                </Pressable>
-              ) : (
-                <Pressable style={styles.contactBtn} onPress={() => void onPressCall(selectedItem.phone)}>
-                  <Text style={styles.contactBtnText}>Liên hệ</Text>
-                </Pressable>
-              )}
+              <Pressable style={styles.cancelBtn}>
+                <Text style={styles.cancelBtnText}>Hủy lịch</Text>
+              </Pressable>
             </View>
           )}
         </>
@@ -543,14 +536,6 @@ const styles = StyleSheet.create({
     backgroundColor: '#fff',
   },
   cancelBtnText: { color: '#dc2626', fontSize: 15, fontWeight: '700' },
-  contactBtn: {
-    borderRadius: 14,
-    height: 48,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: '#1976d2',
-  },
-  contactBtnText: { color: '#fff', fontSize: 15, fontWeight: '700' },
   loadMoreBtn: {
     alignItems: 'center',
     justifyContent: 'center',

@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
+  Alert,
   View,
   Text,
   StyleSheet,
@@ -14,6 +15,7 @@ import {
   Platform,
   StatusBar,
   Dimensions,
+  Linking,
 } from 'react-native';
 import { fetchPostList } from '../api/post';
 import type { PostCategory, SchoolPost } from '../types/post';
@@ -112,6 +114,14 @@ export default function PostFeedScreen({ onOpenPostDetail, onClose }: PostFeedSc
     setImageViewerVisible(false);
   }, []);
 
+  const openAttachment = useCallback((fileUrl: string | null) => {
+    const trimmed = (fileUrl ?? '').trim();
+    if (!trimmed) return;
+    void Linking.openURL(trimmed).catch(() => {
+      Alert.alert('Không thể mở tệp', 'Vui lòng thử lại sau.');
+    });
+  }, []);
+
   useEffect(() => {
     if (!imageViewerVisible || imageViewerImages.length === 0) return;
     const timer = setTimeout(() => {
@@ -198,6 +208,18 @@ export default function PostFeedScreen({ onOpenPostDetail, onClose }: PostFeedSc
         <Text numberOfLines={3} style={styles.description}>
           {description || 'Bài đăng từ nhà trường'}
         </Text>
+
+        {item.fileUrl ? (
+          <Pressable
+            onPress={() => openAttachment(item.fileUrl)}
+            style={({ pressed }) => [styles.fileButton, pressed && { opacity: 0.9 }]}
+          >
+            <MaterialIcons name="attach-file" size={16} color="#1d4ed8" />
+            <Text numberOfLines={1} style={styles.fileButtonText}>
+              Tệp đính kèm
+            </Text>
+          </Pressable>
+        ) : null}
 
         {item.hashTag.length > 0 && (
           <View style={styles.hashTagRow}>
@@ -323,6 +345,18 @@ export default function PostFeedScreen({ onOpenPostDetail, onClose }: PostFeedSc
                 {selectedPost.content?.shortDescription ??
                   normalizeText(selectedPost.content?.contentDataList?.[0]?.text ?? '')}
               </Text>
+              {selectedPost.fileUrl ? (
+                <Pressable
+                  onPress={() => openAttachment(selectedPost.fileUrl)}
+                  style={({ pressed }) => [styles.detailFileButton, pressed && { opacity: 0.9 }]}
+                >
+                  <MaterialIcons name="description" size={17} color="#1d4ed8" />
+                  <Text numberOfLines={1} style={styles.detailFileButtonText}>
+                    Tệp đính kèm
+                  </Text>
+                  <MaterialIcons name="open-in-new" size={16} color="#1d4ed8" />
+                </Pressable>
+              ) : null}
               <ScrollView
                 horizontal
                 showsHorizontalScrollIndicator={false}
@@ -571,6 +605,24 @@ const styles = StyleSheet.create({
     lineHeight: 21,
     marginBottom: sp.sm,
   },
+  fileButton: {
+    alignSelf: 'flex-start',
+    maxWidth: '100%',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: '#eff6ff',
+    borderRadius: radius.full,
+    paddingHorizontal: sp.sm,
+    paddingVertical: 7,
+    marginBottom: sp.sm,
+  },
+  fileButtonText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#1d4ed8',
+    maxWidth: 250,
+  },
   hashTagRow: {
     flexDirection: 'row',
     flexWrap: 'wrap',
@@ -703,6 +755,24 @@ const styles = StyleSheet.create({
     color: '#334155',
     lineHeight: 23,
     marginTop: sp.xs,
+  },
+  detailFileButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: '#eff6ff',
+    borderWidth: 1,
+    borderColor: '#bfdbfe',
+    borderRadius: radius.lg,
+    paddingHorizontal: sp.md,
+    paddingVertical: sp.sm,
+    marginTop: sp.xs,
+  },
+  detailFileButtonText: {
+    flex: 1,
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#1d4ed8',
   },
   imageViewerBackdrop: {
     ...StyleSheet.absoluteFillObject,

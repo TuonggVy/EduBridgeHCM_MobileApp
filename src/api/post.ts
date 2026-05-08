@@ -50,6 +50,7 @@ function normalizeSchoolPost(item: unknown): SchoolPost {
     id: pickNumber(raw?.id) ?? 0,
     imageJson: imageItemList.length > 0 ? { imageItemList } : null,
     thumbnail: pickString(raw?.thumbnail),
+    fileUrl: pickString(raw?.fileUrl),
     author: pickString(author?.name) ? { name: String(author?.name) } : null,
     categoryPost: pickString(raw?.categoryPost) ?? 'ANNOUNCEMENT',
     totalPosition: pickNumber(raw?.totalPosition),

@@ -9,16 +9,29 @@ function asString(v: unknown): string | null {
   return null;
 }
 
+function firstNonEmptyString(...values: unknown[]): string {
+  for (const value of values) {
+    const s = asString(value)?.trim();
+    if (s) return s;
+  }
+  return '';
+}
+
 function normalizeDetails(raw: unknown): AiChatDetailItem[] {
   if (!Array.isArray(raw)) return [];
   const out: AiChatDetailItem[] = [];
   for (const it of raw) {
-    if (!it || typeof it !== 'object') continue;
-    const o = it as Record<string, unknown>;
-    const label = asString(o.label) ?? '';
-    const value = asString(o.value) ?? '';
-    if (!label.trim() && !value.trim()) continue;
-    out.push({ label: label.trim(), value: value.trim() });
+    if (it && typeof it === 'object') {
+      const o = it as Record<string, unknown>;
+      const label = asString(o.label)?.trim() ?? '';
+      const value = asString(o.value)?.trim() ?? '';
+      if (!label && !value) continue;
+      out.push({ label, value });
+      continue;
+    }
+    const textValue = asString(it)?.trim() ?? '';
+    if (!textValue) continue;
+    out.push({ label: '', value: textValue });
   }
   return out;
 }
@@ -26,12 +39,22 @@ function normalizeDetails(raw: unknown): AiChatDetailItem[] {
 /** n8n có thể trả `source` là một chuỗi hoặc mảng chuỗi (URL). */
 function normalizeSources(raw: unknown): string[] {
   if (typeof raw === 'string') {
-    const t = raw.trim();
-    return t ? [t] : [];
+    return raw
+      .split(';')
+      .map((s) => s.trim())
+      .filter(Boolean);
   }
   if (!Array.isArray(raw)) return [];
   const out: string[] = [];
   for (const it of raw) {
+    if (typeof it === 'string') {
+      const chunks = it
+        .split(';')
+        .map((s) => s.trim())
+        .filter(Boolean);
+      out.push(...chunks);
+      continue;
+    }
     const s = asString(it)?.trim();
     if (s) out.push(s);
   }
@@ -86,12 +109,27 @@ export async function postAiAssistantChat(payload: {
   }
 
   const body = unwrapBody(raw);
-  const summary = asString(body.summary) ?? '';
-  const sources = normalizeSources(body.source);
+  const data = body.data && typeof body.data === 'object' ? (body.data as Record<string, unknown>) : null;
+  const summary = firstNonEmptyString(
+    body.summary,
+    body.output,
+    body.response,
+    body.answer,
+    body.message,
+    body.text,
+    data?.summary,
+    data?.output,
+    data?.response,
+    data?.answer,
+    data?.message,
+    data?.text
+  );
+  const details = normalizeDetails(body.details ?? data?.details);
+  const sources = normalizeSources(body.source ?? data?.source);
 
   return {
     summary,
-    details: normalizeDetails(body.details),
+    details,
     source: sources[0] ?? null,
     sources: sources.length > 0 ? sources : undefined,
   };
