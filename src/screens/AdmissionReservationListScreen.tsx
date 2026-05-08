@@ -258,20 +258,11 @@ export default function AdmissionReservationListScreen({ visible, onClose }: Pro
                 <View key={`${item.id}-${m.key}`} style={styles.metaBlock}>
                   <Text style={styles.metaKey}>{m.key}</Text>
                   <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.imageRow}>
-                    {(m.imageUrl || []).slice(0, 4).map((url, idx) => {
-                      const extra = Math.max(0, (m.imageUrl || []).length - 4);
-                      const isLastVisible = idx === 3 && extra > 0;
-                      return (
-                        <Pressable key={`${m.key}-${idx}`} onPress={() => openPreview(m.imageUrl || [], idx)} style={styles.thumbWrap}>
-                          <Image source={{ uri: url }} style={styles.thumb} />
-                          {isLastVisible ? (
-                            <View style={styles.thumbOverlay}>
-                              <Text style={styles.thumbOverlayText}>+{extra}</Text>
-                            </View>
-                          ) : null}
-                        </Pressable>
-                      );
-                    })}
+                    {(m.imageUrl || []).map((url, idx) => (
+                      <Pressable key={`${m.key}-${idx}`} onPress={() => openPreview(m.imageUrl || [], idx)} style={styles.thumbWrap}>
+                        <Image source={{ uri: url }} style={styles.thumb} />
+                      </Pressable>
+                    ))}
                   </ScrollView>
                 </View>
               ))}
@@ -517,13 +508,6 @@ const styles = StyleSheet.create({
     borderRadius: 18,
     backgroundColor: '#f1f5f9',
   },
-  thumbOverlay: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(15,23,42,0.45)',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  thumbOverlayText: { color: '#fff', fontSize: 20, fontWeight: '800' },
   reasonBox: {
     marginTop: 12,
     borderRadius: 16,

@@ -9,7 +9,6 @@ import {
   View,
   ActivityIndicator,
   Image,
-  Linking,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as ImagePicker from 'expo-image-picker';
@@ -101,6 +100,7 @@ export default function AdmissionReservationFormScreen({
   const [requiredDocs, setRequiredDocs] = useState<ReservationDocumentItem[]>([]);
   const [optionalDocs, setOptionalDocs] = useState<ReservationDocumentItem[]>([]);
   const [uploadsByDoc, setUploadsByDoc] = useState<Record<string, UploadItem[]>>({});
+  const [previewImageUrl, setPreviewImageUrl] = useState<string | null>(null);
 
   useEffect(() => {
     if (!visible || !campusProgramOfferingId) return;
@@ -146,6 +146,7 @@ export default function AdmissionReservationFormScreen({
       setRequiredDocs([]);
       setOptionalDocs([]);
       setUploadsByDoc({});
+      setPreviewImageUrl(null);
     }
   }, [visible]);
 
@@ -187,27 +188,40 @@ export default function AdmissionReservationFormScreen({
     const res =
       source === 'camera'
         ? await ImagePicker.launchCameraAsync({ mediaTypes: ['images'], quality: 0.8 })
-        : await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'], quality: 0.8, allowsMultipleSelection: false });
-    if (res.canceled || !res.assets[0]?.uri) return;
-    const localUri = res.assets[0].uri;
-    const id = `${docCode}-${Date.now()}`;
-    setUploadsByDoc((prev) => ({
-      ...prev,
-      [docCode]: [...(prev[docCode] ?? []), { id, localUri, remoteUrl: null, status: 'uploading' }],
-    }));
-    try {
-      const remoteUrl = await uploadImageToCloudinary(localUri);
+        : await ImagePicker.launchImageLibraryAsync({
+            mediaTypes: ['images'],
+            quality: 0.8,
+            allowsMultipleSelection: true,
+            selectionLimit: 10,
+          });
+    if (res.canceled || !res.assets?.length) return;
+
+    const validAssets = res.assets.filter((asset) => !!asset?.uri);
+    if (validAssets.length === 0) return;
+
+    for (const asset of validAssets) {
+      const localUri = asset.uri!;
+      const id = `${docCode}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
       setUploadsByDoc((prev) => ({
         ...prev,
-        [docCode]: (prev[docCode] ?? []).map((item) => (item.id === id ? { ...item, remoteUrl, status: 'uploaded' } : item)),
+        [docCode]: [...(prev[docCode] ?? []), { id, localUri, remoteUrl: null, status: 'uploading' }],
       }));
-    } catch (e: unknown) {
-      setUploadsByDoc((prev) => ({
-        ...prev,
-        [docCode]: (prev[docCode] ?? []).map((item) =>
-          item.id === id ? { ...item, status: 'error', error: e instanceof Error ? e.message : 'Upload thất bại' } : item
-        ),
-      }));
+      try {
+        const remoteUrl = await uploadImageToCloudinary(localUri);
+        setUploadsByDoc((prev) => ({
+          ...prev,
+          [docCode]: (prev[docCode] ?? []).map((item) =>
+            item.id === id ? { ...item, remoteUrl, status: 'uploaded' } : item
+          ),
+        }));
+      } catch (e: unknown) {
+        setUploadsByDoc((prev) => ({
+          ...prev,
+          [docCode]: (prev[docCode] ?? []).map((item) =>
+            item.id === id ? { ...item, status: 'error', error: e instanceof Error ? e.message : 'Upload thất bại' } : item
+          ),
+        }));
+      }
     }
   };
 
@@ -280,8 +294,8 @@ export default function AdmissionReservationFormScreen({
                   </View>
                 ) : null}
                 <View style={styles.thumbActions}>
-                  {item.remoteUrl ? (
-                    <Pressable onPress={() => void Linking.openURL(item.remoteUrl!)}>
+                  {item.remoteUrl || item.localUri ? (
+                    <Pressable onPress={() => setPreviewImageUrl(item.remoteUrl || item.localUri)}>
                       <Text style={styles.thumbActionText}>Xem</Text>
                     </Pressable>
                   ) : null}
@@ -396,6 +410,16 @@ export default function AdmissionReservationFormScreen({
           </View>
         </>
       )}
+      <Modal transparent visible={previewImageUrl != null} animationType="fade" onRequestClose={() => setPreviewImageUrl(null)}>
+        <Pressable style={styles.previewBackdrop} onPress={() => setPreviewImageUrl(null)}>
+          {previewImageUrl ? (
+            <Image source={{ uri: previewImageUrl }} style={styles.previewImage} resizeMode="contain" />
+          ) : null}
+          <Pressable style={styles.previewCloseBtn} onPress={() => setPreviewImageUrl(null)}>
+            <MaterialIcons name="close" size={18} color="#fff" />
+          </Pressable>
+        </Pressable>
+      </Modal>
     </View>
   );
 }
@@ -468,6 +492,28 @@ const styles = StyleSheet.create({
   thumbActions: { marginTop: 6, flexDirection: 'row', justifyContent: 'space-between' },
   thumbActionText: { color: PRIMARY, fontSize: 12, fontWeight: '700' },
   thumbDeleteText: { color: '#dc2626', fontSize: 12, fontWeight: '700' },
+  previewBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(15,23,42,0.92)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 16,
+  },
+  previewImage: {
+    width: '100%',
+    height: '78%',
+  },
+  previewCloseBtn: {
+    position: 'absolute',
+    top: 52,
+    right: 22,
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    backgroundColor: 'rgba(15,23,42,0.45)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   bottomBar: {
     position: 'absolute',
     left: 0,

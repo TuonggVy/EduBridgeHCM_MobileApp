@@ -114,6 +114,7 @@ export default function HomeScreen() {
   const [aiAssistantVisible, setAiAssistantVisible] = useState(false);
   const [compareVisible, setCompareVisible] = useState(false);
   const [selectedConversation, setSelectedConversation] = useState<ParentConversationsItem | null>(null);
+  const [returnToSchoolDetailAfterChat, setReturnToSchoolDetailAfterChat] = useState(false);
 
   const [students, setStudents] = useState<ParentStudentProfile[]>([]);
   const [studentsLoading, setStudentsLoading] = useState(false);
@@ -339,9 +340,8 @@ export default function HomeScreen() {
           schoolName: selectedSchoolDetail.name,
           schoolLogoUrl: resolvedSchoolLogoUrl,
         });
+        setReturnToSchoolDetailAfterChat(true);
         setSchoolDetailVisible(false);
-        setSelectedSchoolId(null);
-        setSelectedSchoolDetail(null);
         closeStudentPicker();
         setChatView('chat');
       };
@@ -629,7 +629,13 @@ export default function HomeScreen() {
         studentName={selectedConversation.studentName ?? undefined}
         initialLastMessageContent={selectedConversation.lastMessageContent ?? undefined}
         initialLastMessageAt={selectedConversation.lastMessageAt ?? undefined}
-        onBack={() => setChatView('app')}
+        onBack={() => {
+          setChatView('app');
+          if (returnToSchoolDetailAfterChat && selectedSchoolDetail) {
+            setSchoolDetailVisible(true);
+          }
+          setReturnToSchoolDetailAfterChat(false);
+        }}
       />
     );
   }
@@ -703,6 +709,7 @@ export default function HomeScreen() {
             showNavigationHeader={false}
             onOpenChat={(conversation) => {
               setSelectedConversation(conversation);
+              setReturnToSchoolDetailAfterChat(false);
               setChatView('chat');
             }}
           />
@@ -918,6 +925,7 @@ export default function HomeScreen() {
           setSchoolDetailVisible(false);
           setSelectedSchoolId(null);
           setSelectedSchoolDetail(null);
+          setReturnToSchoolDetailAfterChat(false);
           closeStudentPicker();
         }}
       />
