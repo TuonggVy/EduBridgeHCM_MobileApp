@@ -171,6 +171,19 @@ function getOfferingStatusColors(status?: string | null): { bg: string; text: st
   return { bg: '#f1f5f9', text: '#475569' };
 }
 
+/** Nút Nộp hồ sơ chỉ khi phương thức của gói (`admissionMethod`) cho phép giữ chỗ trên timeline chiến dịch. */
+function canShowReservationSubmitForOffering(
+  campaign: SchoolCampaignTemplate,
+  offering: Record<string, unknown>
+): boolean {
+  const methodCode =
+    typeof offering.admissionMethod === 'string' ? offering.admissionMethod.trim() : '';
+  if (!methodCode) return false;
+  const detail = campaign.admissionMethodDetails.find((m) => m.methodCode === methodCode);
+  if (!detail) return false;
+  return detail.allowReservationSubmission === true;
+}
+
 function buildCurriculumListFromCampaignTemplates(
   campaigns: SchoolCampaignTemplate[]
 ): SchoolDetail['curriculumList'] {
@@ -1368,7 +1381,9 @@ export function SchoolDetailModal({
                             <Text style={styles.metaSmall}>
                               Thời gian nhận hồ sơ: {formatIsoDateRange(openDate, closeDate)}
                             </Text>
-                            {typeof offering.id === 'number' && onOpenAdmissionSubmission ? (
+                            {typeof offering.id === 'number' &&
+                            onOpenAdmissionSubmission &&
+                            canShowReservationSubmitForOffering(campaign, offering) ? (
                               <Pressable
                                 style={styles.submitProfileBtn}
                                 onPress={() =>
