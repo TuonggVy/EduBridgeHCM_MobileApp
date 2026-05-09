@@ -259,10 +259,27 @@ function normalizeAdmissionMethodDetail(method: unknown): AdmissionMethodDetail 
   };
 }
 
-function normalizeCampaignTemplate(item: unknown): SchoolCampaignTemplate | null {
+function normalizeCampaignTemplate(
+  item: unknown,
+  fallbackMandatoryAll: AdmissionDocumentRequirement[] = []
+): SchoolCampaignTemplate | null {
   if (!item || typeof item !== 'object') return null;
   const c = item as Record<string, unknown>;
   if (typeof c.id !== 'number' || typeof c.schoolId !== 'number' || typeof c.name !== 'string') return null;
+  const normalizedMethodDetails = Array.isArray(c.admissionMethodDetails)
+    ? c.admissionMethodDetails
+        .map((m) => normalizeAdmissionMethodDetail(m))
+        .filter((m): m is AdmissionMethodDetail => m != null)
+    : Array.isArray(c.admissionMethodTimelines)
+      ? c.admissionMethodTimelines
+          .map((m) => normalizeAdmissionMethodDetail(m))
+          .filter((m): m is AdmissionMethodDetail => m != null)
+      : [];
+  const normalizedMandatoryAll = Array.isArray(c.mandatoryAll)
+    ? c.mandatoryAll
+        .map((d) => normalizeAdmissionDoc(d))
+        .filter((d): d is AdmissionDocumentRequirement => d != null)
+    : fallbackMandatoryAll;
   return {
     id: c.id,
     schoolId: c.schoolId,
@@ -272,17 +289,9 @@ function normalizeCampaignTemplate(item: unknown): SchoolCampaignTemplate | null
     startDate: typeof c.startDate === 'string' ? c.startDate : null,
     endDate: typeof c.endDate === 'string' ? c.endDate : null,
     status: typeof c.status === 'string' ? c.status : 'UNKNOWN',
-    admissionMethodDetails: Array.isArray(c.admissionMethodDetails)
-      ? c.admissionMethodDetails
-          .map((m) => normalizeAdmissionMethodDetail(m))
-          .filter((m): m is AdmissionMethodDetail => m != null)
-      : [],
+    admissionMethodDetails: normalizedMethodDetails,
     admissionMethodTimelines: [],
-    mandatoryAll: Array.isArray(c.mandatoryAll)
-      ? c.mandatoryAll
-          .map((d) => normalizeAdmissionDoc(d))
-          .filter((d): d is AdmissionDocumentRequirement => d != null)
-      : [],
+    mandatoryAll: normalizedMandatoryAll,
     campusProgramOfferings: Array.isArray(c.campusProgramOfferings)
       ? c.campusProgramOfferings.filter((p): p is Record<string, unknown> => !!p && typeof p === 'object')
       : [],
@@ -298,10 +307,25 @@ export async function fetchSchoolCampaignTemplates(
     `/api/v1/school/${schoolId}/campaign/template/public?${query}`,
     { method: 'GET' }
   );
-  const body = Array.isArray(response.body)
-    ? response.body
-        .map((row) => normalizeCampaignTemplate(row))
-        .filter((row): row is SchoolCampaignTemplate => row != null)
+  const rawBody = response.body;
+  const campaignContainer =
+    rawBody && typeof rawBody === 'object' ? (rawBody as Record<string, unknown>) : null;
+  const campaignConfig =
+    campaignContainer?.campaignConfig && typeof campaignContainer.campaignConfig === 'object'
+      ? (campaignContainer.campaignConfig as Record<string, unknown>)
+      : null;
+  const fallbackMandatoryAll = Array.isArray(campaignConfig?.mandatoryAll)
+    ? campaignConfig.mandatoryAll
+        .map((d) => normalizeAdmissionDoc(d))
+        .filter((d): d is AdmissionDocumentRequirement => d != null)
     : [];
+  const campaignRows = Array.isArray(campaignContainer?.campaigns)
+    ? campaignContainer.campaigns
+    : Array.isArray(rawBody)
+      ? rawBody
+      : [];
+  const body = campaignRows
+    .map((row) => normalizeCampaignTemplate(row, fallbackMandatoryAll))
+    .filter((row): row is SchoolCampaignTemplate => row != null);
   return { message: response.message, body };
 }

@@ -15,7 +15,6 @@ import {
   TextInput,
   View,
 } from 'react-native';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Clipboard from 'expo-clipboard';
 
 const Ionicons = require('@expo/vector-icons').Ionicons;
@@ -51,10 +50,6 @@ const SUGGESTED_CHIPS = [
   'Chương trình học là gì?',
 ];
 
-function storageKey(sessionId: string): string {
-  return `@edubridge_ai_assistant_v1:${sessionId.trim().toLowerCase()}`;
-}
-
 function newId(prefix: string): string {
   return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
 }
@@ -67,12 +62,71 @@ function formatTime(iso: string): string {
   return `${hh}:${mm}`;
 }
 
+function buildSourceViewUrl(sourceUrl: string): string {
+  const normalized = sourceUrl.trim();
+  if (!normalized) return '';
+  return `https://view.officeapps.live.com/op/view.aspx?src=${encodeURIComponent(normalized)}`;
+}
+
+const TRAILING_UUID_RE =
+  /_?[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+function stripTrailingUuid(segment: string): string {
+  let s = segment.trim();
+  if (!s) return s;
+  let prev: string;
+  do {
+    prev = s;
+    s = s.replace(TRAILING_UUID_RE, '');
+  } while (s !== prev);
+  return s;
+}
+
+function humanizeStorageSegment(segment: string): string {
+  const core = stripTrailingUuid(segment.trim()).replace(/\.[^.]+$/i, '');
+  return core.replace(/_/g, ' ').replace(/\s+/g, ' ').trim();
+}
+
+function getSourceLinkLabel(rawUrl: string): string {
+  const fallback = rawUrl.trim();
+  if (!fallback) return '';
+  try {
+    const u = new URL(fallback);
+    const parts = u.pathname.split('/').filter(Boolean);
+    const eduIdx = parts.findIndex((p) => p.toLowerCase() === 'edubridge');
+    const segs = eduIdx >= 0 ? parts.slice(eduIdx + 1) : parts;
+    if (segs.length === 0) return fallback;
+
+    const last = segs[segs.length - 1];
+    const lastIsFile = /\.[a-z0-9]{2,8}$/i.test(last);
+    const fileExt = lastIsFile ? (last.match(/(\.[^./]+)$/i)?.[1] || '').toLowerCase() : '';
+    const lastNoExt = last.replace(/\.[^.]+$/i, '');
+    const baseCore = stripTrailingUuid(lastNoExt);
+
+    let chosen = lastNoExt;
+    if (lastIsFile && segs.length >= 2) {
+      const parent = segs[segs.length - 2];
+      chosen = /^(school|campus)_info$/i.test(baseCore) ? parent : lastNoExt;
+    } else if (!lastIsFile) {
+      chosen = last;
+    }
+
+    const label = humanizeStorageSegment(chosen);
+    if (!label) return fallback;
+    const withExt = fileExt ? `${label}${fileExt}` : label;
+    return withExt.length > 120 ? `${withExt.slice(0, 117)}...` : withExt;
+  } catch {
+    return fallback;
+  }
+}
+
 function buildCopyText(m: AiChatAssistantMessage): string {
   const lines: string[] = [m.summary.trim()];
   for (const row of m.details) {
     lines.push(`${row.label}: ${row.value}`);
   }
-  if (m.source?.trim()) lines.push(m.source.trim());
+  const urls = m.sources?.length ? m.sources : m.source?.trim() ? [m.source.trim()] : [];
+  for (const u of urls) lines.push(u);
   return lines.filter(Boolean).join('\n');
 }
 
@@ -144,47 +198,16 @@ export default function AiAssistantChatScreen({ sessionId, onBack }: AiAssistant
   const listRef = useRef<FlatList<AiChatStoredMessage> | null>(null);
   const [inputText, setInputText] = useState('');
   const [messages, setMessages] = useState<AiChatStoredMessage[]>([]);
-  const [hydrated, setHydrated] = useState(false);
   const [awaitingAssistant, setAwaitingAssistant] = useState(false);
 
   const trimmedSession = sessionId.trim();
   const canSend = trimmedSession.length > 0 && inputText.trim().length > 0 && !awaitingAssistant;
 
   useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      if (!trimmedSession) {
-        setMessages([]);
-        setHydrated(true);
-        return;
-      }
-      try {
-        const raw = await AsyncStorage.getItem(storageKey(trimmedSession));
-        if (cancelled) return;
-        if (raw) {
-          const parsed = JSON.parse(raw) as unknown;
-          if (Array.isArray(parsed)) {
-            setMessages(parsed as AiChatStoredMessage[]);
-          }
-        }
-      } catch {
-        if (!cancelled) setMessages([]);
-      } finally {
-        if (!cancelled) setHydrated(true);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
+    if (!trimmedSession) {
+      setMessages([]);
+    }
   }, [trimmedSession]);
-
-  useEffect(() => {
-    if (!hydrated || !trimmedSession) return;
-    const t = setTimeout(() => {
-      void AsyncStorage.setItem(storageKey(trimmedSession), JSON.stringify(messages));
-    }, 120);
-    return () => clearTimeout(t);
-  }, [messages, hydrated, trimmedSession]);
 
   const scrollToEnd = useCallback(() => {
     requestAnimationFrame(() => {
@@ -213,12 +236,17 @@ export default function AiAssistantChatScreen({ sessionId, onBack }: AiAssistant
 
       try {
         const res = await postAiAssistantChat({ chatInput: text, sessionId: trimmedSession });
+        const sourcesList =
+          res.sources?.filter((u) => typeof u === 'string' && u.trim().length > 0) ?? [];
+        const primary =
+          sourcesList[0] ?? (res.source?.trim() ? res.source.trim() : null);
         const assistant: AiChatAssistantMessage = {
           id: newId('a'),
           role: 'assistant',
           summary: res.summary?.trim() || 'Chưa có nội dung phản hồi.',
           details: Array.isArray(res.details) ? res.details : [],
-          source: res.source?.trim() ? res.source.trim() : null,
+          source: primary,
+          sources: sourcesList.length > 1 ? sourcesList : undefined,
           createdAt: new Date().toISOString(),
         };
         setMessages((prev) => [...prev, assistant]);
@@ -254,7 +282,9 @@ export default function AiAssistantChatScreen({ sessionId, onBack }: AiAssistant
   }, []);
 
   const handleOpenSource = useCallback((url: string) => {
-    void Linking.openURL(url).catch(() => {
+    const officeView = buildSourceViewUrl(url);
+    const target = officeView || url;
+    void Linking.openURL(target).catch(() => {
       Alert.alert('Không mở được liên kết', 'Vui lòng kiểm tra URL nguồn.');
     });
   }, []);
@@ -313,15 +343,31 @@ export default function AiAssistantChatScreen({ sessionId, onBack }: AiAssistant
                   ))}
                 </View>
               ) : null}
-              {assistant.source ? (
-                <Pressable
-                  onPress={() => handleOpenSource(assistant.source!)}
-                  style={({ pressed }) => [styles.sourceBtn, pressed && { opacity: 0.9 }]}
-                >
-                  <Ionicons name="open-outline" size={16} color={COLORS.primary} />
-                  <Text style={styles.sourceBtnText}>Xem nguồn</Text>
-                </Pressable>
-              ) : null}
+              {(() => {
+                const urls =
+                  assistant.sources?.length ?
+                    assistant.sources
+                  : assistant.source ?
+                    [assistant.source]
+                  : [];
+                if (urls.length === 0) return null;
+                return (
+                  <View style={styles.sourceBtnsWrap}>
+                    {urls.map((url, i) => (
+                      <Pressable
+                        key={`${url}-${i}`}
+                        onPress={() => handleOpenSource(url)}
+                        style={({ pressed }) => [styles.sourceBtn, pressed && { opacity: 0.9 }]}
+                      >
+                        <Ionicons name="open-outline" size={16} color={COLORS.primary} />
+                        <Text style={styles.sourceBtnText}>
+                          {getSourceLinkLabel(url) || (urls.length > 1 ? `Nguồn ${i + 1}` : 'Xem nguồn')}
+                        </Text>
+                      </Pressable>
+                    ))}
+                  </View>
+                );
+              })()}
               <Text style={styles.aiHint}>Giữ để sao chép</Text>
               <Text style={styles.aiTime}>{formatTime(assistant.createdAt)}</Text>
             </View>
@@ -333,7 +379,7 @@ export default function AiAssistantChatScreen({ sessionId, onBack }: AiAssistant
   );
 
   const listHeader = useMemo(() => {
-    if (messages.length > 0 || !hydrated) return null;
+    if (messages.length > 0) return null;
     return (
       <View style={styles.emptyWrap}>
         <View style={styles.emptyIllustration}>
@@ -343,7 +389,7 @@ export default function AiAssistantChatScreen({ sessionId, onBack }: AiAssistant
         <Text style={styles.emptySub}>Hãy hỏi tôi bất cứ điều gì về các trường học.</Text>
       </View>
     );
-  }, [messages.length, hydrated]);
+  }, [messages.length]);
 
   const listFooter = useMemo(() => {
     if (!awaitingAssistant) return <View style={{ height: 8 }} />;
@@ -379,31 +425,25 @@ export default function AiAssistantChatScreen({ sessionId, onBack }: AiAssistant
     <SafeAreaView style={styles.screen}>
       <Header onBack={onBack} />
 
-      {!hydrated ? (
-        <View style={styles.centerFill}>
-          <ActivityIndicator size="large" color={COLORS.primary} />
-        </View>
-      ) : (
-        <FlatList
-          ref={(r) => {
-            listRef.current = r;
-          }}
-          data={messages}
-          keyExtractor={(m) => m.id}
-          renderItem={renderItem}
-          ListHeaderComponent={
-            <>
-              {listHeader}
-              <View style={{ height: messages.length > 0 ? 10 : 0 }} />
-            </>
-          }
-          ListFooterComponent={listFooter}
-          contentContainerStyle={styles.listContent}
-          onContentSizeChange={scrollToEnd}
-          keyboardShouldPersistTaps="handled"
-          showsVerticalScrollIndicator={false}
-        />
-      )}
+      <FlatList
+        ref={(r) => {
+          listRef.current = r;
+        }}
+        data={messages}
+        keyExtractor={(m) => m.id}
+        renderItem={renderItem}
+        ListHeaderComponent={
+          <>
+            {listHeader}
+            <View style={{ height: messages.length > 0 ? 10 : 0 }} />
+          </>
+        }
+        ListFooterComponent={listFooter}
+        contentContainerStyle={styles.listContent}
+        onContentSizeChange={scrollToEnd}
+        keyboardShouldPersistTaps="handled"
+        showsVerticalScrollIndicator={false}
+      />
 
       <KeyboardAvoidingView
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
@@ -726,8 +766,14 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: COLORS.text,
   },
-  sourceBtn: {
+  sourceBtnsWrap: {
     marginTop: 12,
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    alignItems: 'center',
+  },
+  sourceBtn: {
     alignSelf: 'flex-start',
     flexDirection: 'row',
     alignItems: 'center',

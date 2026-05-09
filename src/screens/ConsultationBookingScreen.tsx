@@ -1,12 +1,38 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Alert, Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import {
+  KeyboardAvoidingView,
+  Modal,
+  Platform,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
+} from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 const MaterialIcons = require('@expo/vector-icons').MaterialIcons;
-import { fetchParentConsultationSlots, bookOfflineConsultation } from '../api/parentConsultation';
+import {
+  bookOfflineConsultation,
+  fetchParentConsultationSlots,
+} from '../api/parentConsultation';
+import { getProfile } from '../api/profile';
 import type { ParentConsultationSlot } from '../types/consultation';
+import {
+  isParentConsultationSlotBookable,
+  isParentConsultationSlotPressable,
+  parentConsultationSlotDisplayLine,
+} from '../types/consultation';
 import type { SchoolDetail } from '../types/school';
+import { MessageDialog } from '../components/MessageDialog';
 
-type Props = {
+type BookingNotice = {
+  title: string;
+  message: string;
+  variant: 'success' | 'error' | 'info';
+};
+
+export type ConsultationBookingScreenProps = {
   visible: boolean;
   school: SchoolDetail | null;
   onClose: () => void;
@@ -41,12 +67,6 @@ function getWeekdayShortLabel(date: Date): string {
   return `T${weekday + 1}`;
 }
 
-function asDateOnly(value: string): Date | null {
-  if (!value) return null;
-  const dt = new Date(`${value}T00:00:00`);
-  return Number.isNaN(dt.getTime()) ? null : dt;
-}
-
 function isSameDay(a: Date, b: Date): boolean {
   return (
     a.getFullYear() === b.getFullYear() &&
@@ -69,7 +89,11 @@ function BookingSkeleton() {
   );
 }
 
-export default function ConsultationBookingScreen({ visible, school, onClose }: Props) {
+export default function ConsultationBookingScreen({
+  visible,
+  school,
+  onClose,
+}: ConsultationBookingScreenProps) {
   const [consultFormVisible, setConsultFormVisible] = useState(false);
   const [selectedCampusId, setSelectedCampusId] = useState<number | null>(null);
   const [consultWeekStart, setConsultWeekStart] = useState<Date>(() => getWeekStart(new Date()));
@@ -78,24 +102,48 @@ export default function ConsultationBookingScreen({ visible, school, onClose }: 
   const [slotsLoading, setSlotsLoading] = useState(false);
   const [slotsError, setSlotsError] = useState<string | null>(null);
   const [slotsByDate, setSlotsByDate] = useState<Record<string, ParentConsultationSlot[]>>({});
+  /** Tăng sau khi đặt lịch thành công để fetch lại slot tuần hiện tại. */
+  const [slotsRefreshTick, setSlotsRefreshTick] = useState(0);
   const [bookingPhone, setBookingPhone] = useState('');
   const [bookingQuestion, setBookingQuestion] = useState('');
   const [bookingSubmitting, setBookingSubmitting] = useState(false);
 
+  const [bookingNotice, setBookingNotice] = useState<BookingNotice | null>(null);
+
   const campusList = useMemo(() => school?.campusList ?? [], [school?.campusList]);
-  const selectedCampus = useMemo(() => campusList.find((campus) => campus.id === selectedCampusId) ?? null, [campusList, selectedCampusId]);
+  const selectedCampus = useMemo(
+    () => campusList.find((campus) => campus.id === selectedCampusId) ?? null,
+    [campusList, selectedCampusId]
+  );
   const weekDates = useMemo(() => Array.from({ length: 7 }, (_, i) => addDays(consultWeekStart, i)), [consultWeekStart]);
   const weekDateKeys = useMemo(() => weekDates.map((date) => toIsoDate(date)), [weekDates]);
   const selectedDateSlots = useMemo(() => slotsByDate[selectedDate] ?? [], [slotsByDate, selectedDate]);
   const availableSlotsCount = useMemo(
-    () => selectedDateSlots.filter((slot) => slot.status !== 'PAST').length,
+    () => selectedDateSlots.filter((slot) => isParentConsultationSlotBookable(slot, selectedDateSlots)).length,
     [selectedDateSlots]
   );
+  const selectedSlotBookable = useMemo(
+    () =>
+      selectedSlot != null ? isParentConsultationSlotBookable(selectedSlot, selectedDateSlots) : false,
+    [selectedSlot, selectedDateSlots]
+  );
+  /** Hiển thị quy định đặt trước bao nhiêu giờ (lấy max trong các slot ngày đang chọn nếu API khác nhau). */
+  const displayAllowBookingBeforeHours = useMemo(() => {
+    if (selectedDateSlots.length === 0) return null;
+    const values = selectedDateSlots
+      .map((s) => s.allowBookingBeforeHours)
+      .filter((h): h is number => typeof h === 'number' && Number.isFinite(h) && h > 0);
+    if (values.length === 0) return null;
+    return Math.max(...values);
+  }, [selectedDateSlots]);
   const today = useMemo(() => new Date(), []);
 
   useEffect(() => {
-    if (!visible) return;
-    const firstCampusId = campusList[0]?.id ?? null;
+    if (!visible) {
+      setBookingNotice(null);
+      return;
+    }
+    const firstCampusId = school?.campusList?.[0]?.id ?? null;
     setSelectedCampusId(firstCampusId);
     setConsultWeekStart(getWeekStart(new Date()));
     setSelectedDate(toIsoDate(new Date()));
@@ -103,7 +151,7 @@ export default function ConsultationBookingScreen({ visible, school, onClose }: 
     setSlotsByDate({});
     setSlotsError(null);
     setConsultFormVisible(false);
-  }, [visible, campusList]);
+  }, [visible, school?.id]);
 
   useEffect(() => {
     if (!visible || !selectedCampusId) return;
@@ -118,6 +166,9 @@ export default function ConsultationBookingScreen({ visible, school, onClose }: 
           if (!grouped[slot.date]) grouped[slot.date] = [];
           grouped[slot.date].push(slot);
         }
+        for (const key of Object.keys(grouped)) {
+          grouped[key].sort((a, b) => a.startTime.localeCompare(b.startTime));
+        }
         setSlotsByDate(grouped);
       })
       .catch((error: unknown) => {
@@ -131,7 +182,24 @@ export default function ConsultationBookingScreen({ visible, school, onClose }: 
     return () => {
       cancelled = true;
     };
-  }, [visible, selectedCampusId, weekDates]);
+  }, [visible, selectedCampusId, weekDates, slotsRefreshTick]);
+
+  useEffect(() => {
+    if (!visible) return;
+    let cancelled = false;
+    void getProfile()
+      .then((res) => {
+        if (cancelled) return;
+        setBookingPhone(res.body.parent?.phone?.trim() ?? '');
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setBookingPhone('');
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [visible]);
 
   useEffect(() => {
     if (!weekDateKeys.includes(selectedDate)) {
@@ -142,17 +210,37 @@ export default function ConsultationBookingScreen({ visible, school, onClose }: 
 
   const handleOpenForm = () => {
     if (!selectedSlot) {
-      Alert.alert('Chưa chọn khung giờ', 'Vui lòng chọn một slot tư vấn trước khi đặt lịch.');
+      setBookingNotice({
+        title: 'Chưa chọn khung giờ',
+        message: 'Vui lòng chọn một slot tư vấn trước khi đặt lịch.',
+        variant: 'info',
+      });
+      return;
+    }
+    if (!isParentConsultationSlotBookable(selectedSlot, selectedDateSlots)) {
+      setBookingNotice({
+        title: 'Không thể đặt thêm',
+        message:
+          selectedSlot.consultationOfflineRequest != null
+            ? 'Đây là lịch tư vấn bạn đã đặt trong ngày này.'
+            : 'Bạn chỉ có thể đặt một lịch tư vấn mỗi ngày. Vui lòng chọn ngày khác hoặc xem lịch đã đặt.',
+        variant: 'info',
+      });
       return;
     }
     setConsultFormVisible(true);
   };
 
   const handleSubmit = async () => {
-    if (!selectedSlot) return;
+    if (!selectedSlot || selectedCampusId == null) return;
+    if (!isParentConsultationSlotBookable(selectedSlot, selectedDateSlots)) return;
     const phone = bookingPhone.trim();
     if (!phone) {
-      Alert.alert('Thiếu số điện thoại', 'Vui lòng nhập số điện thoại để đặt lịch tư vấn.');
+      setBookingNotice({
+        title: 'Thiếu số điện thoại',
+        message: 'Không tìm thấy số điện thoại trong hồ sơ. Vui lòng cập nhật hồ sơ tài khoản trước khi đặt lịch.',
+        variant: 'info',
+      });
       return;
     }
     setBookingSubmitting(true);
@@ -162,13 +250,23 @@ export default function ConsultationBookingScreen({ visible, school, onClose }: 
         question: bookingQuestion.trim(),
         appointmentDate: selectedSlot.date,
         appointmentTime: selectedSlot.startTime,
+        campusId: selectedCampusId,
       });
       setConsultFormVisible(false);
-      setBookingPhone('');
       setBookingQuestion('');
-      Alert.alert('Đặt lịch thành công', 'Nhà trường sẽ liên hệ xác nhận lịch tư vấn với bạn.');
+      setSelectedSlot(null);
+      setSlotsRefreshTick((t) => t + 1);
+      setBookingNotice({
+        title: 'Đặt lịch thành công',
+        message: 'Nhà trường sẽ liên hệ xác nhận lịch tư vấn với bạn.',
+        variant: 'success',
+      });
     } catch (error: unknown) {
-      Alert.alert('Không thể đặt lịch', error instanceof Error ? error.message : 'Vui lòng thử lại.');
+      setBookingNotice({
+        title: 'Không thể đặt lịch',
+        message: error instanceof Error ? error.message : 'Vui lòng thử lại.',
+        variant: 'error',
+      });
     } finally {
       setBookingSubmitting(false);
     }
@@ -190,188 +288,244 @@ export default function ConsultationBookingScreen({ visible, school, onClose }: 
         </View>
       </View>
 
-      <ScrollView style={styles.contentScroll} contentContainerStyle={styles.contentContainer} showsVerticalScrollIndicator={false}>
-        <View style={styles.cardSection}>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.campusScroll}>
-            {campusList.map((campus) => (
-              <Pressable
-                key={`campus-${campus.id}`}
-                style={({ pressed }) => [
-                  styles.campusChip,
-                  selectedCampusId === campus.id && styles.campusChipSelected,
-                  pressed && styles.pressScale,
-                ]}
-                onPress={() => {
-                  setSelectedCampusId(campus.id);
-                  setSelectedSlot(null);
-                }}
-              >
-                <MaterialIcons
-                  name="location-on"
-                  size={14}
-                  color={selectedCampusId === campus.id ? '#fff' : '#64748b'}
-                />
-                <Text style={[styles.campusChipText, selectedCampusId === campus.id && styles.campusChipTextSelected]}>
-                  {campus.name}
-                </Text>
-              </Pressable>
-            ))}
-          </ScrollView>
+      {!school ? (
+        <View style={styles.noSchoolWrap}>
+          <MaterialIcons name="school" size={40} color="#94a3b8" />
+          <Text style={styles.noSchoolTitle}>Chọn trường để đặt lịch</Text>
+          <Text style={styles.noSchoolSub}>Vào chi tiết trường và chọn đặt lịch tư vấn tại cơ sở.</Text>
         </View>
-
-        <View style={styles.cardSection}>
-          <View style={styles.weekRow}>
-            <Pressable
-              style={({ pressed }) => [styles.navBtn, pressed && styles.pressScale]}
-              onPress={() => setConsultWeekStart((prev) => addDays(prev, -7))}
-            >
-              <MaterialIcons name="chevron-left" size={20} color="#1976d2" />
-            </Pressable>
-            <Text style={styles.weekLabel}>
-              {toIsoDate(weekDates[0])} - {toIsoDate(weekDates[6])}
-            </Text>
-            <Pressable
-              style={({ pressed }) => [styles.navBtn, pressed && styles.pressScale]}
-              onPress={() => setConsultWeekStart((prev) => addDays(prev, 7))}
-            >
-              <MaterialIcons name="chevron-right" size={20} color="#1976d2" />
-            </Pressable>
-          </View>
-
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.dateScroll}>
-            {weekDates.map((day) => {
-              const dayKey = toIsoDate(day);
-              const isSelected = selectedDate === dayKey;
-              const daySlots = slotsByDate[dayKey] ?? [];
-              const hasAvailableSlot = daySlots.some((slot) => slot.status !== 'PAST');
-              const isToday = isSameDay(day, today);
-              return (
-                <Pressable
-                  key={dayKey}
-                  disabled={!hasAvailableSlot}
-                  style={({ pressed }) => [
-                    styles.dateChip,
-                    isSelected && styles.dateChipSelected,
-                    isToday && !isSelected && styles.dateChipToday,
-                    !hasAvailableSlot && styles.dateChipDisabled,
-                    pressed && hasAvailableSlot && styles.pressScale,
-                  ]}
-                  onPress={() => {
-                    setSelectedDate(dayKey);
-                    setSelectedSlot(null);
-                  }}
-                >
-                  <Text style={[styles.dateWeekday, isSelected && styles.dateSelectedText]}>
-                    {getWeekdayShortLabel(day)}
-                  </Text>
-                  <Text style={[styles.dateDay, isSelected && styles.dateSelectedText]}>
-                    {String(day.getDate()).padStart(2, '0')}
-                  </Text>
-                </Pressable>
-              );
-            })}
-          </ScrollView>
-        </View>
-
-        <View style={styles.cardSection}>
-          <View style={styles.slotHeaderRow}>
-            <Text style={styles.slotHeaderTitle}>Khung giờ khả dụng</Text>
-            <View style={styles.slotBadge}>
-              <Text style={styles.slotBadgeText}>Còn {availableSlotsCount} slot</Text>
-            </View>
-          </View>
-
-          {slotsLoading ? (
-            <BookingSkeleton />
-          ) : slotsError ? (
-            <View style={styles.stateBox}>
-              <MaterialIcons name="error-outline" size={20} color="#dc2626" />
-              <Text style={styles.stateText}>{slotsError}</Text>
-            </View>
-          ) : selectedDateSlots.length === 0 ? (
-            <View style={styles.emptyState}>
-              <MaterialIcons name="calendar-today" size={28} color="#94a3b8" />
-              <Text style={styles.emptyTitle}>Không có lịch tư vấn</Text>
-              <Text style={styles.emptySub}>Vui lòng chọn ngày khác</Text>
-            </View>
-          ) : (
-            <View style={styles.slotGrid}>
-              {selectedDateSlots.map((slot) => {
-                const isDisabled = slot.status === 'PAST';
-                const isSelected = selectedSlot?.campusScheduleTemplateId === slot.campusScheduleTemplateId;
-                return (
+      ) : (
+        <>
+          <ScrollView style={styles.contentScroll} contentContainerStyle={styles.contentContainer} showsVerticalScrollIndicator={false}>
+            <View style={styles.cardSection}>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.campusScroll}>
+                {campusList.map((campus) => (
                   <Pressable
-                    key={`${slot.date}-${slot.campusScheduleTemplateId}`}
-                    disabled={isDisabled}
+                    key={`campus-${campus.id}`}
                     style={({ pressed }) => [
-                      styles.slotCard,
-                      isDisabled && styles.slotDisabled,
-                      isSelected && styles.slotSelected,
-                      pressed && !isDisabled && styles.pressScale,
+                      styles.campusChip,
+                      selectedCampusId === campus.id && styles.campusChipSelected,
+                      pressed && styles.pressScale,
                     ]}
-                    onPress={() => setSelectedSlot(slot)}
+                    onPress={() => {
+                      setSelectedCampusId(campus.id);
+                      setSelectedSlot(null);
+                    }}
                   >
-                    <Text style={[styles.slotTime, isSelected && styles.slotSelectedText]}>
-                      {formatSlotTimeRange(slot.startTime, slot.endTime)}
-                    </Text>
-                    <Text style={[styles.slotStatus, isSelected && styles.slotSelectedSubText]}>
-                      {slot.statusLabel || slot.status}
+                    <MaterialIcons
+                      name="location-on"
+                      size={14}
+                      color={selectedCampusId === campus.id ? '#fff' : '#64748b'}
+                    />
+                    <Text style={[styles.campusChipText, selectedCampusId === campus.id && styles.campusChipTextSelected]}>
+                      {campus.name}
                     </Text>
                   </Pressable>
-                );
-              })}
+                ))}
+              </ScrollView>
             </View>
-          )}
-        </View>
-      </ScrollView>
 
-      <View style={styles.bottomCtaWrap}>
-        <Pressable
-          style={[styles.bookBtn, !selectedSlot && styles.bookBtnDisabled]}
-          onPress={handleOpenForm}
-        >
-          {selectedSlot ? (
-            <LinearGradient
-              colors={['#1976d2', '#42a5f5']}
-              start={{ x: 0, y: 0.5 }}
-              end={{ x: 1, y: 0.5 }}
-              style={styles.bookGradient}
+            <View style={styles.cardSection}>
+              <View style={styles.weekRow}>
+                <Pressable
+                  style={({ pressed }) => [styles.navBtn, pressed && styles.pressScale]}
+                  onPress={() => setConsultWeekStart((prev) => addDays(prev, -7))}
+                >
+                  <MaterialIcons name="chevron-left" size={20} color="#1976d2" />
+                </Pressable>
+                <Text style={styles.weekLabel}>
+                  {toIsoDate(weekDates[0])} - {toIsoDate(weekDates[6])}
+                </Text>
+                <Pressable
+                  style={({ pressed }) => [styles.navBtn, pressed && styles.pressScale]}
+                  onPress={() => setConsultWeekStart((prev) => addDays(prev, 7))}
+                >
+                  <MaterialIcons name="chevron-right" size={20} color="#1976d2" />
+                </Pressable>
+              </View>
+
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.dateScroll}>
+                {weekDates.map((day) => {
+                  const dayKey = toIsoDate(day);
+                  const isSelected = selectedDate === dayKey;
+                  const daySlots = slotsByDate[dayKey] ?? [];
+                  const hasSelectable = daySlots.some((slot) => isParentConsultationSlotPressable(slot, daySlots));
+                  const isToday = isSameDay(day, today);
+                  return (
+                    <Pressable
+                      key={dayKey}
+                      disabled={!hasSelectable}
+                      style={({ pressed }) => [
+                        styles.dateChip,
+                        isSelected && styles.dateChipSelected,
+                        isToday && !isSelected && styles.dateChipToday,
+                        !hasSelectable && styles.dateChipDisabled,
+                        pressed && hasSelectable && styles.pressScale,
+                      ]}
+                      onPress={() => {
+                        setSelectedDate(dayKey);
+                        setSelectedSlot(null);
+                      }}
+                    >
+                      <Text style={[styles.dateWeekday, isSelected && styles.dateSelectedText]}>
+                        {getWeekdayShortLabel(day)}
+                      </Text>
+                      <Text style={[styles.dateDay, isSelected && styles.dateSelectedText]}>
+                        {String(day.getDate()).padStart(2, '0')}
+                      </Text>
+                    </Pressable>
+                  );
+                })}
+              </ScrollView>
+            </View>
+
+            <View style={styles.cardSection}>
+              <View style={styles.slotHeaderRow}>
+                <Text style={styles.slotHeaderTitle}>Khung giờ tư vấn</Text>
+                <View style={styles.slotBadge}>
+                  <Text style={styles.slotBadgeText}>Còn {availableSlotsCount} slot</Text>
+                </View>
+              </View>
+              {displayAllowBookingBeforeHours != null ? (
+                <Text style={styles.slotPolicyHint}>
+                  Phụ huynh vui lòng đặt lịch trước {displayAllowBookingBeforeHours} giờ
+                </Text>
+              ) : null}
+
+              {slotsLoading ? (
+                <BookingSkeleton />
+              ) : slotsError ? (
+                <View style={styles.stateBox}>
+                  <MaterialIcons name="error-outline" size={20} color="#dc2626" />
+                  <Text style={styles.stateText}>{slotsError}</Text>
+                </View>
+              ) : selectedDateSlots.length === 0 ? (
+                <View style={styles.emptyState}>
+                  <MaterialIcons name="calendar-today" size={28} color="#94a3b8" />
+                  <Text style={styles.emptyTitle}>Không có lịch tư vấn</Text>
+                  <Text style={styles.emptySub}>Vui lòng chọn ngày khác</Text>
+                </View>
+              ) : (
+                <View style={styles.slotGrid}>
+                  {selectedDateSlots.map((slot) => {
+                    const isDisabled = !isParentConsultationSlotPressable(slot, selectedDateSlots);
+                    const isSelected = selectedSlot?.campusScheduleTemplateId === slot.campusScheduleTemplateId;
+                    return (
+                      <Pressable
+                        key={`${slot.date}-${slot.campusScheduleTemplateId}`}
+                        disabled={isDisabled}
+                        style={({ pressed }) => [
+                          styles.slotCard,
+                          isDisabled && styles.slotDisabled,
+                          isSelected && styles.slotSelected,
+                          pressed && !isDisabled && styles.pressScale,
+                        ]}
+                        onPress={() => setSelectedSlot(slot)}
+                      >
+                        <Text style={[styles.slotTime, isSelected && styles.slotSelectedText]}>
+                          {formatSlotTimeRange(slot.startTime, slot.endTime)}
+                        </Text>
+                        <Text
+                          style={[
+                            styles.slotStatus,
+                            slot.consultationOfflineRequest != null && styles.slotStatusConsultRequest,
+                            isSelected && styles.slotSelectedSubText,
+                          ]}
+                        >
+                          {parentConsultationSlotDisplayLine(slot)}
+                        </Text>
+                      </Pressable>
+                    );
+                  })}
+                </View>
+              )}
+            </View>
+          </ScrollView>
+
+          <View style={styles.bottomCtaWrap}>
+            <Pressable
+              style={[styles.bookBtn, (!selectedSlot || !selectedSlotBookable) && styles.bookBtnDisabled]}
+              onPress={handleOpenForm}
             >
-              <Text style={styles.bookBtnText}>Đặt lịch</Text>
-            </LinearGradient>
-          ) : (
-            <Text style={styles.bookBtnText}>Đặt lịch</Text>
-          )}
-        </Pressable>
-      </View>
+              {selectedSlot && selectedSlotBookable ? (
+                <LinearGradient
+                  colors={['#1976d2', '#42a5f5']}
+                  start={{ x: 0, y: 0.5 }}
+                  end={{ x: 1, y: 0.5 }}
+                  style={styles.bookGradient}
+                >
+                  <Text style={styles.bookBtnText}>Đặt lịch</Text>
+                </LinearGradient>
+              ) : (
+                <Text style={styles.bookBtnText}>Đặt lịch</Text>
+              )}
+            </Pressable>
+          </View>
+        </>
+      )}
 
       <Modal visible={consultFormVisible} transparent animationType="slide" onRequestClose={() => setConsultFormVisible(false)}>
-        <Pressable style={styles.formBackdrop} onPress={() => setConsultFormVisible(false)}>
-          <Pressable style={styles.formCard} onPress={() => {}}>
-            <View style={styles.formHeader}>
-              <Text style={styles.formTitle}>Đặt lịch tư vấn</Text>
-              <Pressable onPress={() => setConsultFormVisible(false)} hitSlop={8}>
-                <MaterialIcons name="close" size={20} color="#64748b" />
-              </Pressable>
+        <KeyboardAvoidingView
+          style={styles.formKeyboardRoot}
+          behavior={Platform.OS === 'ios' ? 'padding' : 'padding'}
+          keyboardVerticalOffset={Platform.OS === 'ios' ? 16 : 0}
+        >
+          <Pressable style={styles.formBackdrop} onPress={() => setConsultFormVisible(false)}>
+            <View style={styles.formCard} onStartShouldSetResponder={() => true}>
+              <ScrollView
+                keyboardShouldPersistTaps="handled"
+                showsVerticalScrollIndicator={false}
+                bounces={false}
+                contentContainerStyle={styles.formScrollContent}
+              >
+                <View style={styles.formHeader}>
+                  <Text style={styles.formTitle}>Đặt lịch tư vấn</Text>
+                  <Pressable onPress={() => setConsultFormVisible(false)} hitSlop={8}>
+                    <MaterialIcons name="close" size={20} color="#64748b" />
+                  </Pressable>
+                </View>
+                <Text style={styles.formLabel}>Số điện thoại</Text>
+                <TextInput
+                  value={bookingPhone}
+                  editable={false}
+                  selectTextOnFocus={false}
+                  showSoftInputOnFocus={false}
+                  placeholder="Chưa có số điện thoại"
+                  style={[styles.input, styles.inputReadonly]}
+                />
+                <Text style={styles.formLabel}>Câu hỏi</Text>
+                <TextInput
+                  value={bookingQuestion}
+                  onChangeText={setBookingQuestion}
+                  placeholder="Bạn muốn tư vấn điều gì?"
+                  multiline
+                  textAlignVertical="top"
+                  style={[styles.input, styles.textarea]}
+                />
+                <Text style={styles.formLabel}>Khung giờ</Text>
+                <View style={styles.readonlyField}>
+                  <Text style={styles.readonlyText}>{selectedSlot ? formatSlotTimeRange(selectedSlot.startTime, selectedSlot.endTime) : '—'}</Text>
+                </View>
+                <Text style={styles.formLabel}>Ngày hẹn</Text>
+                <View style={styles.readonlyField}>
+                  <Text style={styles.readonlyText}>{selectedSlot?.date ?? '—'}</Text>
+                </View>
+                <Pressable style={[styles.submitBtn, bookingSubmitting && styles.submitBtnDisabled]} disabled={bookingSubmitting} onPress={handleSubmit}>
+                  <Text style={styles.submitText}>{bookingSubmitting ? 'Đang gửi...' : 'Đặt lịch tư vấn'}</Text>
+                </Pressable>
+              </ScrollView>
             </View>
-            <Text style={styles.formLabel}>Số điện thoại</Text>
-            <TextInput value={bookingPhone} onChangeText={setBookingPhone} placeholder="Nhập số điện thoại" keyboardType="phone-pad" style={styles.input} />
-            <Text style={styles.formLabel}>Câu hỏi</Text>
-            <TextInput value={bookingQuestion} onChangeText={setBookingQuestion} placeholder="Bạn muốn tư vấn điều gì?" multiline textAlignVertical="top" style={[styles.input, styles.textarea]} />
-            <Text style={styles.formLabel}>Khung giờ</Text>
-            <View style={styles.readonlyField}>
-              <Text style={styles.readonlyText}>{selectedSlot ? formatSlotTimeRange(selectedSlot.startTime, selectedSlot.endTime) : '—'}</Text>
-            </View>
-            <Text style={styles.formLabel}>Ngày hẹn</Text>
-            <View style={styles.readonlyField}>
-              <Text style={styles.readonlyText}>{selectedSlot?.date ?? '—'}</Text>
-            </View>
-            <Pressable style={[styles.submitBtn, bookingSubmitting && styles.submitBtnDisabled]} disabled={bookingSubmitting} onPress={handleSubmit}>
-              <Text style={styles.submitText}>{bookingSubmitting ? 'Đang gửi...' : 'Đặt lịch tư vấn'}</Text>
-            </Pressable>
           </Pressable>
-        </Pressable>
+        </KeyboardAvoidingView>
       </Modal>
+
+      <MessageDialog
+        visible={bookingNotice != null}
+        title={bookingNotice?.title ?? ''}
+        message={bookingNotice?.message ?? ''}
+        variant={bookingNotice?.variant ?? 'info'}
+        onClose={() => setBookingNotice(null)}
+      />
     </View>
   );
 }
@@ -396,8 +550,88 @@ const styles = StyleSheet.create({
   headerTitleWrap: { flex: 1 },
   headerTitle: { fontSize: 20, fontWeight: '700', color: '#0f172a' },
   headerSubtitle: { marginTop: 2, fontSize: 13, color: '#64748b' },
+  segmentRow: {
+    flexDirection: 'row',
+    gap: 8,
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    backgroundColor: '#fff',
+    borderBottomWidth: 1,
+    borderBottomColor: '#e2e8f0',
+  },
+  segmentChip: {
+    flex: 1,
+    paddingVertical: 10,
+    borderRadius: 12,
+    backgroundColor: '#f1f5f9',
+    alignItems: 'center',
+  },
+  segmentChipActive: { backgroundColor: '#1976d2' },
+  segmentChipText: { fontSize: 14, fontWeight: '600', color: '#64748b' },
+  segmentChipTextActive: { color: '#fff' },
+  noSchoolWrap: {
+    flex: 1,
+    paddingHorizontal: 24,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+  },
+  noSchoolTitle: { fontSize: 17, fontWeight: '700', color: '#334155', marginTop: 8 },
+  noSchoolSub: { fontSize: 14, color: '#64748b', textAlign: 'center' },
   contentScroll: { flex: 1 },
   contentContainer: { padding: 16, paddingBottom: 120, gap: 12 },
+  historyBody: { flex: 1, padding: 16, gap: 12 },
+  historyFilterTitle: { fontSize: 13, fontWeight: '600', color: '#334155', marginBottom: 8 },
+  filterScroll: { flexDirection: 'row', gap: 8, paddingBottom: 2 },
+  filterChip: {
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: '#e2e8f0',
+    backgroundColor: '#fff',
+  },
+  filterChipActive: { backgroundColor: '#e3f2fd', borderColor: '#1976d2' },
+  filterChipText: { fontSize: 12, fontWeight: '600', color: '#64748b' },
+  filterChipTextActive: { color: '#1976d2' },
+  historyLoadingBox: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 8 },
+  historyLoadingText: { fontSize: 14, color: '#64748b' },
+  historyListScroll: { flex: 1 },
+  historyListContent: { gap: 10, paddingBottom: 24 },
+  historyCard: {
+    backgroundColor: '#fff',
+    borderRadius: 14,
+    padding: 14,
+    borderWidth: 1,
+    borderColor: '#e2e8f0',
+    gap: 6,
+  },
+  historyCardTop: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8 },
+  historyDate: { fontSize: 14, fontWeight: '700', color: '#0f172a', flex: 1 },
+  historyStatusPill: {
+    backgroundColor: '#e3f2fd',
+    borderColor: '#bbdefb',
+    borderWidth: 1,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 999,
+  },
+  historyStatusPillText: { fontSize: 11, fontWeight: '700', color: '#1565c0' },
+  historyQuestion: { fontSize: 14, color: '#334155' },
+  historyPhone: { fontSize: 13, color: '#64748b' },
+  loadMoreBtn: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 14,
+    borderRadius: 12,
+    backgroundColor: '#fff',
+    borderWidth: 1,
+    borderColor: '#dbeafe',
+  },
+  loadMoreBtnDisabled: { opacity: 0.7 },
+  loadMoreText: { fontSize: 14, fontWeight: '700', color: '#1976d2' },
+  retryBtn: { marginTop: 8, paddingVertical: 8, paddingHorizontal: 16 },
+  retryBtnText: { fontSize: 14, fontWeight: '600', color: '#1976d2' },
   cardSection: {
     backgroundColor: '#fff',
     borderRadius: 16,
@@ -453,7 +687,13 @@ const styles = StyleSheet.create({
   dateWeekday: { fontSize: 12, fontWeight: '600', color: '#64748b' },
   dateDay: { fontSize: 16, fontWeight: '700', color: '#0f172a' },
   dateSelectedText: { color: '#fff' },
-  slotHeaderRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 },
+  slotHeaderRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 },
+  slotPolicyHint: {
+    fontSize: 13,
+    lineHeight: 18,
+    color: '#64748b',
+    marginBottom: 12,
+  },
   slotHeaderTitle: { fontSize: 16, fontWeight: '700', color: '#0f172a' },
   slotBadge: { borderRadius: 999, backgroundColor: '#e8f5e9', paddingHorizontal: 10, paddingVertical: 4 },
   slotBadgeText: { fontSize: 12, fontWeight: '700', color: '#2e7d32' },
@@ -471,7 +711,7 @@ const styles = StyleSheet.create({
   stateText: { fontSize: 13, color: '#475569', textAlign: 'center' },
   emptyState: { minHeight: 130, alignItems: 'center', justifyContent: 'center', gap: 4 },
   emptyTitle: { fontSize: 15, fontWeight: '700', color: '#334155' },
-  emptySub: { fontSize: 13, color: '#64748b' },
+  emptySub: { fontSize: 13, color: '#64748b', textAlign: 'center', paddingHorizontal: 12 },
   slotGrid: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', rowGap: 10 },
   slotCard: {
     width: '48.5%',
@@ -500,6 +740,7 @@ const styles = StyleSheet.create({
   },
   slotTime: { fontSize: 13, fontWeight: '700', color: '#0f172a' },
   slotStatus: { fontSize: 12, color: '#64748b' },
+  slotStatusConsultRequest: { color: '#1976d2', fontWeight: '700' },
   slotSelectedText: { color: '#fff' },
   slotSelectedSubText: { color: '#dbeafe' },
   bottomCtaWrap: {
@@ -535,8 +776,17 @@ const styles = StyleSheet.create({
   },
   bookBtnDisabled: { backgroundColor: '#90caf9' },
   bookBtnText: { color: '#fff', fontSize: 16, fontWeight: '700' },
+  formKeyboardRoot: { flex: 1 },
   formBackdrop: { flex: 1, backgroundColor: 'rgba(15, 23, 42, 0.45)', justifyContent: 'flex-end' },
-  formCard: { backgroundColor: '#fff', borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: 16, paddingBottom: 26, gap: 10 },
+  formCard: {
+    backgroundColor: '#fff',
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    paddingHorizontal: 16,
+    paddingTop: 16,
+    width: '100%',
+  },
+  formScrollContent: { gap: 10, paddingBottom: 28 },
   formHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12 },
   formTitle: { fontSize: 17, fontWeight: '700', color: '#0f172a' },
   formLabel: { fontSize: 13, fontWeight: '600', color: '#334155' },
@@ -551,6 +801,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#fff',
   },
   textarea: { minHeight: 90 },
+  inputReadonly: { backgroundColor: '#f8fafc', color: '#475569' },
   readonlyField: { borderWidth: 1, borderColor: '#e2e8f0', borderRadius: 12, paddingHorizontal: 12, paddingVertical: 11, backgroundColor: '#f8fafc' },
   readonlyText: { fontSize: 14, color: '#0f172a', fontWeight: '600' },
   submitBtn: { marginTop: 6, height: 46, borderRadius: 12, backgroundColor: '#1976d2', alignItems: 'center', justifyContent: 'center' },

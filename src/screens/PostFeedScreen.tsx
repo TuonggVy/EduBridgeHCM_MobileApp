@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
+  Alert,
   View,
   Text,
   StyleSheet,
@@ -14,6 +15,7 @@ import {
   Platform,
   StatusBar,
   Dimensions,
+  Linking,
 } from 'react-native';
 import { fetchPostList } from '../api/post';
 import type { PostCategory, SchoolPost } from '../types/post';
@@ -31,18 +33,17 @@ const FILTERS: FilterItem[] = [
 const TOP_SAFE_PADDING = Platform.OS === 'ios' ? 56 : (StatusBar.currentHeight ?? 24) + 12;
 const SCREEN_WIDTH = Dimensions.get('window').width;
 
-function relativeTime(isoDate: string | null): string {
-  if (!isoDate) return 'Vừa đăng';
+function formatPublishedDate(isoDate: string | null): string {
+  if (!isoDate) return 'Chưa có thời gian';
   const date = new Date(isoDate);
-  if (Number.isNaN(date.getTime())) return 'Vừa đăng';
-  const diffMs = Date.now() - date.getTime();
-  if (diffMs < 0) return 'Vừa đăng';
-  const mins = Math.floor(diffMs / 60000);
-  if (mins < 60) return `${Math.max(mins, 1)} phút trước`;
-  const hours = Math.floor(mins / 60);
-  if (hours < 24) return `${hours} giờ trước`;
-  const days = Math.floor(hours / 24);
-  return `${days} ngày trước`;
+  if (Number.isNaN(date.getTime())) return isoDate;
+  return new Intl.DateTimeFormat('vi-VN', {
+    hour: '2-digit',
+    minute: '2-digit',
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+  }).format(date);
 }
 
 function categoryLabel(category: string): string {
@@ -55,9 +56,8 @@ function categoryLabel(category: string): string {
 function postImages(post: SchoolPost): string[] {
   const imageList = post.imageJson?.imageItemList ?? [];
   const sorted = [...imageList].sort((a, b) => a.position - b.position).map((item) => item.url);
-  if (sorted.length > 0) return sorted;
-  if (post.thumbnail) return [post.thumbnail];
-  return [];
+  const allImages = post.thumbnail ? [post.thumbnail, ...sorted] : sorted;
+  return allImages.filter((url, index, arr) => url && arr.indexOf(url) === index);
 }
 
 function normalizeText(rawText: string): string {
@@ -112,6 +112,14 @@ export default function PostFeedScreen({ onOpenPostDetail, onClose }: PostFeedSc
 
   const closeImageViewer = useCallback(() => {
     setImageViewerVisible(false);
+  }, []);
+
+  const openAttachment = useCallback((fileUrl: string | null) => {
+    const trimmed = (fileUrl ?? '').trim();
+    if (!trimmed) return;
+    void Linking.openURL(trimmed).catch(() => {
+      Alert.alert('Không thể mở tệp', 'Vui lòng thử lại sau.');
+    });
   }, []);
 
   useEffect(() => {
@@ -188,7 +196,7 @@ export default function PostFeedScreen({ onOpenPostDetail, onClose }: PostFeedSc
             <Text style={styles.schoolName} numberOfLines={1}>
               {item.author?.name ?? 'Trường học'}
             </Text>
-            <Text style={styles.publishedTime}>{relativeTime(item.publishedDate)}</Text>
+            <Text style={styles.publishedTime}>{formatPublishedDate(item.publishedDate)}</Text>
           </View>
           <View style={styles.badge}>
             <Text style={styles.badgeText}>{categoryLabel(item.categoryPost)}</Text>
@@ -201,6 +209,18 @@ export default function PostFeedScreen({ onOpenPostDetail, onClose }: PostFeedSc
           {description || 'Bài đăng từ nhà trường'}
         </Text>
 
+        {item.fileUrl ? (
+          <Pressable
+            onPress={() => openAttachment(item.fileUrl)}
+            style={({ pressed }) => [styles.fileButton, pressed && { opacity: 0.9 }]}
+          >
+            <MaterialIcons name="attach-file" size={16} color="#1d4ed8" />
+            <Text numberOfLines={1} style={styles.fileButtonText}>
+              Tệp đính kèm
+            </Text>
+          </Pressable>
+        ) : null}
+
         {item.hashTag.length > 0 && (
           <View style={styles.hashTagRow}>
             {item.hashTag.slice(0, 4).map((tag) => (
@@ -210,21 +230,6 @@ export default function PostFeedScreen({ onOpenPostDetail, onClose }: PostFeedSc
             ))}
           </View>
         )}
-
-        <View style={styles.actionRow}>
-          <Pressable style={styles.actionButton}>
-            <MaterialIcons name="favorite-border" size={18} color="#64748b" />
-          </Pressable>
-          <Pressable style={styles.actionButton}>
-            <MaterialIcons name="chat-bubble-outline" size={18} color="#64748b" />
-          </Pressable>
-          <Pressable style={styles.actionButton}>
-            <MaterialIcons name="share" size={18} color="#64748b" />
-          </Pressable>
-          <Pressable style={styles.actionButton}>
-            <MaterialIcons name="bookmark-border" size={18} color="#64748b" />
-          </Pressable>
-        </View>
       </Pressable>
     );
   };
@@ -238,14 +243,7 @@ export default function PostFeedScreen({ onOpenPostDetail, onClose }: PostFeedSc
           </Pressable>
         </View>
         <Text style={styles.title}>Bài viết từ Trường</Text>
-        <View style={styles.rightWrap}>
-          <Pressable style={styles.iconButton}>
-            <MaterialIcons name="notifications-none" size={22} color="#0f172a" />
-          </Pressable>
-          <View style={styles.profileAvatar}>
-            <MaterialIcons name="person" size={18} color="#475569" />
-          </View>
-        </View>
+        <View style={styles.rightWrap} />
       </View>
 
       <View style={styles.searchWrap}>
@@ -330,12 +328,35 @@ export default function PostFeedScreen({ onOpenPostDetail, onClose }: PostFeedSc
           </View>
           {selectedPost && (
             <ScrollView contentContainerStyle={styles.detailContent} showsVerticalScrollIndicator={false}>
-              <Text style={styles.detailSchoolName}>{selectedPost.author?.name ?? 'Trường học'}</Text>
-              <Text style={styles.detailPublishedTime}>{relativeTime(selectedPost.publishedDate)}</Text>
+              <View style={styles.detailAuthorRow}>
+                <View style={styles.detailAvatarWrap}>
+                  <MaterialIcons name="school" size={20} color="#2563eb" />
+                </View>
+                <View style={styles.detailAuthorTextWrap}>
+                  <Text style={styles.detailSchoolName}>
+                    {selectedPost.author?.name ?? 'Trường học'}
+                  </Text>
+                  <Text style={styles.detailPublishedTime}>
+                    {formatPublishedDate(selectedPost.publishedDate)}
+                  </Text>
+                </View>
+              </View>
               <Text style={styles.detailDescription}>
                 {selectedPost.content?.shortDescription ??
                   normalizeText(selectedPost.content?.contentDataList?.[0]?.text ?? '')}
               </Text>
+              {selectedPost.fileUrl ? (
+                <Pressable
+                  onPress={() => openAttachment(selectedPost.fileUrl)}
+                  style={({ pressed }) => [styles.detailFileButton, pressed && { opacity: 0.9 }]}
+                >
+                  <MaterialIcons name="description" size={17} color="#1d4ed8" />
+                  <Text numberOfLines={1} style={styles.detailFileButtonText}>
+                    Tệp đính kèm
+                  </Text>
+                  <MaterialIcons name="open-in-new" size={16} color="#1d4ed8" />
+                </Pressable>
+              ) : null}
               <ScrollView
                 horizontal
                 showsHorizontalScrollIndicator={false}
@@ -437,23 +458,11 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
   rightWrap: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'flex-end',
     width: 96,
-    gap: 8,
   },
   iconButton: {
     width: 34,
     height: 34,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  profileAvatar: {
-    width: 30,
-    height: 30,
-    borderRadius: radius.full,
-    backgroundColor: '#e2e8f0',
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -596,6 +605,24 @@ const styles = StyleSheet.create({
     lineHeight: 21,
     marginBottom: sp.sm,
   },
+  fileButton: {
+    alignSelf: 'flex-start',
+    maxWidth: '100%',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: '#eff6ff',
+    borderRadius: radius.full,
+    paddingHorizontal: sp.sm,
+    paddingVertical: 7,
+    marginBottom: sp.sm,
+  },
+  fileButtonText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#1d4ed8',
+    maxWidth: 250,
+  },
   hashTagRow: {
     flexDirection: 'row',
     flexWrap: 'wrap',
@@ -685,8 +712,24 @@ const styles = StyleSheet.create({
     padding: sp.lg,
     gap: sp.sm,
   },
+  detailAuthorRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: sp.sm,
+  },
+  detailAvatarWrap: {
+    width: 40,
+    height: 40,
+    borderRadius: radius.full,
+    backgroundColor: '#dbeafe',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  detailAuthorTextWrap: {
+    flex: 1,
+  },
   detailSchoolName: {
-    fontSize: 18,
+    fontSize: 16,
     fontWeight: '700',
     color: '#0f172a',
   },
@@ -712,6 +755,24 @@ const styles = StyleSheet.create({
     color: '#334155',
     lineHeight: 23,
     marginTop: sp.xs,
+  },
+  detailFileButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: '#eff6ff',
+    borderWidth: 1,
+    borderColor: '#bfdbfe',
+    borderRadius: radius.lg,
+    paddingHorizontal: sp.md,
+    paddingVertical: sp.sm,
+    marginTop: sp.xs,
+  },
+  detailFileButtonText: {
+    flex: 1,
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#1d4ed8',
   },
   imageViewerBackdrop: {
     ...StyleSheet.absoluteFillObject,

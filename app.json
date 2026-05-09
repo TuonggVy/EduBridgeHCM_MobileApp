@@ -4,7 +4,7 @@
     "slug": "EduBridgeHCM_MobileApp",
     "version": "1.0.0",
     "orientation": "portrait",
-    "icon": "./assets/icon.png",
+    "icon": "./assets/LogoEdu2-removebg-preview.png",
     "userInterfaceStyle": "light",
     "splash": {
       "image": "./assets/splash-icon.png",
@@ -13,8 +13,10 @@
     },
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.edubridge.hcm",
+      "bundleIdentifier": "com.sp26se041.edubridgehcm.mobile.ios",
+      "googleServicesFile": "./GoogleService-Info.plist",
       "infoPlist": {
+        "NSUserNotificationsUsageDescription": "EduBridge gửi thông báo về hoạt động và cập nhật quan trọng.",
         "NSLocationWhenInUseUsageDescription": "EduBridge cần quyền vị trí để hiển thị các trường gần bạn.",
         "NSCameraUsageDescription": "EduBridge cần quyền camera để chụp ảnh học bạ.",
         "NSPhotoLibraryUsageDescription": "EduBridge cần quyền thư viện ảnh để chọn ảnh học bạ.",
@@ -23,16 +25,16 @@
     },
     "android": {
       "adaptiveIcon": {
-        "backgroundColor": "#E6F4FE",
-        "foregroundImage": "./assets/android-icon-foreground.png",
-        "backgroundImage": "./assets/android-icon-background.png",
-        "monochromeImage": "./assets/android-icon-monochrome.png"
+        "backgroundColor": "#ffffff",
+        "foregroundImage": "./assets/LogoEdu2-removebg-preview.png"
       },
       "predictiveBackGestureEnabled": false,
-      "package": "com.edubridge.hcm",
+      "package": "com.sp26se041.edubridgehcm.mobile.android",
+      "googleServicesFile": "./google-services.json",
       "permissions": [
         "ACCESS_COARSE_LOCATION",
-        "ACCESS_FINE_LOCATION"
+        "ACCESS_FINE_LOCATION",
+        "android.permission.POST_NOTIFICATIONS"
       ]
     },
     "web": {
@@ -42,7 +44,7 @@
       [
         "@react-native-google-signin/google-signin",
         {
-          "iosUrlScheme": "com.googleusercontent.apps.655929399159-kt2nf9h0qjj3dcnm2ue6opjmtac3rl8l"
+          "iosUrlScheme": "com.googleusercontent.apps.552134784046-48l3bhbcdqo2mp8c7te1q53f4feri00o"
         }
       ],
       [
@@ -57,7 +59,9 @@
         {
           "locationWhenInUsePermission": "EduBridge cần quyền vị trí để tìm trường gần bạn."
         }
-      ]
+      ],
+      "@react-native-firebase/app",
+      "@react-native-firebase/messaging"
     ]
   }
 }

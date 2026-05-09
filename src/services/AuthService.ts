@@ -16,7 +16,7 @@ export type RegisterWithGoogleResult =
   | { success: false; error: string };
 
 const PARENT_ROLE = 'PARENT';
-const GOOGLE_ANDROID_PACKAGE = 'com.edubridge.hcm';
+const GOOGLE_ANDROID_PACKAGE = 'com.sp26se041.edubridgehcm.mobile.android';
 
 function mapGoogleSigninError(error: unknown): string {
   if (isErrorWithCode(error)) {

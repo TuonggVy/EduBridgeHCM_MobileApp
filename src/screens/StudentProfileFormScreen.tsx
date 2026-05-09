@@ -12,6 +12,7 @@ import {
   Platform,
   Image,
   Dimensions,
+  StatusBar,
   findNodeHandle,
   UIManager,
 } from 'react-native';
@@ -43,7 +44,7 @@ const PRIMARY = '#1976d2';
 const GRADIENT_SAVE = ['#1976d2', '#42a5f5'] as const;
 const sp = { xs: 8, sm: 12, md: 16, lg: 20 } as const;
 const radius = { md: 12, lg: 16, xl: 20, full: 9999 } as const;
-const { width: WIN_W } = Dimensions.get('window');
+const { width: WIN_W, height: WIN_H } = Dimensions.get('window');
 const GRID_GAP = 10;
 const CARD_W = (WIN_W - 40 - GRID_GAP) / 2;
 
@@ -332,6 +333,10 @@ export default function StudentProfileFormScreen({ visible, initialStudent, onCl
   const [transcriptPreviewOpen, setTranscriptPreviewOpen] = useState(false);
   const [transcriptPreview, setTranscriptPreview] = useState<AcademicInfo[]>([]);
   const [transcriptExtracting, setTranscriptExtracting] = useState(false);
+  const [transcriptImageViewer, setTranscriptImageViewer] = useState<{
+    uri: string;
+    label: string;
+  } | null>(null);
 
   const [saving, setSaving] = useState(false);
   const [jobSuggestOpen, setJobSuggestOpen] = useState(false);
@@ -1130,9 +1135,23 @@ export default function StudentProfileFormScreen({ visible, initialStudent, onCl
                       if (!item?.localUri) return null;
                       return (
                         <View style={styles.uploadPreviewRow}>
-                          <Image source={{ uri: item.localUri }} style={styles.uploadThumb} />
+                          <Pressable
+                            onPress={() =>
+                              setTranscriptImageViewer({
+                                uri: item.localUri!,
+                                label: `Ảnh học bạ ${gradeLevelDisplayValue(block.gradeLevel)}`,
+                              })
+                            }
+                            style={styles.uploadThumbPressable}
+                          >
+                            <Image source={{ uri: item.localUri }} style={styles.uploadThumb} />
+                            <View style={styles.uploadThumbZoomBadge}>
+                              <Ionicons name="expand-outline" size={12} color="#fff" />
+                            </View>
+                          </Pressable>
                           <View style={{ flex: 1 }}>
                             <Text style={styles.uploadPreviewTxt}>Ảnh học bạ {gradeLevelDisplayValue(block.gradeLevel)}</Text>
+                            <Text style={styles.uploadPreviewHint}>Nhấn vào ảnh để phóng to</Text>
                             {!!item.error && <Text style={styles.uploadErrorTxt}>{item.error}</Text>}
                           </View>
                           <Pressable onPress={() => removeTranscriptUpload(grade)} style={styles.trashBtn}>
@@ -1312,6 +1331,56 @@ export default function StudentProfileFormScreen({ visible, initialStudent, onCl
             </View>
           </View>
         </Modal>
+
+        <Modal
+          visible={transcriptImageViewer != null}
+          transparent
+          animationType="fade"
+          statusBarTranslucent
+          onRequestClose={() => setTranscriptImageViewer(null)}
+        >
+          <View style={styles.imageViewerBackdrop}>
+            <StatusBar barStyle="light-content" backgroundColor="#000" />
+            <Pressable
+              style={styles.imageViewerCloseBtn}
+              onPress={() => setTranscriptImageViewer(null)}
+              hitSlop={10}
+            >
+              <Ionicons name="close" size={26} color="#fff" />
+            </Pressable>
+            {transcriptImageViewer ? (
+              <ScrollView
+                style={styles.imageViewerScroll}
+                contentContainerStyle={styles.imageViewerScrollContent}
+                maximumZoomScale={4}
+                minimumZoomScale={1}
+                pinchGestureEnabled
+                showsHorizontalScrollIndicator={false}
+                showsVerticalScrollIndicator={false}
+                centerContent
+                bouncesZoom
+              >
+                <Pressable onPress={() => setTranscriptImageViewer(null)}>
+                  <Image
+                    source={{ uri: transcriptImageViewer.uri }}
+                    style={styles.imageViewerImage}
+                    resizeMode="contain"
+                  />
+                </Pressable>
+              </ScrollView>
+            ) : null}
+            {transcriptImageViewer ? (
+              <View style={styles.imageViewerFooter}>
+                <Text numberOfLines={1} style={styles.imageViewerLabel}>
+                  {transcriptImageViewer.label}
+                </Text>
+                <Text style={styles.imageViewerHint}>
+                  {Platform.OS === 'ios' ? 'Chụm hai ngón để phóng to' : 'Nhấn ra ngoài để đóng'}
+                </Text>
+              </View>
+            ) : null}
+          </View>
+        </Modal>
       </KeyboardAvoidingView>
     </Modal>
   );
@@ -1486,7 +1555,57 @@ const styles = StyleSheet.create({
     padding: 8,
   },
   uploadThumb: { width: 56, height: 56, borderRadius: 8, backgroundColor: '#e2e8f0' },
+  uploadThumbPressable: { position: 'relative' },
+  uploadThumbZoomBadge: {
+    position: 'absolute',
+    right: 2,
+    bottom: 2,
+    width: 18,
+    height: 18,
+    borderRadius: 9,
+    backgroundColor: 'rgba(15, 23, 42, 0.7)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   uploadPreviewTxt: { fontSize: 12, fontWeight: '600', color: '#334155' },
+  uploadPreviewHint: { fontSize: 11, color: '#64748b', marginTop: 2 },
+  imageViewerBackdrop: {
+    flex: 1,
+    backgroundColor: '#000',
+  },
+  imageViewerCloseBtn: {
+    position: 'absolute',
+    top: Platform.OS === 'ios' ? 54 : (StatusBar.currentHeight ?? 24) + 12,
+    right: 16,
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    backgroundColor: 'rgba(255, 255, 255, 0.18)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 10,
+  },
+  imageViewerScroll: { flex: 1 },
+  imageViewerScrollContent: {
+    flexGrow: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  imageViewerImage: {
+    width: WIN_W,
+    height: WIN_H,
+  },
+  imageViewerFooter: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: Platform.OS === 'ios' ? 32 : 20,
+    paddingHorizontal: 24,
+    alignItems: 'center',
+    gap: 4,
+  },
+  imageViewerLabel: { color: '#fff', fontSize: 14, fontWeight: '700' },
+  imageViewerHint: { color: 'rgba(255,255,255,0.7)', fontSize: 12 },
   uploadErrorTxt: { marginTop: 2, fontSize: 11, color: '#dc2626' },
   autoFillBtn: { marginTop: 10, borderRadius: radius.md, overflow: 'hidden' },
   autoFillGrad: {

@@ -80,7 +80,6 @@ export default function SearchScreen({
       name={school.name}
       description={school.description}
       imageUrl={school.logoUrl}
-      rating={school.averageRating}
       totalCampus={school.totalCampus}
       isFavourite={favouriteMap?.[school.id] ?? school.isFavourite}
       onToggleFavourite={() => onToggleFavourite?.(school.id)}

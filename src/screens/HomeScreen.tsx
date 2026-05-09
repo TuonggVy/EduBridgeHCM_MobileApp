@@ -9,6 +9,7 @@ import {
   StatusBar,
   Modal,
   Alert,
+  AppState,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 const MaterialIcons = require('@expo/vector-icons').MaterialIcons;
@@ -17,7 +18,6 @@ import SearchScreen from './SearchScreen';
 import {
   HomeTabScreen,
   SchoolsTabScreen,
-  NewsTabScreen,
   AccountTabScreen,
   sp,
   radius,
@@ -53,6 +53,16 @@ import FavouriteSchoolsScreen from './FavouriteSchoolsScreen';
 import PostFeedScreen from './PostFeedScreen';
 import AiAssistantChatScreen from './AiAssistantChatScreen';
 import ConsultationBookingScreen from './ConsultationBookingScreen';
+import ConsultationHistoryScreen from './ConsultationHistoryScreen';
+import SchoolCompareScreen from './SchoolCompareScreen';
+import NotificationsScreen from './NotificationsScreen';
+import AdmissionReservationFormScreen from './AdmissionReservationFormScreen';
+import AdmissionReservationListScreen from './AdmissionReservationListScreen';
+import { fetchUnreadNotificationCount } from '../api/notifications';
+import {
+  subscribeNotificationInboxChanged,
+  subscribeNotificationRoute,
+} from '../services/NotificationNavigationBus';
 
 const HEADER_TOP_PADDING =
   Platform.OS === 'ios' ? 50 : (StatusBar.currentHeight ?? 24) + 8;
@@ -100,10 +110,11 @@ export default function HomeScreen() {
   const [showProfileSheet, setShowProfileSheet] = useState(false);
   const [showProfileForm, setShowProfileForm] = useState(false);
   const [chatView, setChatView] = useState<'app' | 'chat'>('app');
-  const [newsModalVisible, setNewsModalVisible] = useState(false);
   const [postFeedVisible, setPostFeedVisible] = useState(false);
   const [aiAssistantVisible, setAiAssistantVisible] = useState(false);
+  const [compareVisible, setCompareVisible] = useState(false);
   const [selectedConversation, setSelectedConversation] = useState<ParentConversationsItem | null>(null);
+  const [returnToSchoolDetailAfterChat, setReturnToSchoolDetailAfterChat] = useState(false);
 
   const [students, setStudents] = useState<ParentStudentProfile[]>([]);
   const [studentsLoading, setStudentsLoading] = useState(false);
@@ -127,7 +138,13 @@ export default function HomeScreen() {
   const [favouriteModalVisible, setFavouriteModalVisible] = useState(false);
   const [favouriteIdBySchoolId, setFavouriteIdBySchoolId] = useState<Record<number, number>>({});
   const [consultBookingVisible, setConsultBookingVisible] = useState(false);
+  const [consultHistoryVisible, setConsultHistoryVisible] = useState(false);
+  const [notificationsVisible, setNotificationsVisible] = useState(false);
+  const [unreadNotificationCount, setUnreadNotificationCount] = useState(0);
   const [consultBookingSchool, setConsultBookingSchool] = useState<SchoolDetail | null>(null);
+  const [reservationFormVisible, setReservationFormVisible] = useState(false);
+  const [selectedCampusProgramOfferingId, setSelectedCampusProgramOfferingId] = useState<number | null>(null);
+  const [reservationListVisible, setReservationListVisible] = useState(false);
 
   const refreshStudents = useCallback(async () => {
     try {
@@ -323,9 +340,8 @@ export default function HomeScreen() {
           schoolName: selectedSchoolDetail.name,
           schoolLogoUrl: resolvedSchoolLogoUrl,
         });
+        setReturnToSchoolDetailAfterChat(true);
         setSchoolDetailVisible(false);
-        setSelectedSchoolId(null);
-        setSelectedSchoolDetail(null);
         closeStudentPicker();
         setChatView('chat');
       };
@@ -438,6 +454,95 @@ export default function HomeScreen() {
     refreshSchools();
   }, [refreshSchools]);
 
+  const refreshUnreadNotificationCount = useCallback(async () => {
+    if (!user?.email) {
+      setUnreadNotificationCount(0);
+      return;
+    }
+    try {
+      const count = await fetchUnreadNotificationCount();
+      setUnreadNotificationCount(count);
+    } catch {
+      // Bỏ qua lỗi lấy badge count.
+    }
+  }, [user?.email]);
+
+  const openRouteFromNotification = useCallback((route: string | null) => {
+    const normalized = (route ?? '').trim().toLowerCase();
+    if (normalized === '/parent/consultation') {
+      setConsultHistoryVisible(true);
+      return;
+    }
+    if (normalized === '/posts') {
+      setPostFeedVisible(true);
+      return;
+    }
+    setActiveTab('home');
+  }, []);
+
+  useEffect(() => {
+    void refreshUnreadNotificationCount();
+  }, [refreshUnreadNotificationCount]);
+
+  useEffect(() => {
+    const unsubscribe = subscribeNotificationRoute((route) => {
+      openRouteFromNotification(route);
+      void refreshUnreadNotificationCount();
+    });
+    return unsubscribe;
+  }, [openRouteFromNotification, refreshUnreadNotificationCount]);
+
+  useEffect(() => {
+    const unsubscribe = subscribeNotificationInboxChanged(() => {
+      void refreshUnreadNotificationCount();
+    });
+    return unsubscribe;
+  }, [refreshUnreadNotificationCount]);
+
+  useEffect(() => {
+    if (!user?.email) return;
+    let mounted = true;
+    let inFlight = false;
+    const tick = async () => {
+      if (!mounted || inFlight) return;
+      inFlight = true;
+      try {
+        await refreshUnreadNotificationCount();
+      } finally {
+        inFlight = false;
+      }
+    };
+
+    const startPolling = () => {
+      void tick();
+      return setInterval(() => {
+        void tick();
+      }, 2000);
+    };
+
+    let intervalId: ReturnType<typeof setInterval> | null = null;
+    let appState = AppState.currentState;
+    if (appState === 'active') {
+      intervalId = startPolling();
+    }
+
+    const sub = AppState.addEventListener('change', (nextState) => {
+      appState = nextState;
+      if (nextState === 'active') {
+        if (!intervalId) intervalId = startPolling();
+      } else if (intervalId) {
+        clearInterval(intervalId);
+        intervalId = null;
+      }
+    });
+
+    return () => {
+      mounted = false;
+      if (intervalId) clearInterval(intervalId);
+      sub.remove();
+    };
+  }, [refreshUnreadNotificationCount, user?.email]);
+
   useEffect(() => {
     if (activeTab !== 'account' || !user) return;
     let cancelled = false;
@@ -524,7 +629,13 @@ export default function HomeScreen() {
         studentName={selectedConversation.studentName ?? undefined}
         initialLastMessageContent={selectedConversation.lastMessageContent ?? undefined}
         initialLastMessageAt={selectedConversation.lastMessageAt ?? undefined}
-        onBack={() => setChatView('app')}
+        onBack={() => {
+          setChatView('app');
+          if (returnToSchoolDetailAfterChat && selectedSchoolDetail) {
+            setSchoolDetailVisible(true);
+          }
+          setReturnToSchoolDetailAfterChat(false);
+        }}
       />
     );
   }
@@ -550,8 +661,18 @@ export default function HomeScreen() {
                   Tìm trường, địa điểm...
                 </Text>
               </Pressable>
-              <Pressable style={styles.notifButton}>
+              <Pressable
+                style={styles.notifButton}
+                onPress={() => setNotificationsVisible(true)}
+              >
                 <MaterialIcons name="notifications-none" size={24} color="#fff" />
+                {unreadNotificationCount > 0 ? (
+                  <View style={styles.notifBadge}>
+                    <Text style={styles.notifBadgeText}>
+                      {unreadNotificationCount > 99 ? '99+' : unreadNotificationCount}
+                    </Text>
+                  </View>
+                ) : null}
               </Pressable>
             </View>
           </View>
@@ -588,6 +709,7 @@ export default function HomeScreen() {
             showNavigationHeader={false}
             onOpenChat={(conversation) => {
               setSelectedConversation(conversation);
+              setReturnToSchoolDetailAfterChat(false);
               setChatView('chat');
             }}
           />
@@ -606,7 +728,8 @@ export default function HomeScreen() {
                 onToggleFavourite={toggleSchoolFavourite}
                 onViewAllFeaturedSchools={() => setActiveTab('schools')}
                 onOpenConsult={() => setActiveTab('consult')}
-                onOpenNews={() => setNewsModalVisible(true)}
+                onOpenConsultationHistory={() => setConsultHistoryVisible(true)}
+                onOpenCompare={() => setCompareVisible(true)}
                 onOpenPosts={() => setPostFeedVisible(true)}
                 onOpenAiAssistant={() => setAiAssistantVisible(true)}
               />
@@ -626,6 +749,11 @@ export default function HomeScreen() {
                   setShowStudentProfile(true);
                 }}
                 onOpenFavourites={() => setFavouriteModalVisible(true)}
+                onOpenConsultationHistory={() => {
+                  setConsultHistoryVisible(true);
+                }}
+                onOpenCompare={() => setCompareVisible(true)}
+                onOpenReservationForms={() => setReservationListVisible(true)}
               />
             )}
             <View style={styles.bottomSpacer} />
@@ -655,6 +783,26 @@ export default function HomeScreen() {
       </View>
 
       <Modal
+        visible={compareVisible}
+        animationType="slide"
+        presentationStyle="fullScreen"
+        onRequestClose={() => setCompareVisible(false)}
+      >
+        <SchoolCompareScreen
+          onClose={() => setCompareVisible(false)}
+          allSchools={schools}
+          onOpenSchoolDetail={(schoolId) => {
+            setCompareVisible(false);
+            void openSchoolDetail(schoolId);
+          }}
+          onToggleFavourite={toggleSchoolFavourite}
+          getIsFavourite={(schoolId) =>
+            schools.find((s) => s.id === schoolId)?.isFavourite ?? false
+          }
+        />
+      </Modal>
+
+      <Modal
         visible={postFeedVisible}
         animationType="slide"
         presentationStyle="fullScreen"
@@ -676,26 +824,6 @@ export default function HomeScreen() {
       </Modal>
 
       <Modal
-        visible={newsModalVisible}
-        animationType="slide"
-        presentationStyle="fullScreen"
-        onRequestClose={() => setNewsModalVisible(false)}
-      >
-        <View style={styles.newsModalScreen}>
-          <View style={[styles.newsModalHeader, { paddingTop: HEADER_TOP_PADDING }]}>
-            <Pressable onPress={() => setNewsModalVisible(false)} hitSlop={12} style={styles.newsModalBack}>
-              <MaterialIcons name="arrow-back" size={24} color="#0f172a" />
-            </Pressable>
-            <Text style={styles.newsModalTitle}>Tin tức</Text>
-            <View style={styles.newsModalHeaderSpacer} />
-          </View>
-          <View style={styles.newsModalBody}>
-            <NewsTabScreen />
-          </View>
-        </View>
-      </Modal>
-
-      <Modal
         visible={searchVisible}
         animationType="slide"
         presentationStyle="fullScreen"
@@ -712,6 +840,25 @@ export default function HomeScreen() {
           onToggleFavourite={toggleSchoolFavourite}
           onClearRecent={() => setRecentSearches([])}
           onAddRecent={addRecent}
+        />
+      </Modal>
+
+      <Modal
+        visible={notificationsVisible}
+        animationType="slide"
+        presentationStyle="fullScreen"
+        onRequestClose={() => setNotificationsVisible(false)}
+      >
+        <NotificationsScreen
+          visible={notificationsVisible}
+          onClose={() => {
+            setNotificationsVisible(false);
+            void refreshUnreadNotificationCount();
+          }}
+          onOpenRoute={openRouteFromNotification}
+          onUnreadCountChanged={() => {
+            void refreshUnreadNotificationCount();
+          }}
         />
       </Modal>
 
@@ -766,6 +913,11 @@ export default function HomeScreen() {
           closeStudentPicker();
           setConsultBookingVisible(true);
         }}
+        onOpenAdmissionSubmission={({ campusProgramOfferingId }) => {
+          setSelectedCampusProgramOfferingId(campusProgramOfferingId);
+          setSchoolDetailVisible(false);
+          setReservationFormVisible(true);
+        }}
         onToggleFavourite={() => {
           if (selectedSchoolId != null) toggleSchoolFavourite(selectedSchoolId);
         }}
@@ -773,6 +925,7 @@ export default function HomeScreen() {
           setSchoolDetailVisible(false);
           setSelectedSchoolId(null);
           setSelectedSchoolDetail(null);
+          setReturnToSchoolDetailAfterChat(false);
           closeStudentPicker();
         }}
       />
@@ -791,6 +944,59 @@ export default function HomeScreen() {
             setConsultBookingSchool(null);
             if (selectedSchoolDetail) setSchoolDetailVisible(true);
           }}
+        />
+      </Modal>
+
+      <Modal
+        visible={reservationFormVisible}
+        animationType="slide"
+        presentationStyle="fullScreen"
+        onRequestClose={() => {
+          setReservationFormVisible(false);
+          setSelectedCampusProgramOfferingId(null);
+          if (selectedSchoolDetail) setSchoolDetailVisible(true);
+        }}
+      >
+        <AdmissionReservationFormScreen
+          visible={reservationFormVisible}
+          campusProgramOfferingId={selectedCampusProgramOfferingId}
+          onClose={() => {
+            setReservationFormVisible(false);
+            setSelectedCampusProgramOfferingId(null);
+            if (selectedSchoolDetail) setSchoolDetailVisible(true);
+          }}
+          onViewSubmittedForms={() => {
+            setReservationFormVisible(false);
+            setSelectedCampusProgramOfferingId(null);
+            setSchoolDetailVisible(false);
+            setReservationListVisible(true);
+          }}
+        />
+      </Modal>
+
+      <Modal
+        visible={reservationListVisible}
+        animationType="slide"
+        presentationStyle="fullScreen"
+        onRequestClose={() => setReservationListVisible(false)}
+      >
+        <AdmissionReservationListScreen
+          visible={reservationListVisible}
+          onClose={() => {
+            setReservationListVisible(false);
+          }}
+        />
+      </Modal>
+
+      <Modal
+        visible={consultHistoryVisible}
+        animationType="slide"
+        presentationStyle="fullScreen"
+        onRequestClose={() => setConsultHistoryVisible(false)}
+      >
+        <ConsultationHistoryScreen
+          visible={consultHistoryVisible}
+          onClose={() => setConsultHistoryVisible(false)}
         />
       </Modal>
 
@@ -892,6 +1098,24 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(255,255,255,0.22)',
     alignItems: 'center',
     justifyContent: 'center',
+    position: 'relative',
+  },
+  notifBadge: {
+    position: 'absolute',
+    right: -2,
+    top: -2,
+    minWidth: 18,
+    height: 18,
+    borderRadius: 9,
+    paddingHorizontal: 4,
+    backgroundColor: '#ef4444',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  notifBadgeText: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: '#fff',
   },
   scroll: {
     flex: 1,
@@ -936,37 +1160,5 @@ const styles = StyleSheet.create({
   },
   tabLabelActive: {
     color: '#1976d2',
-  },
-  newsModalScreen: {
-    flex: 1,
-    backgroundColor: '#f8fafc',
-  },
-  newsModalHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: sp.lg,
-    paddingBottom: sp.md,
-    backgroundColor: '#fff',
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: '#e2e8f0',
-  },
-  newsModalBack: {
-    width: 40,
-    height: 40,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  newsModalTitle: {
-    flex: 1,
-    fontSize: 20,
-    fontWeight: '700',
-    color: '#0f172a',
-    textAlign: 'center',
-  },
-  newsModalHeaderSpacer: {
-    width: 40,
-  },
-  newsModalBody: {
-    flex: 1,
   },
 });

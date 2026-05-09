@@ -10,27 +10,13 @@ import { useAuth } from '../../context/AuthContext';
 import { ConfirmDialog } from '../../components/ConfirmDialog';
 import type { ProfileGetBody } from '../../types/auth';
 import type { ParentStudentProfile } from '../../types/studentProfile';
-import { formatGradeLevel } from '../../utils/gradeLevel';
 import { MaterialIcons, sp, radius } from './tabConstants';
 
 const PROFILE_MENU_ACTIVITIES: { id: string; label: string; icon: string }[] = [
+  { id: 'reservationForms', label: 'Đơn giữ chỗ', icon: 'description' },
   { id: 'consultation', label: 'Lịch sử tư vấn', icon: 'forum' },
   { id: 'favourites', label: 'Trường yêu thích', icon: 'favorite' },
-  { id: 'application', label: 'Trạng thái hồ sơ', icon: 'description' },
-];
-
-const PROFILE_MENU_QUICK: { id: string; label: string; icon: string }[] = [
   { id: 'compare', label: 'So sánh trường', icon: 'compare-arrows' },
-  { id: 'plans', label: 'Kế hoạch tuyển sinh', icon: 'calendar-today' },
-  { id: 'notifications', label: 'Thông báo', icon: 'notifications-none' },
-  { id: 'support', label: 'Hỗ trợ', icon: 'help-outline' },
-];
-
-const PROFILE_MENU_SETTINGS: { id: string; label: string; icon: string }[] = [
-  { id: 'account', label: 'Tài khoản', icon: 'person-outline' },
-  { id: 'privacy', label: 'Quyền riêng tư', icon: 'security' },
-  { id: 'language', label: 'Ngôn ngữ', icon: 'language' },
-  { id: 'help', label: 'Trung tâm trợ giúp', icon: 'info' },
 ];
 
 export type AccountTabScreenProps = {
@@ -41,6 +27,9 @@ export type AccountTabScreenProps = {
   onAddChild: () => void;
   onOpenChild: (s: ParentStudentProfile) => void;
   onOpenFavourites: () => void;
+  onOpenConsultationHistory?: () => void;
+  onOpenCompare: () => void;
+  onOpenReservationForms?: () => void;
 };
 
 export function AccountTabScreen({
@@ -51,6 +40,9 @@ export function AccountTabScreen({
   onAddChild,
   onOpenChild,
   onOpenFavourites,
+  onOpenConsultationHistory,
+  onOpenCompare,
+  onOpenReservationForms,
 }: AccountTabScreenProps) {
   const { user, logout } = useAuth();
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
@@ -156,10 +148,6 @@ export function AccountTabScreen({
           <View style={styles.profileChildrenList}>
             {students.map((child, index) => {
               const key = child.id != null ? String(child.id) : `student-${index}`;
-              const grade = formatGradeLevel(child.academicInfos?.[0]?.gradeLevel);
-              const meta = [child.gender === 'MALE' ? 'Nam' : child.gender === 'FEMALE' ? 'Nữ' : child.gender, grade]
-                .filter(Boolean)
-                .join(' · ');
               return (
                 <Pressable
                   key={key}
@@ -171,9 +159,6 @@ export function AccountTabScreen({
                   </View>
                   <View style={styles.profileChildInfo}>
                     <Text style={styles.profileChildName}>{child.studentName}</Text>
-                    <Text style={styles.profileChildMeta} numberOfLines={1}>
-                      {meta || 'Xem hồ sơ chi tiết'}
-                    </Text>
                   </View>
                   <MaterialIcons name="chevron-right" size={20} color="#cbd5e1" />
                 </Pressable>
@@ -187,20 +172,11 @@ export function AccountTabScreen({
         title="Hoạt động của tôi"
         items={PROFILE_MENU_ACTIVITIES}
         onItemPress={(id) => {
+          if (id === 'reservationForms') onOpenReservationForms?.();
           if (id === 'favourites') onOpenFavourites();
+          if (id === 'consultation') onOpenConsultationHistory?.();
+          if (id === 'compare') onOpenCompare();
         }}
-      />
-
-      <MenuCard
-        title="Truy cập nhanh"
-        items={PROFILE_MENU_QUICK}
-        onItemPress={() => {}}
-      />
-
-      <MenuCard
-        title="Cài đặt"
-        items={PROFILE_MENU_SETTINGS}
-        onItemPress={() => {}}
       />
 
       <Pressable
@@ -346,16 +322,12 @@ const styles = StyleSheet.create({
   },
   profileChildInfo: {
     flex: 1,
+    justifyContent: 'center',
   },
   profileChildName: {
     fontSize: 16,
     fontWeight: '600',
     color: '#0f172a',
-  },
-  profileChildMeta: {
-    fontSize: 13,
-    color: '#64748b',
-    marginTop: 2,
   },
   profileChildrenSkeleton: {
     paddingVertical: 24,

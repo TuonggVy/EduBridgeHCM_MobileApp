@@ -25,7 +25,12 @@ import type { SchoolCampaignTemplate } from '../types/school';
 import type { ParentStudentProfile } from '../types/studentProfile';
 import { fetchSchoolCampaignTemplates, fetchSchoolPublicDetail, searchNearbyCampus } from '../api/school';
 import { bookOfflineConsultation, fetchParentConsultationSlots } from '../api/parentConsultation';
-import type { ParentConsultationSlot } from '../types/consultation';
+import {
+  type ParentConsultationSlot,
+  isParentConsultationSlotBookable,
+  isParentConsultationSlotPressable,
+  parentConsultationSlotDisplayLine,
+} from '../types/consultation';
 import {
   badgePillStyle,
   getCurriculumStatusBadgeColors,
@@ -40,6 +45,7 @@ import {
 
 const HEADER_TOP = Platform.OS === 'ios' ? 50 : (StatusBar.currentHeight ?? 24) + 8;
 const SCREEN_WIDTH = Dimensions.get('window').width;
+const FACILITY_COLLAPSED_COUNT = 4;
 
 /** Bán kính gọi nearby đủ rộng để vẫn nhận được các cơ sở của trường (km). */
 const NEARBY_SEARCH_RADIUS_KM = 50;
@@ -112,11 +118,168 @@ function hasFacilityData(facility: SchoolDetail['campusList'][number]['facility'
   return hasItems || hasCover || hasGallery;
 }
 
-/** Mở Google Maps với lộ trình tới điểm đích (ô tô). Hoạt động trên iOS/Android khi có app hoặc trình duyệt. */
-function openGoogleMapsDirections(lat: number, lng: number) {
-  const dest = encodeURIComponent(`${lat},${lng}`);
-  const url = `https://www.google.com/maps/dir/?api=1&destination=${dest}&travelmode=driving`;
+/** Mở Google Maps: ưu tiên tìm theo địa chỉ text, fallback theo tọa độ. */
+function openGoogleMapsDirections(address?: string | null, lat?: number | null, lng?: number | null) {
+  const addressText = (address ?? '').trim();
+  const query =
+    addressText ||
+    (typeof lat === 'number' && typeof lng === 'number' ? `${lat},${lng}` : '');
+  if (!query) return;
+  const dest = encodeURIComponent(query);
+  const url = `https://www.google.com/maps/search/?api=1&query=${dest}`;
   void Linking.openURL(url);
+}
+
+function getBoardingTypeLabel(boardingType?: string | null): string {
+  const normalized = (boardingType ?? '').trim().toUpperCase();
+  if (normalized === 'FULL_BOARDING') return 'Nội trú';
+  if (normalized === 'SEMI_BOARDING') return 'Bán trú';
+  if (normalized === 'BOTH') return 'Cả hai (Nội trú & Bán trú)';
+  return boardingType?.trim() || 'Đang cập nhật';
+}
+
+function getLearningModeLabel(learningMode?: string | null): string {
+  const normalized = (learningMode ?? '').trim().toUpperCase().replace(/[\s-]+/g, '_');
+  if (normalized === 'DAY_SCHOOL') return 'Học ban ngày';
+  if (normalized === 'BOARDING') return 'Nội trú';
+  if (normalized === 'SEMI_BOARDING') return 'Bán trú';
+  if (normalized === 'HALF_DAY') return 'Bán ngày';
+  return learningMode?.trim() || 'Đang cập nhật';
+}
+
+function getOfferingStatusLabel(status?: string | null): string {
+  const normalized = (status ?? '').trim().toUpperCase().replace(/[\s-]+/g, '_');
+  if (normalized === 'OPEN') return 'Đang mở';
+  if (normalized === 'UPCOMING_OFFERING' || normalized === 'UPCOMING') return 'Sắp mở';
+  if (normalized === 'DRAFT') return 'Nháp';
+  if (normalized === 'CLOSED') return 'Đã đóng';
+  if (normalized === 'PAUSED') return 'Tạm dừng';
+  if (normalized === 'FULL' || normalized === 'FULLED') return 'Hết chỉ tiêu';
+  if (normalized === 'EXPIRED') return 'Hết hạn';
+  return status?.trim() || 'Đang cập nhật';
+}
+
+function getOfferingStatusColors(status?: string | null): { bg: string; text: string } {
+  const normalized = (status ?? '').trim().toUpperCase().replace(/[\s-]+/g, '_');
+  if (normalized === 'OPEN') return { bg: '#dcfce7', text: '#15803d' };
+  if (normalized === 'UPCOMING_OFFERING' || normalized === 'UPCOMING') return { bg: '#ede9fe', text: '#6d28d9' };
+  if (normalized === 'DRAFT') return { bg: '#f1f5f9', text: '#475569' };
+  if (normalized === 'CLOSED' || normalized === 'PAUSED' || normalized === 'FULL' || normalized === 'FULLED') {
+    return { bg: '#fee2e2', text: '#b91c1c' };
+  }
+  if (normalized === 'EXPIRED') return { bg: '#fef3c7', text: '#b45309' };
+  return { bg: '#f1f5f9', text: '#475569' };
+}
+
+/** Nút Nộp hồ sơ chỉ khi phương thức của gói (`admissionMethod`) cho phép giữ chỗ trên timeline chiến dịch. */
+function canShowReservationSubmitForOffering(
+  campaign: SchoolCampaignTemplate,
+  offering: Record<string, unknown>
+): boolean {
+  const methodCode =
+    typeof offering.admissionMethod === 'string' ? offering.admissionMethod.trim() : '';
+  if (!methodCode) return false;
+  const detail = campaign.admissionMethodDetails.find((m) => m.methodCode === methodCode);
+  if (!detail) return false;
+  return detail.allowReservationSubmission === true;
+}
+
+function buildCurriculumListFromCampaignTemplates(
+  campaigns: SchoolCampaignTemplate[]
+): SchoolDetail['curriculumList'] {
+  const byGroupCode = new Map<string, SchoolDetail['curriculumList'][number]>();
+
+  campaigns.forEach((campaign, campaignIdx) => {
+    campaign.campusProgramOfferings.forEach((offering, offeringIdx) => {
+      const offeringRaw = offering as Record<string, unknown>;
+      const programRaw =
+        offeringRaw.program && typeof offeringRaw.program === 'object'
+          ? (offeringRaw.program as Record<string, unknown>)
+          : null;
+      const curriculumRaw =
+        offeringRaw.curriculum && typeof offeringRaw.curriculum === 'object'
+          ? (offeringRaw.curriculum as Record<string, unknown>)
+          : programRaw?.curriculum && typeof programRaw.curriculum === 'object'
+            ? (programRaw.curriculum as Record<string, unknown>)
+            : null;
+      if (!curriculumRaw && !programRaw) return;
+
+      const fallbackName =
+        typeof programRaw?.name === 'string' && programRaw.name.trim()
+          ? programRaw.name.trim()
+          : `Chương trình ${offeringIdx + 1}`;
+      const curriculumName =
+        typeof curriculumRaw?.name === 'string' && curriculumRaw.name.trim()
+          ? curriculumRaw.name.trim()
+          : fallbackName;
+      const groupCode =
+        typeof curriculumRaw?.groupCode === 'string' && curriculumRaw.groupCode.trim()
+          ? curriculumRaw.groupCode.trim()
+          : `campaign-${campaign.id ?? campaignIdx}-curriculum-${offeringIdx}`;
+
+      const existing = byGroupCode.get(groupCode);
+      const subjectsJsonb = Array.isArray(curriculumRaw?.subjectOptions)
+        ? curriculumRaw.subjectOptions
+            .filter((subject): subject is Record<string, unknown> => !!subject && typeof subject === 'object')
+            .map((subject) => ({
+              name: typeof subject.name === 'string' ? subject.name : 'Môn học',
+              description: typeof subject.description === 'string' ? subject.description : null,
+              isMandatory: Boolean(subject.isMandatory),
+            }))
+        : [];
+      const methodLearningList = Array.isArray(curriculumRaw?.methodLearnings)
+        ? curriculumRaw.methodLearnings.filter((method): method is string => typeof method === 'string')
+        : [];
+
+      const base =
+        existing ??
+        ({
+          curriculumStatus:
+            typeof curriculumRaw?.status === 'string' && curriculumRaw.status ? curriculumRaw.status : 'UNKNOWN',
+          methodLearningList,
+          applicationYear:
+            typeof curriculumRaw?.applicationYear === 'number'
+              ? curriculumRaw.applicationYear
+              : typeof campaign.year === 'number'
+                ? campaign.year
+                : new Date().getFullYear(),
+          name: curriculumName,
+          description: typeof curriculumRaw?.description === 'string' ? curriculumRaw.description : null,
+          programList: [],
+          subjectsJsonb,
+          curriculumType:
+            typeof curriculumRaw?.curriculumType === 'string' && curriculumRaw.curriculumType
+              ? curriculumRaw.curriculumType
+              : 'UNKNOWN',
+          groupCode,
+        } satisfies SchoolDetail['curriculumList'][number]);
+
+      const programName =
+        typeof programRaw?.name === 'string' && programRaw.name.trim() ? programRaw.name.trim() : curriculumName;
+      const existingProgram = base.programList.find((program) => program.name === programName);
+      if (existingProgram) {
+        existingProgram.campusProgramOfferingList.push(offeringRaw);
+      } else {
+        base.programList.push({
+          baseTuitionFee:
+            typeof programRaw?.baseTuitionFee === 'number' && Number.isFinite(programRaw.baseTuitionFee)
+              ? programRaw.baseTuitionFee
+              : null,
+          targetStudentDescription:
+            typeof programRaw?.targetStudentDescription === 'string' ? programRaw.targetStudentDescription : null,
+          name: programName,
+          campusProgramOfferingList: [offeringRaw],
+          graduationStandard:
+            typeof programRaw?.graduationStandard === 'string' ? programRaw.graduationStandard : null,
+          isActive: typeof programRaw?.status === 'string' ? programRaw.status : null,
+        });
+      }
+
+      byGroupCode.set(groupCode, base);
+    });
+  });
+
+  return Array.from(byGroupCode.values());
 }
 
 type Props = {
@@ -129,6 +292,11 @@ type Props = {
   onToggleFavourite: () => void;
   onContactConsult?: (campusId: number) => void;
   onOpenConsultBooking?: () => void;
+  onOpenAdmissionSubmission?: (payload: {
+    campusProgramOfferingId: number;
+    campusName: string;
+    programName: string;
+  }) => void;
   studentPickerVisible?: boolean;
   studentPickerOptions?: ParentStudentProfile[];
   studentPickerCampusName?: string | null;
@@ -274,6 +442,7 @@ export function SchoolDetailModal({
   onToggleFavourite,
   onContactConsult,
   onOpenConsultBooking,
+  onOpenAdmissionSubmission,
   studentPickerVisible = false,
   studentPickerOptions = [],
   studentPickerCampusName = null,
@@ -294,6 +463,7 @@ export function SchoolDetailModal({
   const [expandedProgram, setExpandedProgram] = useState<Record<string, boolean>>({});
   const [expandedProgramGraduation, setExpandedProgramGraduation] = useState<Record<string, boolean>>({});
   const [expandedCampus, setExpandedCampus] = useState<Record<number, boolean>>({});
+  const [expandedFacility, setExpandedFacility] = useState<Record<number, boolean>>({});
   const [distancesKmByCampusId, setDistancesKmByCampusId] = useState<Record<number, number>>({});
   const [campaignTemplates, setCampaignTemplates] = useState<SchoolCampaignTemplate[]>([]);
   const [campaignLoading, setCampaignLoading] = useState(false);
@@ -322,14 +492,24 @@ export function SchoolDetailModal({
   const [consultSlotsLoading, setConsultSlotsLoading] = useState(false);
   const [consultSlotsError, setConsultSlotsError] = useState<string | null>(null);
   const [consultSlotsByDate, setConsultSlotsByDate] = useState<Record<string, ParentConsultationSlot[]>>({});
+  const [consultSlotsRefreshTick, setConsultSlotsRefreshTick] = useState(0);
   const [bookingPhone, setBookingPhone] = useState('');
   const [bookingQuestion, setBookingQuestion] = useState('');
   const [bookingSubmitting, setBookingSubmitting] = useState(false);
   const facilityViewerListRef = useRef<FlatList<FacilityImage> | null>(null);
+  const curriculumFromCampaigns = useMemo(
+    () => buildCurriculumListFromCampaignTemplates(campaignTemplates),
+    [campaignTemplates]
+  );
 
   const curriculumList = useMemo(
-    () => (apiCurriculumList.length > 0 ? apiCurriculumList : school?.curriculumList ?? []),
-    [apiCurriculumList, school?.curriculumList]
+    () =>
+      curriculumFromCampaigns.length > 0
+        ? curriculumFromCampaigns
+        : apiCurriculumList.length > 0
+          ? apiCurriculumList
+          : school?.curriculumList ?? [],
+    [curriculumFromCampaigns, apiCurriculumList, school?.curriculumList]
   );
   const campusList = useMemo(() => school?.campusList ?? [], [school?.campusList]);
   const consultCampuses = useMemo(() => campusList, [campusList]);
@@ -346,8 +526,15 @@ export function SchoolDetailModal({
     [consultSlotsByDate, selectedConsultDate]
   );
   const upcomingSlotsCount = useMemo(
-    () => selectedDateSlots.filter((slot) => slot.status === 'UPCOMING').length,
+    () => selectedDateSlots.filter((slot) => isParentConsultationSlotBookable(slot, selectedDateSlots)).length,
     [selectedDateSlots]
+  );
+  const selectedConsultSlotBookable = useMemo(
+    () =>
+      selectedConsultSlot != null
+        ? isParentConsultationSlotBookable(selectedConsultSlot, selectedDateSlots)
+        : false,
+    [selectedConsultSlot, selectedDateSlots]
   );
   const displayHotline = apiSchoolContact.hotline ?? school?.hotline ?? null;
   const displayEmailSupport = apiSchoolContact.emailSupport ?? school?.emailSupport ?? null;
@@ -391,6 +578,7 @@ export function SchoolDetailModal({
   useEffect(() => {
     if (!visible) {
       setDistancesKmByCampusId({});
+      setExpandedFacility({});
       setCampusPickerVisible(false);
       setConsultCampusPickerVisible(false);
       setConsultBookingVisible(false);
@@ -419,6 +607,9 @@ export function SchoolDetailModal({
           if (!grouped[slot.date]) grouped[slot.date] = [];
           grouped[slot.date].push(slot);
         }
+        for (const key of Object.keys(grouped)) {
+          grouped[key].sort((a, b) => a.startTime.localeCompare(b.startTime));
+        }
         setConsultSlotsByDate(grouped);
       })
       .catch((error: unknown) => {
@@ -434,7 +625,7 @@ export function SchoolDetailModal({
     return () => {
       cancelled = true;
     };
-  }, [consultBookingVisible, selectedConsultCampusId, weekDates]);
+  }, [consultBookingVisible, selectedConsultCampusId, weekDates, consultSlotsRefreshTick]);
 
   useEffect(() => {
     if (!weekDateKeys.includes(selectedConsultDate)) {
@@ -566,6 +757,13 @@ export function SchoolDetailModal({
       Alert.alert('Chưa chọn khung giờ', 'Vui lòng chọn khung giờ tư vấn trước khi đặt lịch.');
       return;
     }
+    if (!isParentConsultationSlotBookable(selectedConsultSlot, selectedDateSlots)) {
+      return;
+    }
+    if (selectedConsultCampusId == null) {
+      Alert.alert('Chưa chọn cơ sở', 'Vui lòng chọn cơ sở trước khi đặt lịch.');
+      return;
+    }
     const phone = bookingPhone.trim();
     const question = bookingQuestion.trim();
     if (!phone) {
@@ -579,10 +777,13 @@ export function SchoolDetailModal({
         question,
         appointmentDate: selectedConsultSlot.date,
         appointmentTime: selectedConsultSlot.startTime,
+        campusId: selectedConsultCampusId,
       });
       setConsultFormVisible(false);
       setBookingPhone('');
       setBookingQuestion('');
+      setSelectedConsultSlot(null);
+      setConsultSlotsRefreshTick((t) => t + 1);
       Alert.alert('Đặt lịch thành công', 'Nhà trường sẽ liên hệ xác nhận lịch tư vấn với bạn.');
     } catch (error: unknown) {
       const message =
@@ -598,6 +799,15 @@ export function SchoolDetailModal({
   const handleOpenConsultForm = () => {
     if (!selectedConsultSlot) {
       Alert.alert('Chưa chọn khung giờ', 'Vui lòng chọn một slot tư vấn trước khi đặt lịch.');
+      return;
+    }
+    if (!isParentConsultationSlotBookable(selectedConsultSlot, selectedDateSlots)) {
+      Alert.alert(
+        'Không thể đặt thêm',
+        selectedConsultSlot.consultationOfflineRequest != null
+          ? 'Đây là lịch tư vấn bạn đã đặt trong ngày này.'
+          : 'Bạn chỉ có thể đặt một lịch tư vấn mỗi ngày. Vui lòng chọn ngày khác.'
+      );
       return;
     }
     setConsultFormVisible(true);
@@ -650,12 +860,6 @@ export function SchoolDetailModal({
             <View style={styles.content}>
               <View style={styles.card}>
                 <Text style={styles.name}>{school.name}</Text>
-                <View style={styles.metaRow}>
-                  <MaterialIcons name="star" size={16} color="#f59e0b" />
-                  <Text style={styles.meta}>
-                    {typeof school.averageRating === 'number' ? school.averageRating.toFixed(1) : 'Chưa có đánh giá'}
-                  </Text>
-                </View>
                 <View style={styles.metaRow}>
                   <MaterialIcons name="event" size={16} color="#64748b" />
                   <Text style={styles.meta}>{school.foundingDate ?? 'Đang cập nhật'}</Text>
@@ -763,9 +967,20 @@ export function SchoolDetailModal({
                               </View>
                             ) : null}
 
+                            {campus.boardingType ? (
+                              <View style={styles.metaRow}>
+                                <MaterialIcons name="hotel" size={16} color="#64748b" />
+                                <Text style={styles.meta}>
+                                  Loại nội trú: {getBoardingTypeLabel(campus.boardingType)}
+                                </Text>
+                              </View>
+                            ) : null}
+
                             {typeof campus.latitude === 'number' && typeof campus.longitude === 'number' ? (
                               <Pressable
-                                onPress={() => openGoogleMapsDirections(campus.latitude!, campus.longitude!)}
+                                onPress={() =>
+                                  openGoogleMapsDirections(campus.address, campus.latitude!, campus.longitude!)
+                                }
                                 style={styles.campusMiniMapWrap}
                               >
                                 {Platform.OS === 'android' ? (
@@ -836,125 +1051,126 @@ export function SchoolDetailModal({
                                 </View>
 
                                 {(() => {
+                                  const facilityExpanded = !!expandedFacility[campus.id];
+                                  const facilityItems = Array.isArray(campus.facility?.itemList)
+                                    ? campus.facility.itemList
+                                        .filter(
+                                          (item): item is FacilityItem =>
+                                            !!item &&
+                                            typeof item === 'object' &&
+                                            (typeof item.name === 'string' || typeof item.category === 'string')
+                                        )
+                                        .sort((a, b) => {
+                                          const aUsage = a.isUsage ? 1 : 0;
+                                          const bUsage = b.isUsage ? 1 : 0;
+                                          return bUsage - aUsage;
+                                        })
+                                    : [];
+                                  const visibleItems = facilityExpanded
+                                    ? facilityItems
+                                    : facilityItems.slice(0, FACILITY_COLLAPSED_COUNT);
                                   const galleryImages = Array.isArray(campus.facility?.imageData?.imageList)
                                     ? campus.facility.imageData.imageList.filter(
                                         (img): img is FacilityImage => typeof img?.url === 'string' && img.url.length > 0
                                       )
                                     : [];
-                                  const totalImages = galleryImages.length;
-                                  const overflowCount = Math.max(0, totalImages - 2);
-                                  const previewImages = galleryImages.slice(0, 4);
+                                  const usedImageIndexes = new Set<number>();
 
-                                  if (totalImages === 0) return null;
-
-                                  if (totalImages === 1) {
+                                  if (facilityItems.length === 0) {
                                     return (
-                                      <Pressable
-                                        onPress={() => openFacilityGallery(galleryImages, 0)}
-                                        style={({ pressed }) => [styles.facilityGallerySingle, pressed && styles.facilityCardPressed]}
-                                      >
-                                        <FacilityImageBlock imageUrl={galleryImages[0].url} height={210} />
-                                        <View style={styles.facilityImageNameOverlay}>
-                                          <Text numberOfLines={1} style={styles.facilityImageNameText}>
-                                            {getFacilityImageLabel(galleryImages[0], 0)}
-                                          </Text>
-                                        </View>
-                                        <View style={styles.facilityImageBadge}>
-                                          <MaterialIcons name="photo-library" size={14} color="#fff" />
-                                          <Text style={styles.facilityImageBadgeText}>{`${totalImages} ảnh`}</Text>
-                                        </View>
-                                      </Pressable>
-                                    );
-                                  }
-
-                                  if (totalImages === 2) {
-                                    return (
-                                      <View style={styles.facilityGalleryGridTwo}>
-                                        {galleryImages.map((image, idx) => (
-                                          <Pressable
-                                            key={`${campus.id}-gallery-${image.url ?? idx}`}
-                                            onPress={() => openFacilityGallery(galleryImages, idx)}
-                                            style={({ pressed }) => [
-                                              styles.facilityGalleryGridTwoItem,
-                                              pressed && styles.facilityCardPressed,
-                                            ]}
-                                          >
-                                            <FacilityImageBlock imageUrl={image.url} height={132} />
-                                            <View style={styles.facilityImageNameOverlay}>
-                                              <Text numberOfLines={1} style={styles.facilityImageNameText}>
-                                                {getFacilityImageLabel(image, idx)}
-                                              </Text>
-                                            </View>
-                                            {idx === 0 ? (
-                                              <View style={styles.facilityImageBadge}>
-                                                <MaterialIcons name="photo-library" size={14} color="#fff" />
-                                                <Text style={styles.facilityImageBadgeText}>{`${totalImages} ảnh`}</Text>
-                                              </View>
-                                            ) : null}
-                                          </Pressable>
-                                        ))}
+                                      <View style={styles.facilityEmptyState}>
+                                        <MaterialIcons name="apartment" size={18} color="#64748b" />
+                                        <Text style={styles.facilityEmptyText}>
+                                          Cơ sở này chưa cập nhật danh mục cơ sở vật chất.
+                                        </Text>
                                       </View>
                                     );
                                   }
 
                                   return (
-                                    <View style={styles.facilityGalleryGridFour}>
-                                      {previewImages.map((image, idx) => {
-                                        const isOverflowTile = overflowCount > 0 && idx === previewImages.length - 1;
+                                    <>
+                                      <View style={styles.facilityGrid}>
+                                        {visibleItems.map((item, idx) => {
+                                          const globalIndex = facilityExpanded ? idx : idx;
+                                        const matchedImage = matchFacilityImageByItem(
+                                          item,
+                                          galleryImages,
+                                          usedImageIndexes,
+                                          globalIndex
+                                        );
+                                        const valueLabel = getFacilityItemValueLabel(item);
+                                        const itemLabel = item.name?.trim() || item.category?.trim() || 'Tiện ích';
                                         return (
                                           <Pressable
-                                            key={`${campus.id}-gallery-${image.url ?? idx}`}
-                                            onPress={() => openFacilityGallery(galleryImages, idx)}
+                                            key={`${campus.id}-facility-${item.facilityCode ?? itemLabel}-${idx}`}
+                                            onPress={() => {
+                                              if (!matchedImage?.url) return;
+                                              const targetIndex = galleryImages.findIndex(
+                                                (image) => image.url === matchedImage.url
+                                              );
+                                              openFacilityGallery(
+                                                galleryImages,
+                                                targetIndex >= 0 ? targetIndex : 0
+                                              );
+                                            }}
+                                            disabled={!matchedImage?.url}
                                             style={({ pressed }) => [
-                                              styles.facilityGalleryGridFourItem,
-                                              pressed && styles.facilityCardPressed,
+                                              styles.facilityItemCard,
+                                              matchedImage?.url && pressed && styles.facilityCardPressed,
                                             ]}
                                           >
-                                            <FacilityImageBlock imageUrl={image.url} height={110} />
-                                            <View style={styles.facilityImageNameOverlay}>
-                                              <Text numberOfLines={1} style={styles.facilityImageNameText}>
-                                                {getFacilityImageLabel(image, idx)}
-                                              </Text>
+                                            <FacilityImageBlock imageUrl={matchedImage?.url} height={110} />
+                                            <View style={styles.facilityItemBody}>
+                                              <View style={styles.facilityItemTitleRow}>
+                                                <MaterialIcons
+                                                  name={getFacilityItemIcon(item)}
+                                                  size={16}
+                                                  color="#2563eb"
+                                                />
+                                                <Text numberOfLines={2} style={styles.facilityItemTitle}>
+                                                  {itemLabel}
+                                                </Text>
+                                              </View>
+                                              {valueLabel ? (
+                                                <Text style={styles.facilityItemValue}>{valueLabel}</Text>
+                                              ) : null}
+                                              {item.category ? (
+                                                <View style={styles.facilityHighlightBadge}>
+                                                  <Text numberOfLines={1} style={styles.facilityHighlightBadgeText}>
+                                                    {item.category}
+                                                  </Text>
+                                                </View>
+                                              ) : null}
                                             </View>
-                                            {idx === 0 ? (
-                                              <View style={styles.facilityImageBadge}>
-                                                <MaterialIcons name="photo-library" size={14} color="#fff" />
-                                                <Text style={styles.facilityImageBadgeText}>{`${totalImages} ảnh`}</Text>
-                                              </View>
-                                            ) : null}
-                                            {isOverflowTile ? (
-                                              <View style={styles.facilityImageOverflowOverlay}>
-                                                <MaterialIcons name="photo-library" size={16} color="#fff" />
-                                                <Text style={styles.facilityImageOverflowText}>{`+${overflowCount}`}</Text>
-                                              </View>
-                                            ) : null}
                                           </Pressable>
                                         );
-                                      })}
-                                    </View>
+                                        })}
+                                      </View>
+                                      {facilityItems.length > FACILITY_COLLAPSED_COUNT ? (
+                                        <Pressable
+                                          onPress={() =>
+                                            setExpandedFacility((prev) => ({
+                                              ...prev,
+                                              [campus.id]: !prev[campus.id],
+                                            }))
+                                          }
+                                          style={styles.facilityViewAllPhotosBtn}
+                                        >
+                                          <MaterialIcons
+                                            name={facilityExpanded ? 'expand-less' : 'expand-more'}
+                                            size={16}
+                                            color="#1976d2"
+                                          />
+                                          <Text style={styles.facilityViewAllPhotosText}>
+                                            {facilityExpanded
+                                              ? 'Thu gọn'
+                                              : `Mở rộng (${facilityItems.length - FACILITY_COLLAPSED_COUNT} mục)`}
+                                          </Text>
+                                        </Pressable>
+                                      ) : null}
+                                    </>
                                   );
                                 })()}
-                                {Array.isArray(campus.facility?.imageData?.imageList) &&
-                                campus.facility.imageData.imageList.length === 0 &&
-                                campus.facility?.imageData?.coverUrl ? (
-                                  <Pressable
-                                    onPress={() =>
-                                      openFacilityGallery([{ url: campus.facility!.imageData!.coverUrl!, name: 'Ảnh cơ sở' }])
-                                    }
-                                    style={({ pressed }) => [styles.facilityGallerySingle, pressed && styles.facilityCardPressed]}
-                                  >
-                                    <FacilityImageBlock imageUrl={campus.facility.imageData.coverUrl} height={210} />
-                                    <View style={styles.facilityImageNameOverlay}>
-                                      <Text numberOfLines={1} style={styles.facilityImageNameText}>
-                                        Ảnh cơ sở
-                                      </Text>
-                                    </View>
-                                    <View style={styles.facilityImageBadge}>
-                                      <MaterialIcons name="photo" size={14} color="#fff" />
-                                      <Text style={styles.facilityImageBadgeText}>Ảnh cơ sở</Text>
-                                    </View>
-                                  </Pressable>
-                                ) : null}
                               </View>
                             ) : null}
                           </>
@@ -982,200 +1198,213 @@ export function SchoolDetailModal({
                   const mandatoryItems = mandatoryExpanded ? campaign.mandatoryAll : campaign.mandatoryAll.slice(0, 3);
                   return (
                     <View key={campaign.id} style={styles.campaignCard}>
-                      <Pressable
-                        onPress={() => setExpandedCampaign((prev) => ({ ...prev, [campaign.id]: !prev[campaign.id] }))}
-                      >
-                        <View style={styles.curriculumHeaderRow}>
-                          <Text style={styles.curriculumName}>{campaign.name}</Text>
-                          <MaterialIcons name={expanded ? 'expand-less' : 'expand-more'} size={22} color="#64748b" />
-                        </View>
-                        <View style={styles.badgeRow}>
-                          <View style={statusPill.wrap}>
-                            <Text style={statusPill.text}>{isOpen ? 'ĐANG MỞ' : 'ĐÃ ĐÓNG'}</Text>
+                        <Pressable
+                          onPress={() => setExpandedCampaign((prev) => ({ ...prev, [campaign.id]: !prev[campaign.id] }))}
+                        >
+                          <View style={styles.curriculumHeaderRow}>
+                            <Text style={styles.curriculumName}>{campaign.name}</Text>
+                            <MaterialIcons name={expanded ? 'expand-less' : 'expand-more'} size={22} color="#64748b" />
                           </View>
-                        </View>
-                        <Text style={styles.metaSmall}>Năm: {campaign.year}</Text>
-                        <Text style={styles.metaSmall}>
-                          {formatIsoDateRange(campaign.startDate, campaign.endDate)}
-                        </Text>
-                        {campaign.description ? (
-                          expanded ? (
-                            <View style={styles.programSection}>
-                              <Text style={styles.programSectionTitle}>Mô tả</Text>
-                              <Text style={styles.sectionText}>{stripBasicHtml(campaign.description)}</Text>
+                          <View style={styles.badgeRow}>
+                            <View style={statusPill.wrap}>
+                              <Text style={statusPill.text}>{isOpen ? 'ĐANG MỞ' : 'ĐÃ ĐÓNG'}</Text>
                             </View>
-                          ) : (
-                            <Text numberOfLines={1} style={styles.sectionText}>
-                              {stripBasicHtml(campaign.description)}
-                            </Text>
-                          )
-                        ) : null}
-                      </Pressable>
-                      {expanded ? (
-                        <View style={styles.curriculumBody}>
-                          <Text style={styles.programSectionTitle}>Phương thức tuyển sinh</Text>
-                          {campaign.admissionMethodDetails.map((method) => {
-                            const methodKey = `${campaign.id}-${method.methodCode}`;
-                            const methodExpanded = !!expandedMethod[methodKey];
-                            return (
-                              <View key={methodKey} style={styles.methodCard}>
-                                <Pressable
-                                  onPress={() => setExpandedMethod((prev) => ({ ...prev, [methodKey]: !prev[methodKey] }))}
-                                >
-                                  <View style={styles.programHeaderRow}>
-                                    <Text style={styles.programName}>{method.displayName}</Text>
-                                    <MaterialIcons
-                                      name={methodExpanded ? 'expand-less' : 'expand-more'}
-                                      size={20}
-                                      color="#64748b"
-                                    />
-                                  </View>
-                                  <Text style={styles.metaSmall}>
-                                    {formatArrayDate(method.startDate)} - {formatArrayDate(method.endDate)}
-                                  </Text>
-                                  {method.allowReservationSubmission ? (
-                                    <Text style={styles.methodReservationTag}>Cho phép giữ chỗ</Text>
-                                  ) : null}
-                                </Pressable>
-                                {methodExpanded ? (
-                                  <View style={styles.methodBody}>
-                                    {method.description ? <Text style={styles.sectionText}>{method.description}</Text> : null}
-                                    {method.admissionProcessSteps.length > 0 ? (
-                                      <View style={styles.stepsWrap}>
-                                        <Text style={styles.programSubLabel}>Quy trình</Text>
-                                        {method.admissionProcessSteps
-                                          .slice()
-                                          .sort((a, b) => a.stepOrder - b.stepOrder)
-                                          .map((step) => (
-                                            <View key={`${methodKey}-step-${step.stepOrder}`} style={styles.stepItem}>
-                                              <View style={styles.stepDot} />
-                                              <View style={styles.stepContent}>
-                                                <Text style={styles.stepTitle}>
-                                                  Bước {step.stepOrder}: {step.stepName}
-                                                </Text>
-                                                {step.description ? (
-                                                  <Text style={styles.subjectDesc}>{step.description}</Text>
-                                                ) : null}
+                          </View>
+                          <Text style={styles.metaSmall}>Năm: {campaign.year}</Text>
+                          <Text style={styles.metaSmall}>
+                            Thời gian: {formatIsoDateRange(campaign.startDate, campaign.endDate)}
+                          </Text>
+                          {campaign.description ? (
+                            expanded ? (
+                              <View style={styles.programSection}>
+                                <Text style={styles.programSectionTitle}>Mô tả</Text>
+                                <Text style={styles.sectionText}>{stripBasicHtml(campaign.description)}</Text>
+                              </View>
+                            ) : (
+                              <Text numberOfLines={1} style={styles.sectionText}>
+                                {stripBasicHtml(campaign.description)}
+                              </Text>
+                            )
+                          ) : null}
+                        </Pressable>
+                        {expanded ? (
+                          <View style={styles.curriculumBody}>
+                            <Text style={styles.programSectionTitle}>Phương thức tuyển sinh</Text>
+                            {campaign.admissionMethodDetails.map((method) => {
+                              const methodKey = `${campaign.id}-${method.methodCode}`;
+                              const methodExpanded = !!expandedMethod[methodKey];
+                              return (
+                                <View key={methodKey} style={styles.methodCard}>
+                                  <Pressable
+                                    onPress={() => setExpandedMethod((prev) => ({ ...prev, [methodKey]: !prev[methodKey] }))}
+                                  >
+                                    <View style={styles.programHeaderRow}>
+                                      <Text style={styles.programName}>{method.displayName}</Text>
+                                      <MaterialIcons
+                                        name={methodExpanded ? 'expand-less' : 'expand-more'}
+                                        size={20}
+                                        color="#64748b"
+                                      />
+                                    </View>
+                                    <Text style={styles.metaSmall}>
+                                      {formatArrayDate(method.startDate)} - {formatArrayDate(method.endDate)}
+                                    </Text>
+                                    {method.allowReservationSubmission ? (
+                                      <Text style={styles.methodReservationTag}>Cho phép giữ chỗ</Text>
+                                    ) : null}
+                                  </Pressable>
+                                  {methodExpanded ? (
+                                    <View style={styles.methodBody}>
+                                      {method.description ? <Text style={styles.sectionText}>{method.description}</Text> : null}
+                                      {method.admissionProcessSteps.length > 0 ? (
+                                        <View style={styles.stepsWrap}>
+                                          <Text style={styles.programSubLabel}>Quy trình</Text>
+                                          {method.admissionProcessSteps
+                                            .slice()
+                                            .sort((a, b) => a.stepOrder - b.stepOrder)
+                                            .map((step) => (
+                                              <View key={`${methodKey}-step-${step.stepOrder}`} style={styles.stepItem}>
+                                                <View style={styles.stepDot} />
+                                                <View style={styles.stepContent}>
+                                                  <Text style={styles.stepTitle}>
+                                                    Bước {step.stepOrder}: {step.stepName}
+                                                  </Text>
+                                                  {step.description ? (
+                                                    <Text style={styles.subjectDesc}>{step.description}</Text>
+                                                  ) : null}
+                                                </View>
                                               </View>
+                                            ))}
+                                        </View>
+                                      ) : null}
+                                      {method.methodDocumentRequirements.length > 0 ? (
+                                        <View style={styles.programSection}>
+                                          <Text style={styles.programSubLabel}>Hồ sơ theo phương thức</Text>
+                                          {method.methodDocumentRequirements.map((doc) => (
+                                            <View key={`${methodKey}-doc-${doc.code}`} style={styles.docItemRow}>
+                                              <MaterialIcons
+                                                name={doc.required ? 'check-circle' : 'radio-button-unchecked'}
+                                                size={16}
+                                                color={doc.required ? '#dc2626' : '#94a3b8'}
+                                              />
+                                              <Text style={styles.docItemText}>{doc.name}</Text>
                                             </View>
                                           ))}
-                                      </View>
-                                    ) : null}
-                                    {method.methodDocumentRequirements.length > 0 ? (
-                                      <View style={styles.programSection}>
-                                        <Text style={styles.programSubLabel}>Hồ sơ theo phương thức</Text>
-                                        {method.methodDocumentRequirements.map((doc) => (
-                                          <View key={`${methodKey}-doc-${doc.code}`} style={styles.docItemRow}>
-                                            <MaterialIcons
-                                              name={doc.required ? 'check-circle' : 'radio-button-unchecked'}
-                                              size={16}
-                                              color={doc.required ? '#dc2626' : '#94a3b8'}
-                                            />
-                                            <Text style={styles.docItemText}>{doc.name}</Text>
-                                          </View>
-                                        ))}
-                                      </View>
-                                    ) : null}
+                                        </View>
+                                      ) : null}
+                                    </View>
+                                  ) : null}
+                                </View>
+                              );
+                            })}
+                            {campaign.mandatoryAll.length > 0 ? (
+                              <View style={styles.programSection}>
+                                <Text style={styles.programSectionTitle}>Hồ sơ bắt buộc</Text>
+                                {mandatoryItems.map((doc) => (
+                                  <View key={`${campaign.id}-mandatory-${doc.code}`} style={styles.docItemRow}>
+                                    <MaterialIcons name="description" size={16} color="#ef4444" />
+                                    <Text style={styles.docItemText}>{doc.name}</Text>
                                   </View>
+                                ))}
+                                {campaign.mandatoryAll.length > 3 ? (
+                                  <Pressable
+                                    onPress={() =>
+                                      setExpandedMandatoryDocs((prev) => ({ ...prev, [campaign.id]: !prev[campaign.id] }))
+                                    }
+                                  >
+                                    <Text style={styles.expandText}>{mandatoryExpanded ? 'Thu gọn' : 'Xem thêm'}</Text>
+                                  </Pressable>
                                 ) : null}
                               </View>
-                            );
-                          })}
-                          {campaign.campusProgramOfferings.length > 0 ? (
-                            <View style={styles.programSection}>
-                              <Text style={styles.programSectionTitle}>Chỉ tiêu theo cơ sở</Text>
-                              {campaign.campusProgramOfferings.map((offering, idx) => {
-                                const campusName =
-                                  typeof offering.campusName === 'string' ? offering.campusName : `Cơ sở #${idx + 1}`;
-                                const quota =
-                                  typeof offering.quota === 'number' && Number.isFinite(offering.quota)
-                                    ? offering.quota
-                                    : null;
-                                const remainingQuota =
-                                  typeof offering.remainingQuota === 'number' && Number.isFinite(offering.remainingQuota)
-                                    ? offering.remainingQuota
-                                    : null;
-                                const tuitionFee =
-                                  typeof offering.tuitionFee === 'number' && Number.isFinite(offering.tuitionFee)
-                                    ? offering.tuitionFee
-                                    : null;
-                                const learningMode =
-                                  typeof offering.learningMode === 'string' ? offering.learningMode : null;
-                                const openDate = typeof offering.openDate === 'string' ? offering.openDate : null;
-                                const closeDate = typeof offering.closeDate === 'string' ? offering.closeDate : null;
-                                const programRaw =
-                                  offering.program && typeof offering.program === 'object'
-                                    ? (offering.program as Record<string, unknown>)
-                                    : null;
-                                const programName =
-                                  typeof programRaw?.name === 'string' ? programRaw.name : 'Chương trình';
-                                const statusLabel =
-                                  typeof offering.applicationStatus === 'string'
-                                    ? offering.applicationStatus
-                                    : typeof offering.status === 'string'
-                                      ? offering.status
-                                      : 'UNKNOWN';
-                                const statusPill = badgePillStyle({
-                                  bg: statusLabel.includes('OPEN') ? '#dcfce7' : '#f1f5f9',
-                                  text: statusLabel.includes('OPEN') ? '#15803d' : '#475569',
-                                });
-                                return (
-                                  <View key={`${campaign.id}-offering-${idx}`} style={styles.offeringCard}>
-                                    <View style={styles.programHeaderRow}>
-                                      <Text style={styles.programName}>{campusName}</Text>
-                                      <View style={statusPill.wrap}>
-                                        <Text style={statusPill.text}>{statusLabel}</Text>
-                                      </View>
-                                    </View>
-                                    <Text style={styles.programBodyText}>Chương trình: {programName}</Text>
-                                    {learningMode ? (
-                                      <Text style={styles.programBodyText}>Hình thức học: {learningMode}</Text>
-                                    ) : null}
-                                    {quota != null || remainingQuota != null ? (
-                                      <Text style={styles.programBodyText}>
-                                        Chỉ tiêu: {quota ?? '—'} | Còn lại: {remainingQuota ?? '—'}
-                                      </Text>
-                                    ) : null}
-                                    {tuitionFee != null ? (
-                                      <Text style={styles.programTuition}>
-                                        Học phí: {formatTuitionVnd(tuitionFee) ?? `${tuitionFee} đ`}
-                                      </Text>
-                                    ) : null}
-                                    <Text style={styles.metaSmall}>
-                                      Thời gian nhận hồ sơ: {formatIsoDateRange(openDate, closeDate)}
-                                    </Text>
-                                  </View>
-                                );
-                              })}
-                            </View>
-                          ) : null}
-                          {campaign.mandatoryAll.length > 0 ? (
-                            <View style={styles.programSection}>
-                              <Text style={styles.programSectionTitle}>Hồ sơ bắt buộc</Text>
-                              {mandatoryItems.map((doc) => (
-                                <View key={`${campaign.id}-mandatory-${doc.code}`} style={styles.docItemRow}>
-                                  <MaterialIcons name="description" size={16} color="#ef4444" />
-                                  <Text style={styles.docItemText}>{doc.name}</Text>
-                                </View>
-                              ))}
-                              {campaign.mandatoryAll.length > 3 ? (
-                                <Pressable
-                                  onPress={() =>
-                                    setExpandedMandatoryDocs((prev) => ({ ...prev, [campaign.id]: !prev[campaign.id] }))
-                                  }
-                                >
-                                  <Text style={styles.expandText}>{mandatoryExpanded ? 'Thu gọn' : 'Xem thêm'}</Text>
-                                </Pressable>
-                              ) : null}
-                            </View>
-                          ) : null}
-                          
-                        </View>
-                      ) : null}
-                    </View>
+                            ) : null}
+                          </View>
+                        ) : null}
+                      </View>
                   );
                 })}
               </View>
+              {campaignTemplates.some((campaign) => campaign.campusProgramOfferings.length > 0) ? (
+                <View style={styles.section}>
+                  <Text style={styles.sectionTitle}>Gói tuyển sinh</Text>
+                  <View style={styles.programSection}>
+                    {campaignTemplates.map((campaign) =>
+                      campaign.campusProgramOfferings.map((offering, idx) => {
+                        const campusName =
+                          typeof offering.campusName === 'string' ? offering.campusName : `Cơ sở #${idx + 1}`;
+                        const quota =
+                          typeof offering.quota === 'number' && Number.isFinite(offering.quota) ? offering.quota : null;
+                        const remainingQuota =
+                          typeof offering.remainingQuota === 'number' && Number.isFinite(offering.remainingQuota)
+                            ? offering.remainingQuota
+                            : null;
+                        const tuitionFee =
+                          typeof offering.tuitionFee === 'number' && Number.isFinite(offering.tuitionFee)
+                            ? offering.tuitionFee
+                            : null;
+                        const learningMode = typeof offering.learningMode === 'string' ? offering.learningMode : null;
+                        const openDate = typeof offering.openDate === 'string' ? offering.openDate : null;
+                        const closeDate = typeof offering.closeDate === 'string' ? offering.closeDate : null;
+                        const programRaw =
+                          offering.program && typeof offering.program === 'object'
+                            ? (offering.program as Record<string, unknown>)
+                            : null;
+                        const programName = typeof programRaw?.name === 'string' ? programRaw.name : 'Chương trình';
+                        const statusRaw =
+                          typeof offering.applicationStatus === 'string'
+                            ? offering.applicationStatus
+                            : typeof offering.status === 'string'
+                              ? offering.status
+                              : 'UNKNOWN';
+                        const statusLabel = getOfferingStatusLabel(statusRaw);
+                        const offeringStatusPill = badgePillStyle(getOfferingStatusColors(statusRaw));
+                        return (
+                          <View key={`${campaign.id}-offering-${idx}`} style={styles.offeringCard}>
+                            <Text style={styles.metaSmall}>Chiến dịch: {campaign.name}</Text>
+                            <View style={styles.programHeaderRow}>
+                              <Text style={styles.programName}>{campusName}</Text>
+                              <View style={offeringStatusPill.wrap}>
+                                <Text style={offeringStatusPill.text}>{statusLabel}</Text>
+                              </View>
+                            </View>
+                            <Text style={styles.programBodyText}>Chương trình: {programName}</Text>
+                            {learningMode ? (
+                              <Text style={styles.programBodyText}>Hình thức học: {getLearningModeLabel(learningMode)}</Text>
+                            ) : null}
+                            {quota != null || remainingQuota != null ? (
+                              <Text style={styles.programBodyText}>
+                                Chỉ tiêu: {quota ?? '—'} | Còn lại: {remainingQuota ?? '—'}
+                              </Text>
+                            ) : null}
+                            {tuitionFee != null ? (
+                              <Text style={styles.programTuition}>Học phí: {formatTuitionVnd(tuitionFee) ?? `${tuitionFee} đ`}</Text>
+                            ) : null}
+                            <Text style={styles.metaSmall}>
+                              Thời gian nhận hồ sơ: {formatIsoDateRange(openDate, closeDate)}
+                            </Text>
+                            {typeof offering.id === 'number' &&
+                            onOpenAdmissionSubmission &&
+                            canShowReservationSubmitForOffering(campaign, offering) ? (
+                              <Pressable
+                                style={styles.submitProfileBtn}
+                                onPress={() =>
+                                  onOpenAdmissionSubmission({
+                                    campusProgramOfferingId: offering.id as number,
+                                    campusName,
+                                    programName,
+                                  })
+                                }
+                              >
+                                <MaterialIcons name="upload-file" size={16} color="#1976d2" />
+                                <Text style={styles.submitProfileBtnText}>Nộp hồ sơ</Text>
+                              </Pressable>
+                            ) : null}
+                          </View>
+                        );
+                      })
+                    )}
+                  </View>
+                </View>
+              ) : null}
 
               <View style={styles.section}>
                 <Text style={styles.sectionTitle}>Chương trình học</Text>
@@ -1372,7 +1601,7 @@ export function SchoolDetailModal({
                     setConsultCampusPickerVisible(true);
                   }}
                 >
-                  <MaterialIcons name="event-available" size={18} color="#fff" />
+                  <MaterialIcons name="event-available" size={18} color="#1976d2" />
                   <Text style={styles.consultSectionButtonText}>Xem lịch tư vấn</Text>
                 </Pressable>
               </View>
@@ -1528,15 +1757,17 @@ export function SchoolDetailModal({
                   const dayKey = toIsoDate(day);
                   const isSelected = selectedConsultDate === dayKey;
                   const isToday = dayKey === toIsoDate(new Date());
-                  const hasSlots = (consultSlotsByDate[dayKey] ?? []).length > 0;
+                  const daySlots = consultSlotsByDate[dayKey] ?? [];
+                  const hasSelectable = daySlots.some((slot) => isParentConsultationSlotPressable(slot, daySlots));
                   return (
                     <Pressable
                       key={dayKey}
+                      disabled={!hasSelectable}
                       style={[
                         styles.consultDateChip,
                         isSelected && styles.consultDateChipSelected,
                         isToday && !isSelected && styles.consultDateChipToday,
-                        !hasSlots && styles.consultDateChipDisabled,
+                        !hasSelectable && styles.consultDateChipDisabled,
                       ]}
                       onPress={() => {
                         setSelectedConsultDate(dayKey);
@@ -1584,7 +1815,7 @@ export function SchoolDetailModal({
                       >
                         <View style={styles.consultSlotGrid}>
                           {selectedDateSlots.map((slot) => {
-                            const isDisabled = slot.status === 'PAST';
+                            const isDisabled = !isParentConsultationSlotPressable(slot, selectedDateSlots);
                             const isSelected = selectedConsultSlot?.campusScheduleTemplateId === slot.campusScheduleTemplateId;
                             return (
                               <Pressable
@@ -1601,7 +1832,7 @@ export function SchoolDetailModal({
                                   {formatSlotTimeRange(slot.startTime, slot.endTime)}
                                 </Text>
                                 <Text style={[styles.consultSlotStatus, isSelected && styles.consultSlotStatusSelected]}>
-                                  {slot.statusLabel || slot.status}
+                                  {parentConsultationSlotDisplayLine(slot)}
                                 </Text>
                               </Pressable>
                             );
@@ -1614,7 +1845,10 @@ export function SchoolDetailModal({
               </View>
 
               <Pressable
-                style={[styles.consultBookingButton, !selectedConsultSlot && styles.consultBookingButtonDisabled]}
+                style={[
+                  styles.consultBookingButton,
+                  (!selectedConsultSlot || !selectedConsultSlotBookable) && styles.consultBookingButtonDisabled,
+                ]}
                 onPress={handleOpenConsultForm}
               >
                 <Text style={styles.consultBookingButtonText}>Đặt lịch</Text>
@@ -2260,6 +2494,24 @@ const styles = StyleSheet.create({
   },
   programName: { fontSize: 14, fontWeight: '700', color: '#0f172a', flex: 1 },
   programTuition: { fontSize: 13, fontWeight: '600', color: '#0369a1' },
+  submitProfileBtn: {
+    marginTop: 8,
+    alignSelf: 'flex-start',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: '#fff',
+    borderWidth: 1,
+    borderColor: '#bfdbfe',
+    borderRadius: 999,
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+  },
+  submitProfileBtnText: {
+    color: '#1976d2',
+    fontSize: 13,
+    fontWeight: '700',
+  },
   graduationHeader: {
     marginTop: 4,
     flexDirection: 'row',
@@ -2355,13 +2607,15 @@ const styles = StyleSheet.create({
     marginTop: 12,
     height: 44,
     borderRadius: 12,
-    backgroundColor: '#1976d2',
+    backgroundColor: '#fff',
+    borderWidth: 1,
+    borderColor: '#e2e8f0',
     alignItems: 'center',
     justifyContent: 'center',
     flexDirection: 'row',
     gap: 8,
   },
-  consultSectionButtonText: { color: '#fff', fontSize: 15, fontWeight: '700' },
+  consultSectionButtonText: { color: '#1976d2', fontSize: 15, fontWeight: '700' },
   consultSheetBackdrop: {
     flex: 1,
     backgroundColor: 'rgba(15, 23, 42, 0.45)',

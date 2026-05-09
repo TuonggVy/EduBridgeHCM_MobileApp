@@ -1,5 +1,6 @@
 import React from 'react';
 import { View, Text, StyleSheet, Pressable, Image } from 'react-native';
+import type { StyleProp, ViewStyle } from 'react-native';
 const MaterialIcons = require('@expo/vector-icons').MaterialIcons;
 
 const radius = { xl: 20 } as const;
@@ -8,7 +9,6 @@ type SchoolCardProps = {
   name: string;
   description?: string | null;
   imageUrl?: string | null;
-  rating?: number | null;
   totalCampus?: number;
   isFavourite?: boolean;
   onToggleFavourite?: () => void;
@@ -16,23 +16,24 @@ type SchoolCardProps = {
   showFooter?: boolean;
   ctaLabel?: string;
   onPress: () => void;
+  containerStyle?: StyleProp<ViewStyle>;
 };
 
 export function SchoolCard({
   name,
   description,
   imageUrl,
-  rating,
   totalCampus,
   isFavourite,
   onToggleFavourite,
   showFooter = true,
   ctaLabel = 'Xem chi tiết',
   onPress,
+  containerStyle,
 }: SchoolCardProps) {
   return (
     <Pressable
-      style={({ pressed }) => [styles.card, pressed && styles.cardPressed]}
+      style={({ pressed }) => [styles.card, containerStyle, pressed && styles.cardPressed]}
       onPress={onPress}
     >
       <View style={styles.favoriteWrap}>
@@ -61,12 +62,6 @@ export function SchoolCard({
               {description}
             </Text>
           ) : null}
-          <View style={styles.metaRow}>
-            <MaterialIcons name="star" size={14} color="#f59e0b" />
-            <Text style={styles.metaText}>
-              {typeof rating === 'number' ? rating.toFixed(1) : 'Chưa có đánh giá'}
-            </Text>
-          </View>
           <View style={styles.metaRow}>
             <MaterialIcons name="business" size={14} color="#64748b" />
             <Text style={styles.metaText}>{`${totalCampus ?? 0} cơ sở`}</Text>
@@ -138,6 +133,8 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: '#0f172a',
     lineHeight: 21,
+    // Chừa chỗ cho icon tim ở góc trên bên phải để tên trường không bị che.
+    paddingRight: 36,
   },
   description: {
     marginTop: 4,
