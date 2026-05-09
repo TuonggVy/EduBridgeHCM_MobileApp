@@ -235,16 +235,37 @@ function normalizeDateParts(parts: unknown): number[] {
   return parts.filter((n): n is number => typeof n === 'number' && Number.isFinite(n));
 }
 
-function normalizeAdmissionMethodDetail(method: unknown): AdmissionMethodDetail | null {
+function buildMethodDisplayNameLookup(campaignConfig: Record<string, unknown> | null): Record<string, string> {
+  const out: Record<string, string> = {};
+  const arr =
+    campaignConfig && Array.isArray(campaignConfig.allowedMethods) ? campaignConfig.allowedMethods : [];
+  for (const raw of arr) {
+    if (!raw || typeof raw !== 'object') continue;
+    const o = raw as Record<string, unknown>;
+    if (typeof o.code !== 'string' || !o.code.trim()) continue;
+    if (typeof o.displayName === 'string' && o.displayName.trim()) out[o.code.trim()] = o.displayName.trim();
+  }
+  return out;
+}
+
+function normalizeAdmissionMethodDetail(
+  method: unknown,
+  displayByCode: Record<string, string> = {}
+): AdmissionMethodDetail | null {
   if (!method || typeof method !== 'object') return null;
   const m = method as Record<string, unknown>;
-  if (typeof m.methodCode !== 'string' || typeof m.displayName !== 'string') return null;
+  if (typeof m.methodCode !== 'string' || !m.methodCode.trim()) return null;
+  const methodCode = m.methodCode.trim();
+  const displayName =
+    typeof m.displayName === 'string' && m.displayName.trim()
+      ? m.displayName.trim()
+      : displayByCode[methodCode] || methodCode;
   return {
     endDate: normalizeDateParts(m.endDate),
     startDate: normalizeDateParts(m.startDate),
-    methodCode: m.methodCode,
+    methodCode,
     description: typeof m.description === 'string' ? m.description : null,
-    displayName: m.displayName,
+    displayName,
     allowReservationSubmission: Boolean(m.allowReservationSubmission),
     admissionProcessSteps: Array.isArray(m.admissionProcessSteps)
       ? m.admissionProcessSteps
@@ -261,20 +282,18 @@ function normalizeAdmissionMethodDetail(method: unknown): AdmissionMethodDetail 
 
 function normalizeCampaignTemplate(
   item: unknown,
-  fallbackMandatoryAll: AdmissionDocumentRequirement[] = []
+  fallbackMandatoryAll: AdmissionDocumentRequirement[] = [],
+  methodDisplayByCode: Record<string, string> = {}
 ): SchoolCampaignTemplate | null {
   if (!item || typeof item !== 'object') return null;
   const c = item as Record<string, unknown>;
   if (typeof c.id !== 'number' || typeof c.schoolId !== 'number' || typeof c.name !== 'string') return null;
-  const normalizedMethodDetails = Array.isArray(c.admissionMethodDetails)
-    ? c.admissionMethodDetails
-        .map((m) => normalizeAdmissionMethodDetail(m))
-        .filter((m): m is AdmissionMethodDetail => m != null)
-    : Array.isArray(c.admissionMethodTimelines)
-      ? c.admissionMethodTimelines
-          .map((m) => normalizeAdmissionMethodDetail(m))
-          .filter((m): m is AdmissionMethodDetail => m != null)
-      : [];
+  const rawDetails = Array.isArray(c.admissionMethodDetails) ? c.admissionMethodDetails : [];
+  const rawTimelines = Array.isArray(c.admissionMethodTimelines) ? c.admissionMethodTimelines : [];
+  const methodSource = rawDetails.length > 0 ? rawDetails : rawTimelines;
+  const normalizedMethodDetails = methodSource
+    .map((m) => normalizeAdmissionMethodDetail(m, methodDisplayByCode))
+    .filter((m): m is AdmissionMethodDetail => m != null);
   const normalizedMandatoryAll = Array.isArray(c.mandatoryAll)
     ? c.mandatoryAll
         .map((d) => normalizeAdmissionDoc(d))
@@ -319,13 +338,14 @@ export async function fetchSchoolCampaignTemplates(
         .map((d) => normalizeAdmissionDoc(d))
         .filter((d): d is AdmissionDocumentRequirement => d != null)
     : [];
+  const methodDisplayByCode = buildMethodDisplayNameLookup(campaignConfig);
   const campaignRows = Array.isArray(campaignContainer?.campaigns)
     ? campaignContainer.campaigns
     : Array.isArray(rawBody)
       ? rawBody
       : [];
   const body = campaignRows
-    .map((row) => normalizeCampaignTemplate(row, fallbackMandatoryAll))
+    .map((row) => normalizeCampaignTemplate(row, fallbackMandatoryAll, methodDisplayByCode))
     .filter((row): row is SchoolCampaignTemplate => row != null);
   return { message: response.message, body };
 }

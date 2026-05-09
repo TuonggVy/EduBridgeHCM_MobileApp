@@ -184,6 +184,14 @@ function canShowReservationSubmitForOffering(
   return detail.allowReservationSubmission === true;
 }
 
+/** Nhãn hiển thị (displayName) theo `methodCode` của gói — khớp timeline chiến dịch hoặc fallback mã. */
+function admissionMethodDisplayLabel(campaign: SchoolCampaignTemplate, methodCode: string): string {
+  const code = methodCode.trim();
+  if (!code) return '';
+  const detail = campaign.admissionMethodDetails.find((m) => m.methodCode === code);
+  return (detail?.displayName ?? '').trim() || code;
+}
+
 function buildCurriculumListFromCampaignTemplates(
   campaigns: SchoolCampaignTemplate[]
 ): SchoolDetail['curriculumList'] {
@@ -1357,6 +1365,11 @@ export function SchoolDetailModal({
                               : 'UNKNOWN';
                         const statusLabel = getOfferingStatusLabel(statusRaw);
                         const offeringStatusPill = badgePillStyle(getOfferingStatusColors(statusRaw));
+                        const admissionMethodRaw =
+                          typeof offering.admissionMethod === 'string' ? offering.admissionMethod.trim() : '';
+                        const admissionMethodLabel = admissionMethodRaw
+                          ? admissionMethodDisplayLabel(campaign, admissionMethodRaw)
+                          : '';
                         return (
                           <View key={`${campaign.id}-offering-${idx}`} style={styles.offeringCard}>
                             <Text style={styles.metaSmall}>Chiến dịch: {campaign.name}</Text>
@@ -1367,6 +1380,9 @@ export function SchoolDetailModal({
                               </View>
                             </View>
                             <Text style={styles.programBodyText}>Chương trình: {programName}</Text>
+                            {admissionMethodLabel ? (
+                              <Text style={styles.programBodyText}>Phương thức: {admissionMethodLabel}</Text>
+                            ) : null}
                             {learningMode ? (
                               <Text style={styles.programBodyText}>Hình thức học: {getLearningModeLabel(learningMode)}</Text>
                             ) : null}
