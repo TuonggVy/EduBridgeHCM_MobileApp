@@ -1160,23 +1160,21 @@ export default function StudentProfileFormScreen({ visible, initialStudent, onCl
                         </View>
                       );
                     })()}
-                    {bi === 0 && (
-                      <Pressable onPress={runAutoFillTranscript} style={styles.autoFillBtn} disabled={transcriptExtracting}>
-                        <LinearGradient colors={[...GRADIENT_SAVE]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={styles.autoFillGrad}>
-                          {transcriptExtracting ? (
-                            <>
-                              <ActivityIndicator size="small" color="#fff" />
-                              <Text style={styles.autoFillTxt}>Đang đọc dữ liệu học bạ...</Text>
-                            </>
-                          ) : (
-                            <>
-                              <Ionicons name="sparkles-outline" size={18} color="#fff" />
-                              <Text style={styles.autoFillTxt}>Tự động điền điểm</Text>
-                            </>
-                          )}
-                        </LinearGradient>
-                      </Pressable>
-                    )}
+                    <Pressable onPress={runAutoFillTranscript} style={styles.autoFillBtn} disabled={transcriptExtracting}>
+                      <LinearGradient colors={[...GRADIENT_SAVE]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={styles.autoFillGrad}>
+                        {transcriptExtracting ? (
+                          <>
+                            <ActivityIndicator size="small" color="#fff" />
+                            <Text style={styles.autoFillTxt}>Đang đọc dữ liệu học bạ...</Text>
+                          </>
+                        ) : (
+                          <>
+                            <Ionicons name="sparkles-outline" size={18} color="#fff" />
+                            <Text style={styles.autoFillTxt}>Tự động điền điểm</Text>
+                          </>
+                        )}
+                      </LinearGradient>
+                    </Pressable>
                   </View>
                 )}
 
