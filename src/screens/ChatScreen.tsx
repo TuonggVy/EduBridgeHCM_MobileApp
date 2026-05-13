@@ -1,10 +1,13 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  Animated,
   AppState,
+  Easing,
   FlatList,
   Image,
   KeyboardAvoidingView,
+  Linking,
   Modal,
   Platform,
   Pressable,
@@ -14,6 +17,7 @@ import {
   Text,
   TextInput,
   useColorScheme,
+  useWindowDimensions,
   View,
 } from 'react-native';
 const Ionicons = require('@expo/vector-icons').Ionicons;
@@ -30,9 +34,11 @@ import {
   markConversationMessagesRead,
 } from '../api/parentChat';
 import { ApiError } from '../api/client';
-import type { ChatMessage } from '../types/chat';
+import type { ChatAttachment, ChatMessage } from '../types/chat';
 import { fetchParentStudents } from '../api/parentStudent';
 import type { ParentStudentProfile } from '../types/studentProfile';
+import { ChatBubbleImage } from '../components/ChatBubbleImage';
+import { ImageViewerModal } from '../components/ImageViewerModal';
 
 /** Kích thước icon attach / gửi — dùng chung để đồng nhất */
 const INPUT_BAR_ICON_SIZE = 22;
@@ -101,24 +107,93 @@ function dayKey(date: Date): string {
   return `${date.getFullYear()}-${date.getMonth() + 1}-${date.getDate()}`;
 }
 
-function formatDayLabel(date: Date): string {
-  const today = new Date();
-  const dKey = dayKey(date);
-  const tKey = dayKey(today);
-
-  if (dKey === tKey) return 'Hôm nay';
-
-  const y = new Date(today);
-  y.setDate(today.getDate() - 1);
-  if (dayKey(y) === dKey) return 'Hôm qua';
-
-  return `${date.getDate()}/${date.getMonth() + 1}/${date.getFullYear()}`;
-}
-
 function formatTime(date: Date): string {
   const hh = `${date.getHours()}`.padStart(2, '0');
   const mm = `${date.getMinutes()}`.padStart(2, '0');
   return `${hh}:${mm}`;
+}
+
+/** Khoảng tối thiểu giữa hai tin để hiện separator thời gian (Zalo/Messenger). */
+const CHAT_TIMESTAMP_GAP_MS = 15 * 60 * 1000;
+
+function isYesterdayLocal(d: Date): boolean {
+  const t = new Date();
+  const y = new Date(t.getFullYear(), t.getMonth(), t.getDate() - 1);
+  return dayKey(d) === dayKey(y);
+}
+
+function shouldShowChatTimestampSeparator(newer: Date, older: Date): boolean {
+  if (dayKey(newer) !== dayKey(older)) return true;
+  return newer.getTime() - older.getTime() > CHAT_TIMESTAMP_GAP_MS;
+}
+
+/** Nhãn separator giữa tin mới hơn (`newer`) và tin cũ hơn (`older`) — mốc thời gian theo tin phía dưới cụm (newer). */
+function formatZaloTimestampSeparator(newer: Date): string {
+  const now = new Date();
+  const t = formatTime(newer);
+
+  if (dayKey(newer) === dayKey(now)) {
+    return `Hôm nay ${t}`;
+  }
+  if (isYesterdayLocal(newer)) {
+    return `Hôm qua ${t}`;
+  }
+  return `${newer.getDate()} tháng ${newer.getMonth() + 1}, ${t}`;
+}
+
+/**
+ * Separator chỉ khi cùng ngày nhưng cách >15p → chỉ "HH:mm".
+ * Khác ngày → "Hôm nay/Hôm qua/ngày tháng + giờ".
+ */
+function chatSeparatorLabelBetween(newer: Date, older: Date): string {
+  if (dayKey(newer) !== dayKey(older)) {
+    return formatZaloTimestampSeparator(newer);
+  }
+  return formatTime(newer);
+}
+
+type ChatListMessageRow = {
+  kind: 'msg';
+  id: string;
+  message: ChatMessage & { _chronoIndex: number };
+  displayIndex: number;
+};
+
+type ChatListSeparatorRow = {
+  kind: 'sep';
+  id: string;
+  label: string;
+};
+
+type ChatListRow = ChatListMessageRow | ChatListSeparatorRow;
+
+function buildChatListRows(
+  newestFirst: (ChatMessage & { _chronoIndex: number })[]
+): ChatListRow[] {
+  const out: ChatListRow[] = [];
+  const n = newestFirst.length;
+  for (let i = 0; i < n; i++) {
+    const m = newestFirst[i];
+    out.push({ kind: 'msg', id: m.id, message: m, displayIndex: i });
+    const older = newestFirst[i + 1];
+    if (!older) {
+      // Tin cũ nhất trong batch hiện tại: luôn có mốc thời gian ở đầu thread (tránh mất pill khi từ 1 tin → nhiều tin cùng cụm).
+      out.push({
+        kind: 'sep',
+        id: `sep-anchor-${m.id}`,
+        label: formatZaloTimestampSeparator(new Date(m.createdAt)),
+      });
+      continue;
+    }
+    if (shouldShowChatTimestampSeparator(new Date(m.createdAt), new Date(older.createdAt))) {
+      out.push({
+        kind: 'sep',
+        id: `sep-${m.id}-${older.id}`,
+        label: chatSeparatorLabelBetween(new Date(m.createdAt), new Date(older.createdAt)),
+      });
+    }
+  }
+  return out;
 }
 
 /**
@@ -204,6 +279,245 @@ function textFromBody(body: any): string | null {
   return null;
 }
 
+const IMAGE_EXT_RE = /\.(jpg|jpeg|png|gif|webp|bmp|svg)$/i;
+const UUID_PREFIX_RE = /^[0-9a-f]{8}[_-][0-9a-f]{4}[_-][0-9a-f]{4}[_-][0-9a-f]{4}[_-][0-9a-f]{12}_/i;
+
+function isImageAttachment(f: ChatAttachment): boolean {
+  return IMAGE_EXT_RE.test(String(f.fileName || f.fileUrl || ''));
+}
+
+function formatAttachmentName(fileName: string): string {
+  let name = String(fileName || '').trim();
+  let prev: string;
+  do {
+    prev = name;
+    name = name.replace(UUID_PREFIX_RE, '');
+  } while (name !== prev);
+  return name || 'Tệp đính kèm';
+}
+
+function formatBytes(bytes: number): string {
+  if (!Number.isFinite(bytes) || bytes < 0) return '';
+  if (bytes < 1000) return `${Math.round(bytes)} B`;
+  if (bytes < 999_950) return `${(bytes / 1024).toFixed(bytes < 10_240 ? 1 : 0)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(bytes < 10_485_760 ? 1 : 1)} MB`;
+}
+
+function extensionLabelFromFileName(fileName: string): string {
+  const n = formatAttachmentName(fileName);
+  const i = n.lastIndexOf('.');
+  if (i < 0 || i >= n.length - 1) return 'FILE';
+  const ext = n
+    .slice(i + 1)
+    .toUpperCase()
+    .replace(/[^A-Z0-9]/g, '');
+  return ext.slice(0, 8) || 'FILE';
+}
+
+/** Cache kích thước sau HEAD — tránh gọi lặp khi scroll. */
+const fileContentLengthLabelCache = new Map<string, string | null>();
+
+type FileCardTheme = {
+  cardBg: string;
+  cardBorder: string;
+  shadow: boolean;
+  nameColor: string;
+  subtitleColor: string;
+  chevron: string;
+};
+
+function fileAttachmentCardTheme(isMine: boolean, isDark: boolean): FileCardTheme {
+  if (isMine) {
+    return {
+      cardBg: 'rgba(255,255,255,0.14)',
+      cardBorder: 'rgba(255,255,255,0.28)',
+      shadow: false,
+      nameColor: '#ffffff',
+      subtitleColor: 'rgba(255,255,255,0.82)',
+      chevron: 'rgba(255,255,255,0.55)',
+    };
+  }
+  if (isDark) {
+    return {
+      cardBg: 'rgba(15,23,42,0.92)',
+      cardBorder: 'rgba(51,65,85,0.85)',
+      shadow: false,
+      nameColor: '#f1f5f9',
+      subtitleColor: '#94a3b8',
+      chevron: '#64748b',
+    };
+  }
+  return {
+    cardBg: '#ffffff',
+    cardBorder: 'rgba(148,163,184,0.35)',
+    shadow: true,
+    nameColor: '#0f172a',
+    subtitleColor: '#64748b',
+    chevron: '#94a3b8',
+  };
+}
+
+function extAccentForPeer(ext: string, isDark: boolean): { pillBg: string; pillText: string; iconBg: string; iconColor: string } {
+  const e = ext.toUpperCase();
+  if (e === 'PDF') {
+    return isDark
+      ? { pillBg: 'rgba(248,113,113,0.18)', pillText: '#fca5a5', iconBg: 'rgba(248,113,113,0.15)', iconColor: '#f87171' }
+      : { pillBg: 'rgba(239,68,68,0.12)', pillText: '#b91c1c', iconBg: 'rgba(239,68,68,0.1)', iconColor: '#dc2626' };
+  }
+  if (e.includes('XLS') || e === 'CSV') {
+    return isDark
+      ? { pillBg: 'rgba(74,222,128,0.16)', pillText: '#86efac', iconBg: 'rgba(74,222,128,0.12)', iconColor: '#4ade80' }
+      : { pillBg: 'rgba(22,163,74,0.12)', pillText: '#15803d', iconBg: 'rgba(22,163,74,0.1)', iconColor: '#16a34a' };
+  }
+  if (e.includes('DOC') || e === 'TXT' || e === 'RTF' || e === 'MD') {
+    return isDark
+      ? { pillBg: 'rgba(96,165,250,0.18)', pillText: '#93c5fd', iconBg: 'rgba(96,165,250,0.14)', iconColor: '#60a5fa' }
+      : { pillBg: 'rgba(37,99,235,0.1)', pillText: '#1d4ed8', iconBg: 'rgba(37,99,235,0.08)', iconColor: '#2563eb' };
+  }
+  if (e === 'ZIP' || e === 'RAR' || e === '7Z') {
+    return isDark
+      ? { pillBg: 'rgba(192,132,252,0.16)', pillText: '#d8b4fe', iconBg: 'rgba(192,132,252,0.12)', iconColor: '#c084fc' }
+      : { pillBg: 'rgba(147,51,234,0.1)', pillText: '#7e22ce', iconBg: 'rgba(147,51,234,0.08)', iconColor: '#9333ea' };
+  }
+  return isDark
+    ? { pillBg: 'rgba(148,163,184,0.16)', pillText: '#cbd5e1', iconBg: 'rgba(148,163,184,0.12)', iconColor: '#94a3b8' }
+    : { pillBg: 'rgba(100,116,139,0.12)', pillText: '#475569', iconBg: 'rgba(100,116,139,0.1)', iconColor: '#64748b' };
+}
+
+type ChatFileAttachmentCardProps = {
+  file: ChatAttachment;
+  isMine: boolean;
+  isDark: boolean;
+  /** Tin chỉ file không có bubble xanh — card dùng nền sáng/tối như phía đối tác. */
+  standalone?: boolean;
+};
+
+function ChatFileAttachmentCard({ file, isMine, isDark, standalone }: ChatFileAttachmentCardProps) {
+  const surfaceMineStandalone = isMine && standalone;
+  const theme = surfaceMineStandalone ? fileAttachmentCardTheme(false, isDark) : fileAttachmentCardTheme(isMine, isDark);
+  const displayName = formatAttachmentName(file.fileName);
+  const ext = extensionLabelFromFileName(file.fileName);
+  const accent = surfaceMineStandalone
+    ? extAccentForPeer(ext, isDark)
+    : isMine
+      ? {
+          pillBg: 'rgba(255,255,255,0.22)',
+          pillText: '#ffffff',
+          iconBg: 'rgba(255,255,255,0.2)',
+          iconColor: '#ffffff',
+        }
+      : extAccentForPeer(ext, isDark);
+
+  const [sizeLabel, setSizeLabel] = useState<string | null>(() => {
+    if (fileContentLengthLabelCache.has(file.fileUrl)) {
+      return fileContentLengthLabelCache.get(file.fileUrl) ?? null;
+    }
+    return null;
+  });
+
+  useEffect(() => {
+    const url = file.fileUrl;
+    if (fileContentLengthLabelCache.has(url)) {
+      setSizeLabel(fileContentLengthLabelCache.get(url) ?? null);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch(url, { method: 'HEAD' });
+        const raw = res.headers.get('Content-Length')?.trim();
+        if (cancelled) return;
+        if (raw && /^\d+$/.test(raw)) {
+          const label = formatBytes(Number(raw));
+          fileContentLengthLabelCache.set(url, label);
+          setSizeLabel(label);
+        } else {
+          fileContentLengthLabelCache.set(url, null);
+        }
+      } catch {
+        if (!cancelled) fileContentLengthLabelCache.set(url, null);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [file.fileUrl]);
+
+  const subtitle = sizeLabel ? `${sizeLabel} · Chạm để mở` : 'Chạm để mở';
+
+  return (
+    <Pressable
+      onPress={() => void Linking.openURL(file.fileUrl)}
+      accessibilityRole="button"
+      accessibilityLabel={`Mở tệp ${displayName}`}
+      android_ripple={
+        surfaceMineStandalone || !isMine
+          ? isDark
+            ? { color: 'rgba(255,255,255,0.12)' }
+            : { color: 'rgba(15,23,42,0.08)' }
+          : { color: 'rgba(255,255,255,0.18)' }
+      }
+      style={({ pressed }) => [
+        styles.fileAttachCard,
+        {
+          backgroundColor: theme.cardBg,
+          borderColor: theme.cardBorder,
+        },
+        theme.shadow ? styles.fileAttachCardShadow : null,
+        pressed && styles.fileAttachCardPressed,
+      ]}
+    >
+      <View style={[styles.fileAttachIconWrap, { backgroundColor: accent.iconBg }]}>
+        <Ionicons name="document-attach" size={30} color={accent.iconColor} />
+      </View>
+      <View style={styles.fileAttachBody}>
+        <Text style={[styles.fileAttachName, { color: theme.nameColor }]}>{displayName}</Text>
+        <View style={styles.fileAttachMetaRow}>
+          <View style={[styles.fileAttachExtPill, { backgroundColor: accent.pillBg }]}>
+            <Text style={[styles.fileAttachExtText, { color: accent.pillText }]}>{ext}</Text>
+          </View>
+          <Text style={[styles.fileAttachSubtitle, { color: theme.subtitleColor }]} numberOfLines={2}>
+            {subtitle}
+          </Text>
+        </View>
+      </View>
+      <Ionicons name="chevron-forward" size={18} color={theme.chevron} style={styles.fileAttachChevron} />
+    </Pressable>
+  );
+}
+
+function normalizeAttachments(raw: unknown): ChatAttachment[] {
+  if (!Array.isArray(raw)) return [];
+  const out: ChatAttachment[] = [];
+  for (const x of raw) {
+    if (!x || typeof x !== 'object') continue;
+    const o = x as Record<string, unknown>;
+    const fileUrl = asString(o.fileUrl) ?? asString(o.url) ?? '';
+    const fileName = asString(o.fileName) ?? asString(o.name) ?? '';
+    if (fileUrl) out.push({ fileName: fileName || 'Tệp đính kèm', fileUrl });
+  }
+  return out;
+}
+
+/** Bỏ qua frame điều khiển WS (không phải tin chat) — đồng bộ web Header. */
+function shouldIgnoreWsControlPayload(raw: Record<string, unknown>): boolean {
+  const hasChatBody =
+    (raw.message != null && String(raw.message).trim() !== '') ||
+    (raw.content != null && String(raw.content).trim() !== '') ||
+    (raw.text != null && String(raw.text).trim() !== '') ||
+    (Array.isArray(raw.files) && raw.files.length > 0);
+  if (hasChatBody) return false;
+  const t = String(raw.type ?? raw.eventType ?? '').trim().toUpperCase();
+  if (t === 'CONVERSATION_READ') return true;
+  const nested = String(
+    (raw.data as Record<string, unknown> | undefined)?.type ??
+      (raw.payload as Record<string, unknown> | undefined)?.type ??
+      ''
+  ).trim()
+    .toUpperCase();
+  return nested === 'CONVERSATION_READ';
+}
+
 function historyMessagesFromBody(body: Record<string, unknown>): unknown[] {
   if (Array.isArray(body.messages)) return body.messages;
   if (Array.isArray(body.items)) return body.items;
@@ -221,8 +535,10 @@ function mapHistoryStatusToUi(raw: unknown): ChatMessage['status'] | undefined {
 }
 
 function normalizeIncomingMessage(body: any, fallbackConversationId: string): ChatMessage | null {
-  const content = textFromBody(body);
-  if (content == null || content === '') return null;
+  const files = normalizeAttachments(body?.files);
+  const textRaw = textFromBody(body);
+  const content = textRaw == null ? '' : String(textRaw).trim();
+  if (!content && files.length === 0) return null;
 
   const senderFromSenderField =
     typeof body?.sender === 'string'
@@ -271,6 +587,7 @@ function normalizeIncomingMessage(body: any, fallbackConversationId: string): Ch
     createdAt,
     status: mapHistoryStatusToUi(body?.status),
     clientMessageId: asString(body?.clientMessageId) ?? undefined,
+    ...(files.length > 0 ? { files } : {}),
   };
 }
 
@@ -289,6 +606,17 @@ export default function ChatScreen({
 }: ChatScreenProps) {
   const scheme = useColorScheme();
   const isDark = scheme === 'dark';
+  const { width: windowWidth, height: windowHeight } = useWindowDimensions();
+
+  /** Giới hạn khung ảnh trong bubble — tỷ lệ thật do ChatBubbleImage (getSize + contain). */
+  const chatImageMaxWidth = useMemo(() => {
+    const pct = 0.72;
+    return Math.max(120, Math.floor(windowWidth * pct) - 28);
+  }, [windowWidth]);
+  const chatImageMaxHeight = useMemo(
+    () => Math.min(440, Math.floor(windowHeight * 0.5)),
+    [windowHeight]
+  );
 
   const listRef = useRef<FlatList<any> | null>(null);
   const markReadTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -311,6 +639,10 @@ export default function ChatScreen({
 
   const [inputText, setInputText] = useState('');
   const [chatError, setChatError] = useState<string | null>(null);
+  const [imagePreviewUri, setImagePreviewUri] = useState<string | null>(null);
+  const openImagePreview = useCallback((u: string) => {
+    setImagePreviewUri(u);
+  }, []);
   const [studentProfileVisible, setStudentProfileVisible] = useState(false);
   const [studentProfileLoading, setStudentProfileLoading] = useState(false);
   const [studentProfileData, setStudentProfileData] = useState<ParentStudentProfile | null>(null);
@@ -366,6 +698,39 @@ export default function ChatScreen({
       .slice()
       .reverse();
   }, [messages]);
+
+  const chatListRows = useMemo(() => buildChatListRows(displayMessages), [displayMessages]);
+
+  const sepPulse = useRef(new Animated.Value(0)).current;
+  const scrollFlashTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const triggerChatTimestampFlash = useCallback(() => {
+    sepPulse.stopAnimation();
+    sepPulse.setValue(0);
+    Animated.sequence([
+      Animated.timing(sepPulse, {
+        toValue: 1,
+        duration: 220,
+        easing: Easing.out(Easing.cubic),
+        useNativeDriver: true,
+      }),
+      Animated.delay(2600),
+      Animated.timing(sepPulse, {
+        toValue: 0,
+        duration: 380,
+        easing: Easing.in(Easing.cubic),
+        useNativeDriver: true,
+      }),
+    ]).start();
+  }, [sepPulse]);
+
+  const scheduleScrollTimestampFlash = useCallback(() => {
+    if (scrollFlashTimerRef.current) clearTimeout(scrollFlashTimerRef.current);
+    scrollFlashTimerRef.current = setTimeout(() => {
+      scrollFlashTimerRef.current = null;
+      triggerChatTimestampFlash();
+    }, 140);
+  }, [triggerChatTimestampFlash]);
 
   const handleMarkRead = useCallback(
     async (reason: 'open' | 'focus' | 'scroll' | 'new-message') => {
@@ -537,6 +902,7 @@ export default function ChatScreen({
     const onMessage = (body: PrivateMessageBody) => {
       const raw = body as Record<string, unknown> | null;
       if (!raw || typeof raw !== 'object') return;
+      if (shouldIgnoreWsControlPayload(raw)) return;
       const incomingCid = raw.conversationId ?? (raw.conversation as { id?: unknown } | undefined)?.id;
       if (incomingCid == null || incomingCid === '') return;
       if (String(incomingCid) !== String(activeConversationId)) return;
@@ -558,6 +924,8 @@ export default function ChatScreen({
               id: normalized.id,
               status: pickBetterStatus(next[idx].status, normalized.status) ?? normalized.status ?? 'sent',
               createdAt: normalized.createdAt,
+              content: normalized.content,
+              ...(normalized.files?.length ? { files: normalized.files } : {}),
             };
             return dropOptimisticDuplicatesOfServer(next, parentEmail);
           }
@@ -567,7 +935,18 @@ export default function ChatScreen({
           let stripped = false;
           const withoutTmp = base.filter((m) => {
             if (!String(m.id).startsWith('tmp-')) return true;
-            if (!normalized.content || m.content.trim() !== normalized.content.trim()) return true;
+            const textMatch =
+              Boolean(normalized.content?.trim()) &&
+              m.content.trim() === normalized.content.trim();
+            const nf = normalized.files ?? [];
+            const mf = m.files ?? [];
+            const fileOnlyMatch =
+              nf.length > 0 &&
+              mf.length === nf.length &&
+              nf.every((f, i) => f.fileUrl === mf[i]?.fileUrl) &&
+              !normalized.content?.trim() &&
+              !m.content.trim();
+            if (!textMatch && !fileOnlyMatch) return true;
             if (stripped) return true;
             stripped = true;
             return false;
@@ -719,32 +1098,91 @@ export default function ChatScreen({
     }
   }, [studentName, studentProfileData, studentProfileId]);
 
-  const renderMessageItem = useCallback(
-    ({ item, index }: { item: ChatMessage & { _chronoIndex: number }; index: number }) => {
+  const sepOpacityStyle = useMemo(
+    () => ({
+      opacity: sepPulse.interpolate({
+        inputRange: [0, 1],
+        outputRange: [0.78, 1],
+      }),
+    }),
+    [sepPulse]
+  );
+
+  useEffect(() => {
+    return () => {
+      if (scrollFlashTimerRef.current) clearTimeout(scrollFlashTimerRef.current);
+    };
+  }, []);
+
+  const renderMessageBubble = useCallback(
+    (item: ChatMessage & { _chronoIndex: number }, displayIndex: number) => {
       const isMine = emailsEqual(item.senderEmail, parentEmail);
 
-      const above = displayMessages[index + 1] as (ChatMessage & { _chronoIndex: number }) | undefined;
-      const showDateSeparator = (() => {
-        if (!above) return true; // very top
-        const curD = new Date(item.createdAt);
-        const aboveD = new Date(above.createdAt);
-        return dayKey(curD) !== dayKey(aboveD);
-      })();
+      const hasImageAttachment = !!(item.files && item.files.some((f) => isImageAttachment(f)));
+      const hasNonImageFile = !!(item.files && item.files.some((f) => !isImageAttachment(f)));
+      const fileOnlyAttachments = hasNonImageFile && !hasImageAttachment;
 
-      const created = new Date(item.createdAt);
+      const hasText = !!item.content?.trim();
+      const hasFiles = !!(item.files && item.files.length > 0);
+      const attachmentOnly = hasFiles && !hasText;
+
+      const attachBoxStyles = [
+        styles.attachBox,
+        hasImageAttachment && !hasNonImageFile
+          ? isMine
+            ? styles.attachBoxImageIntrinsicMine
+            : styles.attachBoxImageIntrinsicPeer
+          : styles.attachBoxFullWidth,
+        attachmentOnly || fileOnlyAttachments
+          ? styles.attachBoxFileStack
+          : isMine
+            ? styles.attachBoxMine
+            : isDark
+              ? styles.attachBoxPeerDark
+              : styles.attachBoxPeer,
+      ];
 
       return (
-        <View>
-          {showDateSeparator ? (
-            <View style={styles.dateSep}>
-              <Text style={[styles.dateSepText, isDark && styles.dateSepTextDark]}>{formatDayLabel(created)}</Text>
+        <View style={[styles.messageRunRoot, isMine ? styles.rowRight : styles.rowLeft]}>
+          {attachmentOnly ? (
+            <View
+              style={[
+                styles.attachmentOnlyOuter,
+                hasImageAttachment ? styles.bubbleWithMedia : null,
+                hasNonImageFile ? styles.bubbleWithFiles : null,
+                isMine ? styles.attachmentOnlyOuterMine : styles.attachmentOnlyOuterPeer,
+              ]}
+            >
+              <View style={attachBoxStyles}>
+                {item.files!.map((f, fi) =>
+                  isImageAttachment(f) ? (
+                    <ChatBubbleImage
+                      key={`${item.id}-img-${fi}`}
+                      uri={f.fileUrl}
+                      isDark={isDark}
+                      maxWidth={chatImageMaxWidth}
+                      maxHeight={chatImageMaxHeight}
+                      standalone={attachmentOnly}
+                      onRequestPreview={openImagePreview}
+                    />
+                  ) : (
+                    <ChatFileAttachmentCard
+                      key={`${item.id}-file-${fi}`}
+                      file={f}
+                      isMine={isMine}
+                      isDark={isDark}
+                      standalone
+                    />
+                  )
+                )}
+              </View>
             </View>
-          ) : null}
-
-          <View style={[styles.row, isMine ? styles.rowRight : styles.rowLeft]}>
+          ) : (
             <View
               style={[
                 styles.bubbleBase,
+                hasImageAttachment ? styles.bubbleWithMedia : null,
+                hasNonImageFile ? styles.bubbleWithFiles : null,
                 isMine
                   ? styles.bubbleMine
                   : isDark
@@ -753,32 +1191,68 @@ export default function ChatScreen({
                 isDark && styles.bubbleDark,
               ]}
             >
-              <Text
-                style={[
-                  styles.bubbleText,
-                  isMine
-                    ? styles.bubbleTextMine
-                    : isDark
-                      ? styles.bubbleTextCounsellorDark
-                      : styles.bubbleTextCounsellor,
-                ]}
-              >
-                {item.content}
-              </Text>
-              <View style={styles.metaRow}>
-                <Text style={[styles.metaTime, isDark && styles.metaTimeDark]}>{formatTime(created)}</Text>
-                {isMine && item.status ? (
-                  <Text style={[styles.metaStatus, isDark && styles.metaTimeDark]}>
-                    {item.status === 'seen' ? 'Đã xem' : item.status === 'sent' ? 'Đã gửi' : 'Đang gửi'}
-                  </Text>
-                ) : null}
-              </View>
+              {hasText ? (
+                <Text
+                  style={[
+                    styles.bubbleText,
+                    isMine
+                      ? styles.bubbleTextMine
+                      : isDark
+                        ? styles.bubbleTextCounsellorDark
+                        : styles.bubbleTextCounsellor,
+                  ]}
+                >
+                  {item.content}
+                </Text>
+              ) : null}
+              {hasFiles ? (
+                <View style={attachBoxStyles}>
+                  {item.files!.map((f, fi) =>
+                    isImageAttachment(f) ? (
+                      <ChatBubbleImage
+                        key={`${item.id}-img-${fi}`}
+                        uri={f.fileUrl}
+                        isDark={isDark}
+                        maxWidth={chatImageMaxWidth}
+                        maxHeight={chatImageMaxHeight}
+                        standalone={false}
+                        onRequestPreview={openImagePreview}
+                      />
+                    ) : (
+                      <ChatFileAttachmentCard key={`${item.id}-file-${fi}`} file={f} isMine={isMine} isDark={isDark} />
+                    )
+                  )}
+                </View>
+              ) : null}
             </View>
-          </View>
+          )}
+          {displayIndex === 0 && isMine && item.status ? (
+            <View style={[styles.deliveryStatusRow, isMine ? styles.deliveryStatusRowMine : null]}>
+              <Text style={[styles.deliveryStatusText, isDark && styles.deliveryStatusTextDark]}>
+                {item.status === 'seen' ? 'Đã xem' : item.status === 'sent' ? 'Đã gửi' : 'Đang gửi'}
+              </Text>
+            </View>
+          ) : null}
         </View>
       );
     },
-    [displayMessages, isDark, parentEmail]
+    [chatImageMaxHeight, chatImageMaxWidth, isDark, openImagePreview, parentEmail]
+  );
+
+  const renderChatListItem = useCallback(
+    ({ item }: { item: ChatListRow }) => {
+      if (item.kind === 'sep') {
+        return (
+          <Animated.View style={[styles.tsSepRow, sepOpacityStyle]}>
+            <View style={[styles.tsSepPill, isDark && styles.tsSepPillDark]}>
+              <Text style={[styles.tsSepText, isDark && styles.tsSepTextDark]}>{item.label}</Text>
+            </View>
+          </Animated.View>
+        );
+      }
+      return renderMessageBubble(item.message, item.displayIndex);
+    },
+    [isDark, renderMessageBubble, sepOpacityStyle]
   );
 
   return (
@@ -832,16 +1306,19 @@ export default function ChatScreen({
         </View>
       ) : (
         <View style={styles.listWrap}>
+        <Pressable style={styles.listPressCapture} onPress={triggerChatTimestampFlash}>
         <FlatList
           ref={(r) => {
             listRef.current = r;
           }}
           style={styles.listFlex}
-          data={displayMessages}
+          data={chatListRows}
           keyExtractor={(it) => it.id}
-          renderItem={renderMessageItem}
+          renderItem={renderChatListItem}
           inverted
           contentContainerStyle={styles.listContent}
+          onScrollBeginDrag={scheduleScrollTimestampFlash}
+          onMomentumScrollEnd={scheduleScrollTimestampFlash}
           onEndReachedThreshold={0.1}
           onEndReached={() => {
             void loadMoreOlder();
@@ -869,6 +1346,7 @@ export default function ChatScreen({
           }}
           scrollEventThrottle={250}
         />
+        </Pressable>
         </View>
       )}
 
@@ -994,6 +1472,11 @@ export default function ChatScreen({
           </View>
         </View>
       </Modal>
+      <ImageViewerModal
+        visible={!!imagePreviewUri}
+        uri={imagePreviewUri}
+        onClose={() => setImagePreviewUri(null)}
+      />
     </SafeAreaView>
   );
 }
@@ -1058,13 +1541,34 @@ const styles = StyleSheet.create({
   listFlex: { flex: 1 },
   listContent: { paddingHorizontal: 14, paddingTop: 10, paddingBottom: 10, flexGrow: 1 },
 
-  dateSep: { alignItems: 'center', marginVertical: 8 },
-  dateSepText: { backgroundColor: 'rgba(148,163,184,0.18)', paddingHorizontal: 10, paddingVertical: 6, borderRadius: 9999, fontSize: 12, fontWeight: '700', color: '#475569' },
-  dateSepTextDark: { backgroundColor: 'rgba(148,163,184,0.14)', color: '#90caf9' },
+  listPressCapture: { flex: 1 },
+  tsSepRow: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 10,
+    paddingHorizontal: 6,
+  },
+  tsSepPill: {
+    backgroundColor: 'rgba(148,163,184,0.22)',
+    paddingHorizontal: 14,
+    paddingVertical: 5,
+    borderRadius: 9999,
+  },
+  tsSepPillDark: { backgroundColor: 'rgba(51,65,85,0.55)' },
+  tsSepText: { fontSize: 11, fontWeight: '600', color: '#64748b', letterSpacing: 0.15 },
+  tsSepTextDark: { color: '#94a3b8' },
 
-  row: { marginVertical: 6 },
   rowRight: { alignItems: 'flex-end' },
   rowLeft: { alignItems: 'flex-start' },
+
+  messageRunRoot: { marginVertical: 5, flexDirection: 'column' },
+  deliveryStatusRow: { marginTop: 4, alignSelf: 'flex-start' },
+  deliveryStatusRowMine: { alignSelf: 'flex-end' },
+  deliveryStatusText: { fontSize: 11, fontWeight: '700', color: '#1976d2' },
+  deliveryStatusTextDark: { color: '#90caf9' },
+  attachmentOnlyOuter: { maxWidth: '70%' },
+  attachmentOnlyOuterMine: { alignSelf: 'flex-end' },
+  attachmentOnlyOuterPeer: { alignSelf: 'flex-start' },
 
   bubbleBase: {
     maxWidth: '70%',
@@ -1077,6 +1581,9 @@ const styles = StyleSheet.create({
     shadowRadius: 6,
     elevation: 2,
   },
+  bubbleWithMedia: { maxWidth: '78%' },
+  /** Tin có file (PDF, …): bubble rộng hơn để card tệp + tên không tràn ngoài bubble 70%. */
+  bubbleWithFiles: { maxWidth: '88%' },
   bubbleMine: { backgroundColor: '#1976d2' },
   bubbleCounsellor: { backgroundColor: '#E5E7EB' },
   bubbleCounsellorDark: { backgroundColor: '#1F2937' },
@@ -1086,10 +1593,82 @@ const styles = StyleSheet.create({
   bubbleTextCounsellor: { color: '#0f172a' },
   bubbleTextCounsellorDark: { color: '#E5E7EB' },
 
-  metaRow: { marginTop: 6, flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-end', gap: 8 },
-  metaTime: { fontSize: 11, fontWeight: '700', color: 'rgba(255,255,255,0.85)' },
-  metaTimeDark: { color: 'rgba(255,255,255,0.75)' },
-  metaStatus: { fontSize: 11, fontWeight: '800', color: 'rgba(255,255,255,0.85)' },
+  attachBox: {
+    marginTop: 8,
+    borderRadius: 12,
+    padding: 6,
+    gap: 10,
+    alignSelf: 'flex-start',
+  },
+  attachBoxFullWidth: { alignSelf: 'stretch', width: '100%' },
+  /** Ảnh tự co theo tỷ lệ — không ép width cố định. */
+  attachBoxImageIntrinsicPeer: { alignSelf: 'flex-start' },
+  attachBoxImageIntrinsicMine: { alignSelf: 'flex-end' },
+  /** Chỉ chứa card file — không lồng thêm viền ngoài (card tự có surface). */
+  attachBoxFileStack: {
+    backgroundColor: 'transparent',
+    borderWidth: 0,
+    padding: 0,
+  },
+  attachBoxMine: {
+    backgroundColor: 'rgba(255,255,255,0.18)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.35)',
+  },
+  attachBoxPeer: {
+    backgroundColor: '#fff',
+    borderWidth: 1,
+    borderColor: '#e2e8f0',
+  },
+  attachBoxPeerDark: {
+    backgroundColor: '#111827',
+    borderWidth: 1,
+    borderColor: '#334155',
+  },
+  fileAttachCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    width: '100%',
+    borderRadius: 18,
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+    borderWidth: 1,
+    gap: 12,
+  },
+  fileAttachCardShadow: {
+    shadowColor: '#0f172a',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.07,
+    shadowRadius: 12,
+    elevation: 3,
+  },
+  fileAttachCardPressed: { opacity: 0.88 },
+  fileAttachIconWrap: {
+    width: 52,
+    height: 52,
+    borderRadius: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexShrink: 0,
+  },
+  fileAttachBody: { flex: 1, minWidth: 0, paddingRight: 4 },
+  fileAttachName: { fontSize: 15, lineHeight: 21, fontWeight: '700' },
+  fileAttachMetaRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    gap: 8,
+    marginTop: 6,
+  },
+  fileAttachExtPill: {
+    paddingHorizontal: 9,
+    paddingVertical: 4,
+    borderRadius: 8,
+    flexShrink: 0,
+  },
+  fileAttachExtText: { fontSize: 11, fontWeight: '800', letterSpacing: 0.6 },
+  fileAttachSubtitle: { fontSize: 12, fontWeight: '600', flexGrow: 1, flexShrink: 1, minWidth: 80 },
+  fileAttachChevron: { flexShrink: 0, alignSelf: 'center' },
 
   inputWrap: {
     borderTopWidth: 1,
@@ -1170,6 +1749,9 @@ const styles = StyleSheet.create({
     color: '#334155',
     marginBottom: 8,
     lineHeight: 20,
+  },
+  rowSubDark: {
+    color: '#94a3b8',
   },
   profileEmpty: {
     fontSize: 13,
