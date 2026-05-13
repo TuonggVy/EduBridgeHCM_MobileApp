@@ -1,5 +1,11 @@
 export type ChatMessageStatus = 'sending' | 'sent' | 'seen';
 
+/** Đính kèm từ TVV (WebSocket / history) — khớp BE `{ fileName, fileUrl }[]`. */
+export type ChatAttachment = {
+  fileName: string;
+  fileUrl: string;
+};
+
 export type ChatMessage = {
   id: string;
   conversationId: string;
@@ -8,6 +14,7 @@ export type ChatMessage = {
   createdAt: string; // ISO string (or backend string)
   status?: ChatMessageStatus;
   clientMessageId?: string;
+  files?: ChatAttachment[];
 };
 
 export type ParentConversationsItem = {
@@ -83,6 +90,7 @@ export type ParentMessagesHistoryItem = {
   message: string;
   timestamp: string;
   status: string;
+  files?: { fileName?: string; fileUrl?: string }[];
 };
 
 /** REST body: GET /api/v1/parent/messages/history/.../{studentProfileId} */
