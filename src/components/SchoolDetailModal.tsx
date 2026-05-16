@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Modal,
   View,
@@ -171,19 +171,6 @@ function getOfferingStatusColors(status?: string | null): { bg: string; text: st
   return { bg: '#f1f5f9', text: '#475569' };
 }
 
-/** Nút Nộp hồ sơ chỉ khi phương thức của gói (`admissionMethod`) cho phép giữ chỗ trên timeline chiến dịch. */
-function canShowReservationSubmitForOffering(
-  campaign: SchoolCampaignTemplate,
-  offering: Record<string, unknown>
-): boolean {
-  const methodCode =
-    typeof offering.admissionMethod === 'string' ? offering.admissionMethod.trim() : '';
-  if (!methodCode) return false;
-  const detail = campaign.admissionMethodDetails.find((m) => m.methodCode === methodCode);
-  if (!detail) return false;
-  return detail.allowReservationSubmission === true;
-}
-
 /** Nhãn hiển thị (displayName) theo `methodCode` của gói — khớp timeline chiến dịch hoặc fallback mã. */
 function admissionMethodDisplayLabel(campaign: SchoolCampaignTemplate, methodCode: string): string {
   const code = methodCode.trim();
@@ -301,9 +288,8 @@ type Props = {
   onContactConsult?: (campusId: number) => void;
   onOpenConsultBooking?: () => void;
   onOpenAdmissionSubmission?: (payload: {
-    campusProgramOfferingId: number;
-    campusName: string;
-    programName: string;
+    admissionCampaignId: number;
+    campaignName: string;
   }) => void;
   studentPickerVisible?: boolean;
   studentPickerOptions?: ParentStudentProfile[];
@@ -749,6 +735,17 @@ export function SchoolDetailModal({
       cancelled = true;
     };
   }, [visible, loading, school?.id]);
+
+  const handleCampaignAdmissionSubmit = useCallback(
+    (campaign: SchoolCampaignTemplate) => {
+      if (!onOpenAdmissionSubmission) return;
+      onOpenAdmissionSubmission({
+        admissionCampaignId: campaign.id,
+        campaignName: campaign.name,
+      });
+    },
+    [onOpenAdmissionSubmission]
+  );
 
   const handleSelectConsultCampus = (campusId: number) => {
     const today = new Date();
@@ -1327,6 +1324,15 @@ export function SchoolDetailModal({
                             ) : null}
                           </View>
                         ) : null}
+                        {onOpenAdmissionSubmission ? (
+                          <Pressable
+                            style={styles.submitProfileBtn}
+                            onPress={() => handleCampaignAdmissionSubmit(campaign)}
+                          >
+                            <MaterialIcons name="upload-file" size={16} color="#1976d2" />
+                            <Text style={styles.submitProfileBtnText}>Nộp hồ sơ</Text>
+                          </Pressable>
+                        ) : null}
                       </View>
                   );
                 })}
@@ -1397,23 +1403,6 @@ export function SchoolDetailModal({
                             <Text style={styles.metaSmall}>
                               Thời gian nhận hồ sơ: {formatIsoDateRange(openDate, closeDate)}
                             </Text>
-                            {typeof offering.id === 'number' &&
-                            onOpenAdmissionSubmission &&
-                            canShowReservationSubmitForOffering(campaign, offering) ? (
-                              <Pressable
-                                style={styles.submitProfileBtn}
-                                onPress={() =>
-                                  onOpenAdmissionSubmission({
-                                    campusProgramOfferingId: offering.id as number,
-                                    campusName,
-                                    programName,
-                                  })
-                                }
-                              >
-                                <MaterialIcons name="upload-file" size={16} color="#1976d2" />
-                                <Text style={styles.submitProfileBtnText}>Nộp hồ sơ</Text>
-                              </Pressable>
-                            ) : null}
                           </View>
                         );
                       })

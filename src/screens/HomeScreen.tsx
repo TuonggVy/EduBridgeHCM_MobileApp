@@ -57,7 +57,9 @@ import ConsultationHistoryScreen from './ConsultationHistoryScreen';
 import SchoolCompareScreen from './SchoolCompareScreen';
 import NotificationsScreen from './NotificationsScreen';
 import AdmissionReservationFormScreen from './AdmissionReservationFormScreen';
-import AdmissionReservationListScreen from './AdmissionReservationListScreen';
+import AdmissionReservationFormsScreen from './AdmissionReservationFormsScreen';
+import ReservationProfileListScreen from './ReservationProfileListScreen';
+import AdmissionBulkSubmissionScreen from './AdmissionBulkSubmissionScreen';
 import { fetchUnreadNotificationCount } from '../api/notifications';
 import {
   subscribeNotificationInboxChanged,
@@ -143,8 +145,10 @@ export default function HomeScreen() {
   const [unreadNotificationCount, setUnreadNotificationCount] = useState(0);
   const [consultBookingSchool, setConsultBookingSchool] = useState<SchoolDetail | null>(null);
   const [reservationFormVisible, setReservationFormVisible] = useState(false);
-  const [selectedCampusProgramOfferingId, setSelectedCampusProgramOfferingId] = useState<number | null>(null);
+  const [selectedAdmissionCampaignId, setSelectedAdmissionCampaignId] = useState<number | null>(null);
   const [reservationListVisible, setReservationListVisible] = useState(false);
+  const [reservationProfileVisible, setReservationProfileVisible] = useState(false);
+  const [bulkSubmissionVisible, setBulkSubmissionVisible] = useState(false);
 
   const refreshStudents = useCallback(async () => {
     try {
@@ -701,6 +705,7 @@ export default function HomeScreen() {
             onRetry={() => refreshSchools('initial')}
             onOpenSchool={openSchoolDetail}
             onToggleFavourite={toggleSchoolFavourite}
+            onOpenBulkSubmission={() => setBulkSubmissionVisible(true)}
           />
         ) : activeTab === 'consult' ? (
           <ConversationsScreen
@@ -754,6 +759,7 @@ export default function HomeScreen() {
                 }}
                 onOpenCompare={() => setCompareVisible(true)}
                 onOpenReservationForms={() => setReservationListVisible(true)}
+                onOpenReservationProfile={() => setReservationProfileVisible(true)}
               />
             )}
             <View style={styles.bottomSpacer} />
@@ -913,8 +919,8 @@ export default function HomeScreen() {
           closeStudentPicker();
           setConsultBookingVisible(true);
         }}
-        onOpenAdmissionSubmission={({ campusProgramOfferingId }) => {
-          setSelectedCampusProgramOfferingId(campusProgramOfferingId);
+        onOpenAdmissionSubmission={({ admissionCampaignId }) => {
+          setSelectedAdmissionCampaignId(admissionCampaignId);
           setSchoolDetailVisible(false);
           setReservationFormVisible(true);
         }}
@@ -953,21 +959,21 @@ export default function HomeScreen() {
         presentationStyle="fullScreen"
         onRequestClose={() => {
           setReservationFormVisible(false);
-          setSelectedCampusProgramOfferingId(null);
+          setSelectedAdmissionCampaignId(null);
           if (selectedSchoolDetail) setSchoolDetailVisible(true);
         }}
       >
         <AdmissionReservationFormScreen
           visible={reservationFormVisible}
-          campusProgramOfferingId={selectedCampusProgramOfferingId}
+          admissionCampaignId={selectedAdmissionCampaignId}
           onClose={() => {
             setReservationFormVisible(false);
-            setSelectedCampusProgramOfferingId(null);
+            setSelectedAdmissionCampaignId(null);
             if (selectedSchoolDetail) setSchoolDetailVisible(true);
           }}
           onViewSubmittedForms={() => {
             setReservationFormVisible(false);
-            setSelectedCampusProgramOfferingId(null);
+            setSelectedAdmissionCampaignId(null);
             setSchoolDetailVisible(false);
             setReservationListVisible(true);
           }}
@@ -980,10 +986,43 @@ export default function HomeScreen() {
         presentationStyle="fullScreen"
         onRequestClose={() => setReservationListVisible(false)}
       >
-        <AdmissionReservationListScreen
+        <AdmissionReservationFormsScreen
           visible={reservationListVisible}
           onClose={() => {
             setReservationListVisible(false);
+          }}
+        />
+      </Modal>
+
+      <Modal
+        visible={reservationProfileVisible}
+        animationType="slide"
+        presentationStyle="fullScreen"
+        onRequestClose={() => setReservationProfileVisible(false)}
+      >
+        <ReservationProfileListScreen
+          visible={reservationProfileVisible}
+          onClose={() => setReservationProfileVisible(false)}
+        />
+      </Modal>
+
+      <Modal
+        visible={bulkSubmissionVisible}
+        animationType="slide"
+        presentationStyle="fullScreen"
+        onRequestClose={() => setBulkSubmissionVisible(false)}
+      >
+        <AdmissionBulkSubmissionScreen
+          visible={bulkSubmissionVisible}
+          schools={schools}
+          onClose={() => setBulkSubmissionVisible(false)}
+          onViewSubmittedForms={() => {
+            setBulkSubmissionVisible(false);
+            setReservationListVisible(true);
+          }}
+          onOpenReservationProfile={() => {
+            setBulkSubmissionVisible(false);
+            setReservationProfileVisible(true);
           }}
         />
       </Modal>

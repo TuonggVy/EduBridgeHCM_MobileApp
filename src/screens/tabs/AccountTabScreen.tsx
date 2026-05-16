@@ -13,6 +13,7 @@ import type { ParentStudentProfile } from '../../types/studentProfile';
 import { MaterialIcons, sp, radius } from './tabConstants';
 
 const PROFILE_MENU_ACTIVITIES: { id: string; label: string; icon: string }[] = [
+  { id: 'reservationProfile', label: 'Hồ sơ giữ chỗ', icon: 'folder-shared' },
   { id: 'reservationForms', label: 'Đơn giữ chỗ', icon: 'description' },
   { id: 'consultation', label: 'Lịch sử tư vấn', icon: 'forum' },
   { id: 'favourites', label: 'Trường yêu thích', icon: 'favorite' },
@@ -30,6 +31,7 @@ export type AccountTabScreenProps = {
   onOpenConsultationHistory?: () => void;
   onOpenCompare: () => void;
   onOpenReservationForms?: () => void;
+  onOpenReservationProfile?: () => void;
 };
 
 export function AccountTabScreen({
@@ -43,6 +45,7 @@ export function AccountTabScreen({
   onOpenConsultationHistory,
   onOpenCompare,
   onOpenReservationForms,
+  onOpenReservationProfile,
 }: AccountTabScreenProps) {
   const { user, logout } = useAuth();
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
@@ -172,6 +175,7 @@ export function AccountTabScreen({
         title="Hoạt động của tôi"
         items={PROFILE_MENU_ACTIVITIES}
         onItemPress={(id) => {
+          if (id === 'reservationProfile') onOpenReservationProfile?.();
           if (id === 'reservationForms') onOpenReservationForms?.();
           if (id === 'favourites') onOpenFavourites();
           if (id === 'consultation') onOpenConsultationHistory?.();
