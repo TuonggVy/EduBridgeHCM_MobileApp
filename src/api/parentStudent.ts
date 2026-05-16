@@ -25,12 +25,17 @@ export async function fetchParentStudents(): Promise<ParentStudentsResponse> {
       const academicProfileMetadata = Array.isArray(item.academicProfileMetadata)
         ? item.academicProfileMetadata
         : [];
+      const personalityTypeCode =
+        item.personalityTypeCode?.trim() || item.personalityCode?.trim() || '';
       return {
         id: item.id,
         studentName: item.studentName,
+        studentCode: item.studentCode ?? null,
         gender: item.gender,
-        personalityTypeCode: item.personalityTypeCode,
+        personalityTypeCode,
         favouriteJob: item.favouriteJob,
+        traits: Array.isArray(item.traits) ? item.traits : undefined,
+        subjectsInSystem: Array.isArray(item.subjectsInSystem) ? item.subjectsInSystem : undefined,
         academicInfos: academicProfileMetadata.map((m) => ({
           gradeLevel: m.gradeLevel,
           subjectResults: (Array.isArray(m.subjectResults) ? m.subjectResults : [])
