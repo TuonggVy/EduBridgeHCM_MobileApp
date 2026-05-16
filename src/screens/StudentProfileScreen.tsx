@@ -148,9 +148,12 @@ export default function StudentProfileScreen({
   }, [student, personalityGrouped]);
 
   const subtitleGrade = formatGradeLevel(student?.academicInfos?.[0]?.gradeLevel);
-  const subtitle = subtitleGrade
-    ? `${genderLabel(student?.gender ?? '')} · ${subtitleGrade}`
-    : genderLabel(student?.gender ?? '');
+  const subtitleParts = [
+    student?.studentCode?.trim() ? `CCCD: ${student.studentCode.trim()}` : null,
+    genderLabel(student?.gender ?? '') || null,
+    subtitleGrade || null,
+  ].filter(Boolean);
+  const subtitle = subtitleParts.length ? subtitleParts.join(' · ') : '—';
 
   if (!student) return null;
 
@@ -226,6 +229,16 @@ export default function StudentProfileScreen({
                   <Text style={styles.ctaBtnText}>Xem chi tiết</Text>
                   <Ionicons name="arrow-forward" size={18} color={PRIMARY} />
                 </Pressable>
+              </>
+            ) : student.traits?.length ? (
+              <>
+                <Text style={styles.pCode}>{student.personalityTypeCode || '—'}</Text>
+                {student.traits.map((t, i) => (
+                  <View key={`${t.name}-${i}`} style={detailStyles.bulletBlock}>
+                    <Text style={detailStyles.bulletTitle}>{t.name}</Text>
+                    <Text style={detailStyles.bulletBody}>{t.description}</Text>
+                  </View>
+                ))}
               </>
             ) : (
               <Text style={styles.muted}>Chưa chọn hoặc không tìm thấy mã {student.personalityTypeCode || '—'}.</Text>

@@ -329,6 +329,11 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: '#0f172a',
   },
+  profileChildCode: {
+    marginTop: 2,
+    fontSize: 13,
+    color: '#64748b',
+  },
   profileChildrenSkeleton: {
     paddingVertical: 24,
     alignItems: 'center',

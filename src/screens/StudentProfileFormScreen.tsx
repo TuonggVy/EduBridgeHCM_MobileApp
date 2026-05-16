@@ -322,6 +322,7 @@ export default function StudentProfileFormScreen({ visible, initialStudent, onCl
   const [majorGroupsExpanded, setMajorGroupsExpanded] = useState<Record<string, boolean>>({});
 
   const [studentName, setStudentName] = useState('');
+  const [studentCode, setStudentCode] = useState('');
   const [gender, setGender] = useState('');
   const [personalityCode, setPersonalityCode] = useState('');
   const [favouriteJob, setFavouriteJob] = useState('');
@@ -407,7 +408,14 @@ export default function StudentProfileFormScreen({ visible, initialStudent, onCl
     setLoadingRefs(true);
     Promise.all([fetchParentSubjects(), fetchParentPersonalityTypes(), fetchParentMajors()])
       .then(([subRes, perRes, majRes]) => {
-        setSubjectGroups(Array.isArray(subRes.body) ? subRes.body : []);
+        const catalogFromStudent = initialStudent?.subjectsInSystem;
+        const catalogSubjects =
+          Array.isArray(catalogFromStudent) && catalogFromStudent.length > 0
+            ? catalogFromStudent
+            : Array.isArray(subRes.body)
+              ? subRes.body
+              : [];
+        setSubjectGroups(catalogSubjects);
         setPersonalityGrouped(perRes.body && typeof perRes.body === 'object' ? perRes.body : null);
         setMajorGroups(Array.isArray(majRes.body) ? majRes.body : []);
       })
@@ -416,7 +424,7 @@ export default function StudentProfileFormScreen({ visible, initialStudent, onCl
         showError(msg, 'Something went wrong');
       })
       .finally(() => setLoadingRefs(false));
-  }, [visible]);
+  }, [visible, initialStudent?.subjectsInSystem]);
 
   useEffect(() => {
     if (!majorGroups.length) return;
@@ -450,6 +458,7 @@ export default function StudentProfileFormScreen({ visible, initialStudent, onCl
     setTranscriptPreviewOpen(false);
     if (initialStudent) {
       setStudentName(initialStudent.studentName ?? '');
+      setStudentCode(initialStudent.studentCode?.trim() ?? '');
       setGender(initialStudent.gender ?? '');
       setPersonalityCode(initialStudent.personalityTypeCode ?? '');
       setFavouriteJob(initialStudent.favouriteJob ?? '');
@@ -491,6 +500,7 @@ export default function StudentProfileFormScreen({ visible, initialStudent, onCl
       }
     } else {
       setStudentName('');
+      setStudentCode('');
       setGender('');
       setPersonalityCode('');
       setFavouriteJob('');
@@ -829,8 +839,10 @@ export default function StudentProfileFormScreen({ visible, initialStudent, onCl
       }))
       .filter((item) => item.imageUrl);
 
+    const code = studentCode.trim();
     const payloadBase = {
       studentName: name,
+      studentCode: code,
       gender,
       personalityTypeCode: personalityCode.trim().toUpperCase(),
       favouriteJob: favJob,
@@ -951,6 +963,18 @@ export default function StudentProfileFormScreen({ visible, initialStudent, onCl
                 placeholderTextColor="#94a3b8"
               />
               {!!fieldErrors.name && <Text style={styles.fieldErrorText}>{fieldErrors.name}</Text>}
+            </View>
+
+            <View style={styles.field} ref={setFieldRef('studentCode')} collapsable={false}>
+              <Text style={styles.label}>CCCD học sinh</Text>
+              <TextInput
+                style={styles.input}
+                value={studentCode}
+                onChangeText={setStudentCode}
+                placeholder="CCCD (không bắt buộc)"
+                placeholderTextColor="#94a3b8"
+                autoCapitalize="characters"
+              />
             </View>
 
             <View style={styles.field} ref={setFieldRef('gender')} collapsable={false}>

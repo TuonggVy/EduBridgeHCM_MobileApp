@@ -1400,6 +1400,9 @@ export default function ChatScreen({
                   Họ tên: {studentProfileData.studentName || 'Đang cập nhật'}
                 </Text>
                 <Text style={[styles.profileField, isDark && styles.rowSubDark]}>
+                  Mã học sinh: {studentProfileData.studentCode?.trim() || 'Đang cập nhật'}
+                </Text>
+                <Text style={[styles.profileField, isDark && styles.rowSubDark]}>
                   Giới tính: {studentProfileData.gender || 'Đang cập nhật'}
                 </Text>
                 <Text style={[styles.profileField, isDark && styles.rowSubDark]}>
