@@ -14,6 +14,7 @@ import {
   ActivityIndicator,
   Modal,
 } from 'react-native';
+import { LinearGradient } from 'expo-linear-gradient';
 import { SchoolCard } from '../../components/SchoolCard';
 import type { SchoolSummary } from '../../types/school';
 import { MaterialIcons, sp, radius } from './tabConstants';
@@ -40,6 +41,7 @@ export type SchoolsTabScreenProps = {
   onRetry: () => void;
   onOpenSchool: (schoolId: number) => void;
   onToggleFavourite: (schoolId: number) => void;
+  onOpenBulkSubmission?: () => void;
 };
 
 export function SchoolsTabScreen({
@@ -51,6 +53,7 @@ export function SchoolsTabScreen({
   onRetry,
   onOpenSchool,
   onToggleFavourite,
+  onOpenBulkSubmission,
 }: SchoolsTabScreenProps) {
   const [query, setQuery] = useState('');
   const [visibleCount, setVisibleCount] = useState(SCHOOL_LIST_PAGE_SIZE);
@@ -276,6 +279,20 @@ export function SchoolsTabScreen({
             </Pressable>
           ) : null}
         </View>
+
+        {onOpenBulkSubmission ? (
+          <Pressable style={styles.bulkSubmitWrap} onPress={onOpenBulkSubmission}>
+            <LinearGradient
+              colors={['#1976d2', '#42a5f5']}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 1 }}
+              style={styles.bulkSubmitBtn}
+            >
+              <MaterialIcons name="upload-file" size={20} color="#fff" />
+              <Text style={styles.bulkSubmitText}>Nộp hồ sơ</Text>
+            </LinearGradient>
+          </Pressable>
+        ) : null}
 
         <View style={styles.filterActionRow}>
           <Pressable style={styles.filterOpenBtn} onPress={openFilterModal}>
@@ -527,6 +544,29 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '600',
     color: '#1976d2',
+  },
+  bulkSubmitWrap: {
+    marginTop: sp.sm,
+    borderRadius: radius.lg,
+    overflow: 'hidden',
+    shadowColor: '#1976d2',
+    shadowOpacity: 0.25,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 3,
+  },
+  bulkSubmitBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    paddingVertical: 14,
+    borderRadius: radius.lg,
+  },
+  bulkSubmitText: {
+    color: '#fff',
+    fontSize: 15,
+    fontWeight: '800',
   },
   filterActionRow: {
     flexDirection: 'row',
