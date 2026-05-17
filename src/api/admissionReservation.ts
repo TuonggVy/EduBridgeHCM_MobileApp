@@ -1,4 +1,5 @@
 import { apiRequest } from './client';
+import { MAX_PAYMENT_RESUBMIT_ATTEMPTS } from '../utils/reservationStatus';
 
 export type ReservationDocumentOcrCriterion = {
   label: string;
@@ -70,12 +71,9 @@ export type ReservationSubmissionResponse = {
   body: unknown;
 };
 
-export type ReservationFormStatus =
-  | 'RESERVATION_PENDING'
-  | 'RESERVATION_APPROVAL'
-  | 'RESERVATION_APPROVED'
-  | 'RESERVATION_REJECTED'
-  | 'RESERVATION_CANCELLED';
+import type { ReservationFormStatus } from '../utils/reservationStatus';
+
+export type { ReservationFormStatus };
 
 export type ReservationFormMetaItem = {
   key: string;
@@ -106,6 +104,8 @@ export type ReservationFormItem = {
   parentEmail: string | null;
   transferCode?: string | null;
   paymentProofUrl?: string | null;
+  /** Số lần đã nộp lại minh chứng (payment-again); tối đa 3. */
+  paymentResubmitCount?: number | null;
   createdTime: string | null;
   updatedTime: string | null;
   status: ReservationFormStatus | string;
@@ -127,6 +127,48 @@ export type ReservationFormListResponse = {
   body: ReservationFormItem[];
 };
 
+function toResubmitInt(value: unknown): number | null {
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return Math.max(0, Math.floor(value));
+  }
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    if (!trimmed) return null;
+    const parsed = Number(trimmed);
+    if (Number.isFinite(parsed)) return Math.max(0, Math.floor(parsed));
+  }
+  return null;
+}
+
+/** Số lần đã nộp lại (payment-again), suy ra từ field used hoặc remaining từ API. */
+function parsePaymentResubmitCount(raw: ReservationFormItemApi & Record<string, unknown>): number {
+  const remainingKeys = [
+    'remainingPaymentResubmitAttempts',
+    'remainingPaymentResubmits',
+    'remainingResubmitAttempts',
+  ];
+  for (const key of remainingKeys) {
+    const remaining = toResubmitInt(raw[key]);
+    if (remaining != null) {
+      return Math.max(0, MAX_PAYMENT_RESUBMIT_ATTEMPTS - remaining);
+    }
+  }
+
+  const usedKeys = [
+    'paymentResubmitCount',
+    'paymentProofResubmitCount',
+    'paymentRetryCount',
+    'paymentAgainCount',
+    'proofResubmitCount',
+    'resubmitCount',
+  ];
+  for (const key of usedKeys) {
+    const used = toResubmitInt(raw[key]);
+    if (used != null) return used;
+  }
+  return 0;
+}
+
 function mapReservationFormItem(raw: ReservationFormItemApi): ReservationFormItem {
   const profileMetaData = Array.isArray(raw.profileMetaData)
     ? raw.profileMetaData
@@ -137,6 +179,7 @@ function mapReservationFormItem(raw: ReservationFormItemApi): ReservationFormIte
     ...raw,
     profileMetaData,
     transcriptImages: Array.isArray(raw.transcriptImages) ? raw.transcriptImages : [],
+    paymentResubmitCount: parsePaymentResubmitCount(raw as ReservationFormItemApi & Record<string, unknown>),
   };
 }
 
@@ -193,6 +236,14 @@ export async function fetchAdmissionReservationForms(
   return { message: res.message, body };
 }
 
+/** Lấy một đơn giữ chỗ theo id (từ danh sách GET). */
+export async function fetchAdmissionReservationFormById(
+  admissionFormId: number
+): Promise<ReservationFormItem | null> {
+  const res = await fetchAdmissionReservationForms();
+  return res.body.find((item) => item.id === admissionFormId) ?? null;
+}
+
 export type ReservationTemplateMetaItem = {
   key: string;
   imageUrl: string[];
@@ -246,11 +297,41 @@ export async function fetchReservationFormTemplate(
   );
 }
 
+/** POST /api/v1/parent/admission/reservation/form/template — tạo mẫu hồ sơ giữ chỗ */
 export async function saveReservationFormTemplate(
   payload: ReservationTemplatePayload
 ): Promise<ReservationTemplateResponse> {
   return apiRequest<ReservationTemplateResponse>('/api/v1/parent/admission/reservation/form/template', {
     method: 'POST',
     body: payload,
+  });
+}
+
+export type ReservationTemplateUpdatePayload = ReservationTemplatePayload & {
+  admissionReservationFormTemplateId: number;
+};
+
+/** PUT /api/v1/parent/admission/reservation/form/template — cập nhật mẫu hồ sơ giữ chỗ */
+export async function updateReservationFormTemplate(
+  payload: ReservationTemplateUpdatePayload
+): Promise<ReservationTemplateResponse> {
+  return apiRequest<ReservationTemplateResponse>('/api/v1/parent/admission/reservation/form/template', {
+    method: 'PUT',
+    body: payload,
+  });
+}
+
+export type ReservationFormConfirmResponse = {
+  message: string;
+  body: unknown;
+};
+
+/** PUT /api/v1/parent/admission/reservation/form — xác nhận nhập học (action: confirm) */
+export async function confirmReservationEnrollment(
+  admissionFormId: number
+): Promise<ReservationFormConfirmResponse> {
+  return apiRequest<ReservationFormConfirmResponse>('/api/v1/parent/admission/reservation/form', {
+    method: 'PUT',
+    body: { admissionFormId, action: 'confirm' },
   });
 }

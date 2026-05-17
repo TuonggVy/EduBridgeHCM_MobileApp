@@ -18,6 +18,7 @@ import {
   fetchParentDocumentCatalog,
   fetchReservationFormTemplate,
   saveReservationFormTemplate,
+  updateReservationFormTemplate,
   type ReservationDocumentItem,
   type ReservationTemplate,
   type ReservationTemplateMetaItem,
@@ -40,6 +41,8 @@ type Props = {
   studentProfileId?: number | null;
   /** Mở thẳng form tạo mới (từ màn danh sách khi chưa có hồ sơ). */
   startInEditMode?: boolean;
+  /** Học sinh đã có mẫu — dùng khi tạo hồ sơ cho học sinh khác. */
+  existingTemplateStudentProfileIds?: number[];
   onSaved?: () => void;
 };
 
@@ -125,6 +128,7 @@ export default function ReservationProfileTemplateScreen({
   onClose,
   studentProfileId: studentProfileIdProp,
   startInEditMode = false,
+  existingTemplateStudentProfileIds,
   onSaved,
 }: Props) {
   const [loading, setLoading] = useState(false);
@@ -139,6 +143,11 @@ export default function ReservationProfileTemplateScreen({
   const [selectedStudentId, setSelectedStudentId] = useState<number | null>(null);
   const [uploadsByDoc, setUploadsByDoc] = useState<Record<string, UploadItem[]>>({});
   const [previewImageUrl, setPreviewImageUrl] = useState<string | null>(null);
+
+  const excludedStudentIds = useMemo(
+    () => new Set((existingTemplateStudentProfileIds ?? []).filter((id) => Number.isFinite(id))),
+    [existingTemplateStudentProfileIds]
+  );
 
   /** GET /api/v1/parent/documents — danh mục tài liệu hồ sơ. */
   const loadDocuments = useCallback(async (): Promise<ReservationDocumentItem[]> => {
@@ -205,8 +214,13 @@ export default function ReservationProfileTemplateScreen({
         setUploadsByDoc(uploadsFromMeta(body.profileMetaData ?? []));
         setEditing(false);
       } else {
+        const excludedIds = new Set(existingTemplateStudentProfileIds ?? []);
+        const firstWithoutTemplate = list.find((s) => {
+          const id = toNumberId(s.id);
+          return id != null && !excludedIds.has(id);
+        });
         const nextStudentId = skipFetch
-          ? toNumberId(list[0]?.id)
+          ? toNumberId(firstWithoutTemplate?.id) ?? toNumberId(list[0]?.id)
           : resolvedProfileId != null && list.some((s) => toNumberId(s.id) === resolvedProfileId)
             ? resolvedProfileId
             : toNumberId(list[0]?.id);
@@ -218,7 +232,7 @@ export default function ReservationProfileTemplateScreen({
       if (mode === 'initial') setLoading(false);
       if (mode === 'refresh') setRefreshing(false);
     },
-    [loadStudents, loadDocuments, startInEditMode, studentProfileIdProp]
+    [loadStudents, loadDocuments, startInEditMode, studentProfileIdProp, existingTemplateStudentProfileIds]
   );
 
   useEffect(() => {
@@ -369,10 +383,18 @@ export default function ReservationProfileTemplateScreen({
 
     setSaving(true);
     try {
-      await saveReservationFormTemplate({
-        studentProfileId: selectedStudentId,
-        submissionDocuments,
-      });
+      if (template?.id != null) {
+        await updateReservationFormTemplate({
+          admissionReservationFormTemplateId: template.id,
+          studentProfileId: selectedStudentId,
+          submissionDocuments,
+        });
+      } else {
+        await saveReservationFormTemplate({
+          studentProfileId: selectedStudentId,
+          submissionDocuments,
+        });
+      }
       await loadTemplate('refresh', selectedStudentId);
       setEditing(false);
       onSaved?.();
@@ -508,30 +530,43 @@ export default function ReservationProfileTemplateScreen({
                   {students.map((student) => {
                     const studentId = toNumberId(student.id);
                     const active = studentId != null && studentId === selectedStudentId;
-                    const locked = Boolean(template);
+                    const lockedToTemplate = Boolean(template);
+                    const hasExistingTemplate =
+                      !lockedToTemplate && studentId != null && excludedStudentIds.has(studentId);
+                    const disabled = lockedToTemplate || studentId == null || hasExistingTemplate;
                     return (
                       <Pressable
                         key={String(student.id)}
                         style={[
                           styles.studentCard,
                           active && styles.studentCardActive,
-                          locked && !active && styles.studentCardDisabled,
+                          disabled && !active && styles.studentCardDisabled,
                         ]}
                         onPress={() => {
-                          if (locked) return;
+                          if (disabled) return;
                           if (studentId == null) return;
                           setSelectedStudentId(studentId);
                           void loadTemplate('refresh', studentId);
                         }}
-                        disabled={locked || studentId == null}
+                        disabled={disabled}
                       >
                         <View style={styles.studentAvatar}>
-                          <MaterialIcons name="school" size={20} color={PRIMARY} />
+                          <MaterialIcons
+                            name={hasExistingTemplate ? 'lock' : 'school'}
+                            size={20}
+                            color={hasExistingTemplate ? '#94a3b8' : PRIMARY}
+                          />
                         </View>
-                        <Text style={styles.studentName} numberOfLines={2}>
+                        <Text
+                          style={[styles.studentName, hasExistingTemplate && styles.studentNameDisabled]}
+                          numberOfLines={2}
+                        >
                           {student.studentName || 'Học sinh'}
                         </Text>
                         <Text style={styles.genderChipText}>{genderLabel(student.gender)}</Text>
+                        {hasExistingTemplate ? (
+                          <Text style={styles.studentHasTemplateText}>Đã có hồ sơ</Text>
+                        ) : null}
                         {student.studentCode?.trim() ? (
                           <Text style={styles.studentCodeText} numberOfLines={1}>
                             Mã HS: {student.studentCode.trim()}
@@ -550,6 +585,8 @@ export default function ReservationProfileTemplateScreen({
               ) : null}
               {template ? (
                 <Text style={styles.metaHint}>Học sinh đã gắn với mẫu hồ sơ, không thể đổi khi cập nhật.</Text>
+              ) : excludedStudentIds.size > 0 ? (
+                <Text style={styles.metaHint}>Học sinh đã có hồ sơ giữ chỗ sẽ không chọn được.</Text>
               ) : null}
             </View>
 
@@ -585,14 +622,12 @@ export default function ReservationProfileTemplateScreen({
             </View>
           </ScrollView>
 
-          <View style={[styles.bottomBar, !template && styles.bottomBarCentered]}>
-            {template ? (
-              <Pressable style={styles.cancelBtn} onPress={() => setEditing(false)} disabled={saving}>
-                <Text style={styles.cancelBtnText}>Huỷ</Text>
-              </Pressable>
-            ) : null}
+          <View style={[styles.bottomBar, styles.bottomBarCentered]}>
             <Pressable
-              style={[styles.submitBtnWrap, template ? styles.submitBtnWrapFlex : styles.submitBtnWrapNarrow]}
+              style={[
+                styles.submitBtnWrap,
+                template ? styles.submitBtnWrapUpdate : styles.submitBtnWrapNarrow,
+              ]}
               onPress={() => void handleSave()}
               disabled={saving || missingRequired.length > 0 || !selectedStudentId}
             >
@@ -821,6 +856,14 @@ const styles = StyleSheet.create({
     elevation: 2,
   },
   studentCardDisabled: { opacity: 0.55 },
+  studentNameDisabled: { color: '#94a3b8' },
+  studentHasTemplateText: {
+    marginTop: 4,
+    fontSize: 10,
+    fontWeight: '700',
+    color: '#b45309',
+    textAlign: 'center',
+  },
   studentAvatar: {
     width: 36,
     height: 36,
@@ -925,19 +968,9 @@ const styles = StyleSheet.create({
   bottomBarCentered: {
     justifyContent: 'center',
   },
-  cancelBtn: {
-    paddingHorizontal: 16,
-    height: 48,
-    borderRadius: 14,
-    borderWidth: 1,
-    borderColor: '#e2e8f0',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  cancelBtnText: { fontSize: 15, fontWeight: '700', color: '#64748b' },
   submitBtnWrap: {},
-  submitBtnWrapFlex: { flex: 1 },
   submitBtnWrapNarrow: { width: '80%', maxWidth: 400 },
+  submitBtnWrapUpdate: { width: '82%', maxWidth: 400 },
   submitBtn: {
     height: 48,
     borderRadius: 14,

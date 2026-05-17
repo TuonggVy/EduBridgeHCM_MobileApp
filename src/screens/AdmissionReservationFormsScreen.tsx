@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
+  Alert,
   Modal,
   Pressable,
   RefreshControl,
@@ -13,12 +14,21 @@ import {
 import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 const MaterialIcons = require('@expo/vector-icons').MaterialIcons;
+import { ConfirmDialog } from '../components/ConfirmDialog';
 import {
+  confirmReservationEnrollment,
   fetchAdmissionReservationForms,
   type ReservationFormItem,
-  type ReservationFormStatus,
 } from '../api/admissionReservation';
+import {
+  canConfirmReservationEnrollment,
+  canSubmitReservationPayment,
+  isReservationPaymentAgain,
+  reservationStatusUi,
+  type ReservationFormStatus,
+} from '../utils/reservationStatus';
 import AdmissionReservationListScreen from './AdmissionReservationListScreen';
+import ReservationPaymentScreen from './ReservationPaymentScreen';
 
 type Props = {
   visible: boolean;
@@ -32,9 +42,10 @@ type FilterItem = {
 
 const FILTERS: FilterItem[] = [
   { id: 'ALL', label: 'Tất cả' },
-  { id: 'RESERVATION_PENDING', label: 'Chờ xử lý' },
-  { id: 'RESERVATION_APPROVAL', label: 'Đã xét duyệt' },
-  { id: 'RESERVATION_REJECTED', label: 'Từ chối' },
+  { id: 'RESERVATION_PENDING', label: 'Chờ trường duyệt' },
+  { id: 'RESERVATION_APPROVAL', label: 'Chờ thanh toán' },
+  { id: 'RESERVATION_PAYMENT_PENDING', label: 'Chờ xác nhận TT' },
+  { id: 'RESERVATION_REJECTED', label: 'Trường từ chối' },
   { id: 'RESERVATION_CANCELLED', label: 'Đã huỷ' },
 ];
 
@@ -60,53 +71,6 @@ function displayText(value?: string | null, fallback = '—'): string {
   return trimmed;
 }
 
-function statusUi(status: string) {
-  switch (status) {
-    case 'RESERVATION_PENDING':
-      return {
-        label: 'Chờ xử lý',
-        icon: 'schedule',
-        colors: ['#fff7ed', '#ffedd5'] as const,
-        text: '#c2410c',
-      };
-    case 'RESERVATION_APPROVAL':
-      return {
-        label: 'Đã xét duyệt',
-        icon: 'verified',
-        colors: ['#eff6ff', '#dbeafe'] as const,
-        text: '#1d4ed8',
-      };
-    case 'RESERVATION_APPROVED':
-      return {
-        label: 'Đã duyệt',
-        icon: 'check-circle',
-        colors: ['#ecfdf5', '#dcfce7'] as const,
-        text: '#15803d',
-      };
-    case 'RESERVATION_REJECTED':
-      return {
-        label: 'Từ chối',
-        icon: 'cancel',
-        colors: ['#fff1f2', '#ffe4e6'] as const,
-        text: '#be123c',
-      };
-    case 'RESERVATION_CANCELLED':
-      return {
-        label: 'Đã huỷ',
-        icon: 'block',
-        colors: ['#f8fafc', '#e2e8f0'] as const,
-        text: '#475569',
-      };
-    default:
-      return {
-        label: status || 'Không rõ',
-        icon: 'help-outline',
-        colors: ['#f8fafc', '#e2e8f0'] as const,
-        text: '#475569',
-      };
-  }
-}
-
 export default function AdmissionReservationFormsScreen({ visible, onClose }: Props) {
   const insets = useSafeAreaInsets();
   const [activeFilter, setActiveFilter] = useState<FilterItem['id']>('ALL');
@@ -116,6 +80,9 @@ export default function AdmissionReservationFormsScreen({ visible, onClose }: Pr
   const [error, setError] = useState<string | null>(null);
   const [detailVisible, setDetailVisible] = useState(false);
   const [selectedItem, setSelectedItem] = useState<ReservationFormItem | null>(null);
+  const [paymentItem, setPaymentItem] = useState<ReservationFormItem | null>(null);
+  const [confirmItem, setConfirmItem] = useState<ReservationFormItem | null>(null);
+  const [confirming, setConfirming] = useState(false);
 
   const loadData = useCallback(async (mode: 'initial' | 'refresh' = 'initial') => {
     if (mode === 'initial') setLoading(true);
@@ -151,8 +118,26 @@ export default function AdmissionReservationFormsScreen({ visible, onClose }: Pr
       setError(null);
       setDetailVisible(false);
       setSelectedItem(null);
+      setPaymentItem(null);
+      setConfirmItem(null);
+      setConfirming(false);
     }
   }, [visible]);
+
+  const handleConfirmEnrollment = async () => {
+    if (!confirmItem || confirming) return;
+    setConfirming(true);
+    try {
+      await confirmReservationEnrollment(confirmItem.id);
+      setConfirmItem(null);
+      void loadData('refresh');
+      Alert.alert('Thành công', 'Đã xác nhận nhập học.');
+    } catch (e: unknown) {
+      Alert.alert('Lỗi', e instanceof Error ? e.message : 'Không xác nhận được nhập học.');
+    } finally {
+      setConfirming(false);
+    }
+  };
 
   const openDetail = (item: ReservationFormItem) => {
     setSelectedItem(item);
@@ -201,7 +186,7 @@ export default function AdmissionReservationFormsScreen({ visible, onClose }: Pr
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => void loadData('refresh')} />}
       >
         {items.map((item) => {
-          const status = statusUi(item.status);
+          const status = reservationStatusUi(item.status);
           const docCount = (item.profileMetaData ?? []).filter((m) => (m.imageUrl?.length ?? 0) > 0).length;
           const transcriptCount = (item.transcriptImages ?? []).filter((t) => Boolean(t.imageUrl)).length;
           return (
@@ -240,6 +225,47 @@ export default function AdmissionReservationFormsScreen({ visible, onClose }: Pr
                 <MaterialIcons name="schedule" size={16} color="#64748b" />
                 <Text style={styles.infoRowText}>Nộp: {formatDateTime(item.createdTime)}</Text>
               </View>
+
+              {canSubmitReservationPayment(item) ? (
+                <Pressable
+                  onPress={() => setPaymentItem(item)}
+                  style={({ pressed }) => [styles.payBtnWrap, pressed && { opacity: 0.92 }]}
+                >
+                  <LinearGradient
+                    colors={['#1976d2', '#42a5f5']}
+                    start={{ x: 0, y: 0 }}
+                    end={{ x: 1, y: 1 }}
+                    style={styles.payBtn}
+                  >
+                    <MaterialIcons name="account-balance-wallet" size={18} color="#fff" />
+                    <Text style={styles.payBtnText}>
+                      {isReservationPaymentAgain(item.status) ? 'Nộp lại phí giữ chỗ' : 'Nộp phí giữ chỗ'}
+                    </Text>
+                    <MaterialIcons name="qr-code-2" size={18} color="#fff" />
+                  </LinearGradient>
+                </Pressable>
+              ) : null}
+
+              {canConfirmReservationEnrollment(item.status) ? (
+                <Pressable
+                  onPress={() => setConfirmItem(item)}
+                  style={({ pressed }) => [
+                    styles.payBtnWrap,
+                    canSubmitReservationPayment(item) && { marginTop: 8 },
+                    pressed && { opacity: 0.92 },
+                  ]}
+                >
+                  <LinearGradient
+                    colors={['#15803d', '#22c55e']}
+                    start={{ x: 0, y: 0 }}
+                    end={{ x: 1, y: 1 }}
+                    style={styles.payBtn}
+                  >
+                    <MaterialIcons name="how-to-reg" size={18} color="#fff" />
+                    <Text style={styles.payBtnText}>Xác nhận nhập học</Text>
+                  </LinearGradient>
+                </Pressable>
+              ) : null}
             </Pressable>
           );
         })}
@@ -308,8 +334,71 @@ export default function AdmissionReservationFormsScreen({ visible, onClose }: Pr
             setDetailVisible(false);
             setSelectedItem(null);
           }}
+          onPaymentSuccess={async (result) => {
+            const formId = selectedItem?.id;
+            if (formId != null && result?.paymentResubmitCount != null) {
+              const count = result.paymentResubmitCount;
+              setSelectedItem((prev) => (prev?.id === formId ? { ...prev, paymentResubmitCount: count } : prev));
+              setItems((prev) =>
+                prev.map((i) => (i.id === formId ? { ...i, paymentResubmitCount: count } : i))
+              );
+            }
+            try {
+              const res = await fetchAdmissionReservationForms(activeFilter);
+              const normalized = Array.isArray(res.body) ? res.body : [];
+              normalized.sort((a, b) => {
+                const aTime = a.createdTime ? new Date(a.createdTime).getTime() : 0;
+                const bTime = b.createdTime ? new Date(b.createdTime).getTime() : 0;
+                return bTime - aTime;
+              });
+              setItems(normalized);
+              setSelectedItem((prev) => {
+                if (!prev) return prev;
+                return normalized.find((i) => i.id === prev.id) ?? prev;
+              });
+            } catch {
+              void loadData('refresh');
+            }
+          }}
         />
       </Modal>
+
+      <ConfirmDialog
+        visible={confirmItem != null}
+        title="Xác nhận nhập học"
+        message="Bạn có chắc muốn xác nhận nhập học?"
+        cancelLabel="Huỷ"
+        confirmLabel="Xác nhận"
+        onCancel={() => setConfirmItem(null)}
+        onConfirm={() => void handleConfirmEnrollment()}
+      />
+
+      <ReservationPaymentScreen
+        visible={paymentItem != null}
+        admissionFormId={paymentItem?.id ?? 0}
+        formStatus={paymentItem?.status}
+        campusProgramOfferingId={paymentItem?.campusProgramOfferingId}
+        programName={paymentItem?.programName}
+        paymentResubmitCount={paymentItem?.paymentResubmitCount}
+        transferCode={paymentItem?.transferCode}
+        schoolName={paymentItem?.schoolName}
+        studentName={paymentItem?.studentName}
+        onBack={() => setPaymentItem(null)}
+        onSuccess={(result) => {
+          const formId = paymentItem?.id;
+          if (formId != null && result?.paymentResubmitCount != null) {
+            const count = result.paymentResubmitCount;
+            setItems((prev) =>
+              prev.map((i) => (i.id === formId ? { ...i, paymentResubmitCount: count } : i))
+            );
+            setSelectedItem((prev) =>
+              prev?.id === formId ? { ...prev, paymentResubmitCount: count } : prev
+            );
+          }
+          setPaymentItem(null);
+          void loadData('refresh');
+        }}
+      />
     </LinearGradient>
   );
 }
@@ -422,4 +511,14 @@ const styles = StyleSheet.create({
   },
   skeletonLineLg: { height: 18, width: '68%', borderRadius: 8, backgroundColor: '#e2e8f0' },
   skeletonLineMd: { height: 14, width: '52%', borderRadius: 7, backgroundColor: '#f1f5f9' },
+  payBtnWrap: { marginTop: 4, borderRadius: 14, overflow: 'hidden' },
+  payBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    paddingVertical: 12,
+    borderRadius: 14,
+  },
+  payBtnText: { color: '#fff', fontSize: 14, fontWeight: '800' },
 });

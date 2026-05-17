@@ -1,5 +1,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import {
+  ActivityIndicator,
+  Alert,
   Dimensions,
   Image,
   Modal,
@@ -11,12 +13,24 @@ import {
   View,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 const MaterialIcons = require('@expo/vector-icons').MaterialIcons;
+import { ConfirmDialog } from '../components/ConfirmDialog';
 import {
+  confirmReservationEnrollment,
   fetchParentDocumentCatalog,
   type ReservationFormItem,
 } from '../api/admissionReservation';
 import { formatGradeLevel } from '../utils/gradeLevel';
+import {
+  canConfirmReservationEnrollment,
+  canSubmitReservationPayment,
+  isReservationPaymentAgain,
+  reservationDisplayReason,
+  reservationReasonTitle,
+  reservationStatusUi,
+} from '../utils/reservationStatus';
+import ReservationPaymentScreen from './ReservationPaymentScreen';
 
 const { width: WIN_W, height: WIN_H } = Dimensions.get('window');
 
@@ -48,57 +62,19 @@ function displayText(value?: string | null, fallback = '—'): string {
   return trimmed;
 }
 
-function statusUi(status: string) {
-  switch (status) {
-    case 'RESERVATION_PENDING':
-      return {
-        label: 'Chờ xử lý',
-        icon: 'schedule',
-        colors: ['#fff7ed', '#ffedd5'] as const,
-        text: '#c2410c',
-      };
-    case 'RESERVATION_APPROVAL':
-      return {
-        label: 'Đã xét duyệt',
-        icon: 'verified',
-        colors: ['#eff6ff', '#dbeafe'] as const,
-        text: '#1d4ed8',
-      };
-    case 'RESERVATION_APPROVED':
-      return {
-        label: 'Đã duyệt',
-        icon: 'check-circle',
-        colors: ['#ecfdf5', '#dcfce7'] as const,
-        text: '#15803d',
-      };
-    case 'RESERVATION_REJECTED':
-      return {
-        label: 'Từ chối',
-        icon: 'cancel',
-        colors: ['#fff1f2', '#ffe4e6'] as const,
-        text: '#be123c',
-      };
-    case 'RESERVATION_CANCELLED':
-      return {
-        label: 'Đã huỷ',
-        icon: 'block',
-        colors: ['#f8fafc', '#e2e8f0'] as const,
-        text: '#475569',
-      };
-    default:
-      return {
-        label: status || 'Không rõ',
-        icon: 'help-outline',
-        colors: ['#f8fafc', '#e2e8f0'] as const,
-        text: '#475569',
-      };
-  }
-}
-
-export default function AdmissionReservationListScreen({ visible, item, onBack }: Props) {
+export default function AdmissionReservationListScreen({
+  visible,
+  item,
+  onBack,
+  onPaymentSuccess,
+}: Props & { onPaymentSuccess?: (result?: { paymentResubmitCount: number }) => void }) {
+  const insets = useSafeAreaInsets();
   const [previewImages, setPreviewImages] = useState<string[]>([]);
   const [previewIndex, setPreviewIndex] = useState(0);
   const [docNameByCode, setDocNameByCode] = useState<Map<string, string>>(new Map());
+  const [paymentVisible, setPaymentVisible] = useState(false);
+  const [confirmVisible, setConfirmVisible] = useState(false);
+  const [confirming, setConfirming] = useState(false);
 
   const loadDocCatalog = useCallback(async () => {
     try {
@@ -120,8 +96,26 @@ export default function AdmissionReservationListScreen({ visible, item, onBack }
     if (!visible) {
       setPreviewImages([]);
       setPreviewIndex(0);
+      setPaymentVisible(false);
+      setConfirmVisible(false);
+      setConfirming(false);
     }
   }, [visible]);
+
+  const handleConfirmEnrollment = async () => {
+    if (!item || confirming) return;
+    setConfirming(true);
+    try {
+      await confirmReservationEnrollment(item.id);
+      setConfirmVisible(false);
+      onPaymentSuccess?.();
+      Alert.alert('Thành công', 'Đã xác nhận nhập học.');
+    } catch (e: unknown) {
+      Alert.alert('Lỗi', e instanceof Error ? e.message : 'Không xác nhận được nhập học.');
+    } finally {
+      setConfirming(false);
+    }
+  };
 
   const openPreview = (images: string[], index: number) => {
     if (images.length === 0) return;
@@ -131,17 +125,17 @@ export default function AdmissionReservationListScreen({ visible, item, onBack }
 
   if (!visible || !item) return null;
 
-  const status = statusUi(item.status);
-  const reason = item.rejectReason?.trim() || item.cancelReason?.trim() || null;
-  const reasonTitle =
-    item.status === 'RESERVATION_CANCELLED'
-      ? 'Lý do huỷ'
-      : item.status === 'RESERVATION_REJECTED'
-        ? 'Lý do từ chối'
-        : 'Ghi chú';
+  const status = reservationStatusUi(item.status);
+  const reason = reservationDisplayReason(item);
+  const reasonTitle = reservationReasonTitle(item.status);
   const metadata = Array.isArray(item.profileMetaData) ? item.profileMetaData : [];
   const programLabel = displayText(item.programName, '');
   const transcripts = (item.transcriptImages ?? []).filter((t) => Boolean(t.imageUrl));
+  const paymentProofUrl = item.paymentProofUrl?.trim() || null;
+  const showPaymentCta = canSubmitReservationPayment(item);
+  const showConfirmCta = canConfirmReservationEnrollment(item.status);
+  const isPaymentAgain = isReservationPaymentAgain(item.status);
+  const showBottomBar = showPaymentCta || showConfirmCta;
 
   return (
     <LinearGradient colors={['#f8fafc', '#f1f5f9']} style={styles.screen}>
@@ -160,7 +154,13 @@ export default function AdmissionReservationListScreen({ visible, item, onBack }
         </View>
       </View>
 
-      <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+      <ScrollView
+        contentContainerStyle={[
+          styles.content,
+          showBottomBar && { paddingBottom: insets.bottom + 100 },
+        ]}
+        showsVerticalScrollIndicator={false}
+      >
         <View style={styles.card}>
           <View style={styles.cardHeader}>
             <View style={styles.schoolAvatar}>
@@ -294,6 +294,35 @@ export default function AdmissionReservationListScreen({ visible, item, onBack }
             </>
           ) : null}
 
+          {paymentProofUrl ? (
+            <View style={styles.paymentProofSection}>
+              <View style={styles.paymentProofHead}>
+                <MaterialIcons name="receipt-long" size={18} color="#1976d2" />
+                <Text style={styles.paymentProofTitle}>Minh chứng thanh toán</Text>
+              </View>
+              <Text style={styles.paymentProofHint}>Ảnh chụp màn hình giao dịch đã nộp</Text>
+              <Pressable
+                onPress={() => openPreview([paymentProofUrl], 0)}
+                style={({ pressed }) => [styles.paymentProofCard, pressed && { opacity: 0.92 }]}
+              >
+                <Image source={{ uri: paymentProofUrl }} style={styles.paymentProofImage} resizeMode="cover" />
+                <View style={styles.paymentProofZoom}>
+                  <MaterialIcons name="zoom-in" size={18} color="#fff" />
+                  <Text style={styles.paymentProofZoomText}>Nhấn để xem ảnh</Text>
+                </View>
+              </Pressable>
+            </View>
+          ) : null}
+
+          {item.status === 'RESERVATION_PAYMENT_REJECTED' && !showPaymentCta ? (
+            <View style={styles.retryExhaustedBox}>
+              <MaterialIcons name="info-outline" size={18} color="#b45309" />
+              <Text style={styles.retryExhaustedText}>
+                Đã hết lượt nộp lại minh chứng (tối đa 3 lần). Vui lòng liên hệ nhà trường để được hỗ trợ.
+              </Text>
+            </View>
+          ) : null}
+
           {reason ? (
             <View style={styles.reasonBox}>
               <View style={styles.reasonHead}>
@@ -319,6 +348,82 @@ export default function AdmissionReservationListScreen({ visible, item, onBack }
           <Text style={styles.footerMeta}>Cập nhật: {formatDateTime(item.updatedTime)}</Text>
         </View>
       </ScrollView>
+
+      {showBottomBar ? (
+        <View style={[styles.paymentBar, { paddingBottom: insets.bottom + 12 }]}>
+          {showPaymentCta ? (
+            <Pressable
+              onPress={() => setPaymentVisible(true)}
+              style={({ pressed }) => [styles.paymentBtnWrap, pressed && { opacity: 0.92 }]}
+            >
+              <LinearGradient
+                colors={['#1976d2', '#42a5f5']}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 1 }}
+                style={styles.paymentBtn}
+              >
+                <MaterialIcons name="payments" size={20} color="#fff" />
+                <Text style={styles.paymentBtnText}>
+                  {isPaymentAgain ? 'Nộp lại phí giữ chỗ' : 'Nộp phí giữ chỗ'}
+                </Text>
+                <MaterialIcons name="qr-code-2" size={20} color="#fff" />
+              </LinearGradient>
+            </Pressable>
+          ) : null}
+          {showConfirmCta ? (
+            <Pressable
+              onPress={() => setConfirmVisible(true)}
+              disabled={confirming}
+              style={({ pressed }) => [
+                styles.paymentBtnWrap,
+                showPaymentCta && { marginTop: 10 },
+                pressed && { opacity: 0.92 },
+              ]}
+            >
+              <LinearGradient
+                colors={['#15803d', '#22c55e']}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 1 }}
+                style={styles.paymentBtn}
+              >
+                {confirming ? (
+                  <ActivityIndicator size="small" color="#fff" />
+                ) : (
+                  <MaterialIcons name="how-to-reg" size={20} color="#fff" />
+                )}
+                <Text style={styles.paymentBtnText}>Xác nhận nhập học</Text>
+              </LinearGradient>
+            </Pressable>
+          ) : null}
+        </View>
+      ) : null}
+
+      <ConfirmDialog
+        visible={confirmVisible}
+        title="Xác nhận nhập học"
+        message="Bạn có chắc muốn xác nhận nhập học?"
+        cancelLabel="Huỷ"
+        confirmLabel="Xác nhận"
+        onCancel={() => setConfirmVisible(false)}
+        onConfirm={() => void handleConfirmEnrollment()}
+      />
+
+      <ReservationPaymentScreen
+        visible={paymentVisible}
+        admissionFormId={item.id}
+        formStatus={item.status}
+        campusProgramOfferingId={item.campusProgramOfferingId}
+        programName={item.programName}
+        paymentResubmitCount={item.paymentResubmitCount}
+        transferCode={item.transferCode}
+        schoolName={item.schoolName}
+        studentName={item.studentName}
+        onBack={() => setPaymentVisible(false)}
+        onSuccess={(result) => {
+          setPaymentVisible(false);
+          onPaymentSuccess?.(result);
+        }}
+      />
 
       {previewImages.length > 0 ? (
         <View style={styles.previewOverlay}>
@@ -473,6 +578,41 @@ const styles = StyleSheet.create({
     color: '#475569',
     textAlign: 'center',
   },
+  paymentProofSection: { marginTop: 14 },
+  paymentProofHead: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  paymentProofTitle: { fontSize: 14, fontWeight: '700', color: '#0f172a' },
+  paymentProofHint: { marginTop: 4, marginBottom: 10, fontSize: 12, color: '#64748b' },
+  paymentProofCard: {
+    borderRadius: 20,
+    overflow: 'hidden',
+    backgroundColor: '#f8fafc',
+    borderWidth: 1,
+    borderColor: '#e2e8f0',
+  },
+  paymentProofImage: { width: '100%', height: 200, backgroundColor: '#f1f5f9' },
+  paymentProofZoom: {
+    position: 'absolute',
+    right: 12,
+    bottom: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: 'rgba(15,23,42,0.65)',
+    borderRadius: 999,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+  },
+  paymentProofZoomText: { color: '#fff', fontSize: 11, fontWeight: '700' },
+  retryExhaustedBox: {
+    marginTop: 12,
+    borderRadius: 16,
+    padding: 12,
+    backgroundColor: '#fffbeb',
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 8,
+  },
+  retryExhaustedText: { flex: 1, fontSize: 12, color: '#92400e', lineHeight: 18 },
   reasonBox: { marginTop: 12, borderRadius: 16, padding: 12, backgroundColor: '#fff1f2' },
   reasonHead: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   reasonIconWrap: {
@@ -529,4 +669,25 @@ const styles = StyleSheet.create({
   },
   previewThumb: { width: 56, height: 56, borderRadius: 10, opacity: 0.65 },
   previewThumbActive: { opacity: 1, borderWidth: 2, borderColor: '#60a5fa' },
+  paymentBar: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
+    paddingHorizontal: 16,
+    paddingTop: 10,
+    backgroundColor: 'rgba(248,250,252,0.95)',
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: '#e2e8f0',
+  },
+  paymentBtnWrap: { borderRadius: 18, overflow: 'hidden' },
+  paymentBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 10,
+    paddingVertical: 15,
+    borderRadius: 18,
+  },
+  paymentBtnText: { color: '#fff', fontSize: 16, fontWeight: '800' },
 });
