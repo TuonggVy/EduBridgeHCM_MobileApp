@@ -122,7 +122,10 @@ export default function ReservationProfileListScreen({ visible, onClose }: Props
 
   const openDetail = (createMode: boolean, studentProfileId?: number | null) => {
     setDetailCreateMode(createMode);
-    setDetailStudentProfileId(studentProfileId ?? defaultStudentProfileId);
+    // `null` = tạo hồ sơ cho học sinh khác (không gắn học sinh mặc định)
+    setDetailStudentProfileId(
+      studentProfileId === undefined ? defaultStudentProfileId : studentProfileId
+    );
     setDetailVisible(true);
   };
 
@@ -260,6 +263,9 @@ export default function ReservationProfileListScreen({ visible, onClose }: Props
           visible={detailVisible}
           studentProfileId={detailStudentProfileId}
           startInEditMode={detailCreateMode}
+          existingTemplateStudentProfileIds={
+            detailCreateMode ? items.map(({ template }) => template.studentProfileId) : undefined
+          }
           onClose={() => {
             setDetailVisible(false);
             setDetailCreateMode(false);
