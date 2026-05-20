@@ -63,7 +63,8 @@
       "@react-native-firebase/app",
       "@react-native-firebase/messaging",
       "expo-image",
-      "expo-sharing"
+      "expo-sharing",
+      "@react-native-community/datetimepicker"
     ]
   }
 }

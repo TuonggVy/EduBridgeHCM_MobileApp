@@ -287,6 +287,7 @@ type Props = {
   onToggleFavourite: () => void;
   onContactConsult?: (campusId: number) => void;
   onOpenConsultBooking?: () => void;
+  onOpenBulkSubmission?: () => void;
   onOpenAdmissionSubmission?: (payload: {
     admissionCampaignId: number;
     campaignName: string;
@@ -436,6 +437,7 @@ export function SchoolDetailModal({
   onToggleFavourite,
   onContactConsult,
   onOpenConsultBooking,
+  onOpenBulkSubmission,
   onOpenAdmissionSubmission,
   studentPickerVisible = false,
   studentPickerOptions = [],
@@ -738,13 +740,17 @@ export function SchoolDetailModal({
 
   const handleCampaignAdmissionSubmit = useCallback(
     (campaign: SchoolCampaignTemplate) => {
+      if (onOpenBulkSubmission) {
+        onOpenBulkSubmission();
+        return;
+      }
       if (!onOpenAdmissionSubmission) return;
       onOpenAdmissionSubmission({
         admissionCampaignId: campaign.id,
         campaignName: campaign.name,
       });
     },
-    [onOpenAdmissionSubmission]
+    [onOpenAdmissionSubmission, onOpenBulkSubmission]
   );
 
   const handleSelectConsultCampus = (campusId: number) => {
@@ -1324,7 +1330,7 @@ export function SchoolDetailModal({
                             ) : null}
                           </View>
                         ) : null}
-                        {onOpenAdmissionSubmission ? (
+                        {onOpenBulkSubmission || onOpenAdmissionSubmission ? (
                           <Pressable
                             style={styles.submitProfileBtn}
                             onPress={() => handleCampaignAdmissionSubmit(campaign)}

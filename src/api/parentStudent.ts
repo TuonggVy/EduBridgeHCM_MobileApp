@@ -31,6 +31,7 @@ export async function fetchParentStudents(): Promise<ParentStudentsResponse> {
         id: item.id,
         studentName: item.studentName,
         studentCode: item.studentCode ?? null,
+        dateOfBirth: item.dateOfBirth ?? null,
         gender: item.gender,
         personalityTypeCode,
         favouriteJob: item.favouriteJob,

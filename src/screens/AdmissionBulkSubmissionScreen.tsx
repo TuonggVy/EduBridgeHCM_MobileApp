@@ -36,6 +36,7 @@ const { width: WIN_W, height: WIN_H } = Dimensions.get('window');
 type Props = {
   visible: boolean;
   schools: SchoolSummary[];
+  preselectedSchoolIds?: number[];
   onClose: () => void;
   onViewSubmittedForms?: () => void;
   onOpenReservationProfile?: () => void;
@@ -106,6 +107,7 @@ function StickyCta({
 export default function AdmissionBulkSubmissionScreen({
   visible,
   schools,
+  preselectedSchoolIds = [],
   onClose,
   onViewSubmittedForms,
   onOpenReservationProfile,
@@ -202,7 +204,13 @@ export default function AdmissionBulkSubmissionScreen({
       const unavailable = Array.isArray(res.body?.unavailable) ? res.body.unavailable : [];
       setAvailableSchools(available);
       setUnavailableGroups(unavailable);
-      setSelectedSchoolIds(available.map((s) => s.schoolId));
+      const availableIds = available.map((s) => s.schoolId);
+      if (preselectedSchoolIds.length > 0) {
+        const preselectedSet = new Set(preselectedSchoolIds);
+        setSelectedSchoolIds(availableIds.filter((id) => preselectedSet.has(id)));
+      } else {
+        setSelectedSchoolIds(availableIds);
+      }
     } catch (e) {
       Alert.alert('Lỗi', e instanceof Error ? e.message : 'Không kiểm tra được trường.');
       setAvailableSchools([]);
@@ -211,7 +219,7 @@ export default function AdmissionBulkSubmissionScreen({
     } finally {
       setSchoolsLoading(false);
     }
-  }, [selectedStudentId, schools]);
+  }, [preselectedSchoolIds, selectedStudentId, schools]);
 
   const loadTemplate = useCallback(async () => {
     if (!selectedStudentId) return;
@@ -322,7 +330,9 @@ export default function AdmissionBulkSubmissionScreen({
     setStep((s) => s - 1);
   };
 
-  const progress = step >= 5 ? 1 : (step - 1) / TOTAL_STEPS;
+  /** Bước 1..4: thanh tăng đều; bước 4 = 100%. Bước 5 (hoàn tất): vẫn full. */
+  const progress =
+    step >= 5 ? 1 : Math.min(1, Math.max(0, step / TOTAL_STEPS));
 
   const renderProgress = () => (
     <View style={styles.progressWrap}>
@@ -334,7 +344,10 @@ export default function AdmissionBulkSubmissionScreen({
           colors={[...GRADIENT]}
           start={{ x: 0, y: 0 }}
           end={{ x: 1, y: 0 }}
-          style={[styles.progressFill, { width: `${Math.max(8, progress * 100)}%` }]}
+          style={[
+            styles.progressFill,
+            { width: `${Math.max(4, Math.round(progress * 100))}%` },
+          ]}
         />
       </View>
     </View>
@@ -583,26 +596,43 @@ export default function AdmissionBulkSubmissionScreen({
   );
 
   const renderSuccess = () => (
-    <View style={styles.successWrap}>
-      <LinearGradient colors={['#dcfce7', '#ecfdf5']} style={styles.successIcon}>
-        <MaterialIcons name="check-circle" size={56} color="#16a34a" />
-      </LinearGradient>
-      <Text style={styles.successTitle}>Hồ sơ đã được gửi thành công</Text>
-      <Text style={styles.successSub}>Đã gửi đến {submittedSchoolNames.length} trường</Text>
-      <View style={styles.successList}>
-        {submittedSchoolNames.map((name) => (
-          <View key={name} style={styles.successItem}>
-            <MaterialIcons name="school" size={18} color={PRIMARY} />
-            <Text style={styles.successItemText}>{name}</Text>
-          </View>
-        ))}
+    <View style={styles.successScreen}>
+      <ScrollView
+        style={styles.successScroll}
+        contentContainerStyle={styles.successScrollContent}
+        showsVerticalScrollIndicator={false}
+        keyboardShouldPersistTaps="handled"
+      >
+        <LinearGradient colors={['#dcfce7', '#ecfdf5']} style={styles.successIcon}>
+          <MaterialIcons name="check-circle" size={56} color="#16a34a" />
+        </LinearGradient>
+        <Text style={styles.successTitle}>Hồ sơ đã được gửi thành công</Text>
+        <Text style={styles.successSub}>Đã gửi đến {submittedSchoolNames.length} trường</Text>
+        <View style={styles.successList}>
+          {submittedSchoolNames.map((name) => (
+            <View key={name} style={styles.successItem}>
+              <MaterialIcons name="school" size={18} color={PRIMARY} />
+              <Text style={styles.successItemText}>{name}</Text>
+            </View>
+          ))}
+        </View>
+      </ScrollView>
+      <View style={styles.successStickyActions}>
+        <Pressable
+          style={({ pressed }) => [styles.successActionPrimaryWrap, pressed && { opacity: 0.92 }]}
+          onPress={() => onViewSubmittedForms?.()}
+        >
+          <LinearGradient colors={[...GRADIENT]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.successActionPrimary}>
+            <Text style={styles.successActionPrimaryText}>Xem đơn đã nộp</Text>
+          </LinearGradient>
+        </Pressable>
+        <Pressable
+          style={({ pressed }) => [styles.successActionClose, pressed && { opacity: 0.92 }]}
+          onPress={onClose}
+        >
+          <Text style={styles.successActionCloseText}>Đóng</Text>
+        </Pressable>
       </View>
-      <Pressable style={styles.secondaryBtn} onPress={() => onViewSubmittedForms?.()}>
-        <Text style={styles.secondaryBtnText}>Xem đơn đã nộp</Text>
-      </Pressable>
-      <Pressable style={styles.secondaryBtn} onPress={onClose}>
-        <Text style={styles.secondaryBtnText}>Đóng</Text>
-      </Pressable>
     </View>
   );
 
@@ -871,7 +901,15 @@ const styles = StyleSheet.create({
     borderRadius: 16,
   },
   stickyBtnText: { color: '#fff', fontSize: 16, fontWeight: '800' },
-  successWrap: { flex: 1, alignItems: 'center', padding: 32, paddingTop: 48 },
+  successScreen: { flex: 1, width: '100%' },
+  successScroll: { flex: 1 },
+  successScrollContent: {
+    paddingHorizontal: 24,
+    paddingTop: 32,
+    paddingBottom: 16,
+    alignItems: 'center',
+    flexGrow: 1,
+  },
   successIcon: {
     width: 100,
     height: 100,
@@ -880,9 +918,23 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     marginBottom: 20,
   },
+  successStickyActions: {
+    paddingHorizontal: 16,
+    paddingTop: 12,
+    paddingBottom: 24,
+    gap: 10,
+    backgroundColor: '#ffffffee',
+    borderTopWidth: 1,
+    borderTopColor: '#e2e8f0',
+  },
   successTitle: { fontSize: 22, fontWeight: '800', color: '#0f172a', textAlign: 'center' },
   successSub: { fontSize: 14, color: '#64748b', marginTop: 8, marginBottom: 20 },
-  successList: { width: '100%', gap: 8, marginBottom: 24 },
+  successList: {
+    width: '100%',
+    maxWidth: 400,
+    gap: 8,
+    marginBottom: 8,
+  },
   successItem: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -892,13 +944,37 @@ const styles = StyleSheet.create({
     borderRadius: 14,
   },
   successItemText: { flex: 1, fontSize: 14, fontWeight: '600', color: '#334155' },
-  secondaryBtn: {
+  successActionPrimaryWrap: {
     width: '100%',
-    paddingVertical: 14,
-    alignItems: 'center',
-    marginBottom: 8,
+    borderRadius: 14,
+    overflow: 'hidden',
   },
-  secondaryBtnText: { fontSize: 15, fontWeight: '700', color: PRIMARY },
+  successActionPrimary: {
+    height: 48,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 14,
+  },
+  successActionPrimaryText: {
+    color: '#fff',
+    fontSize: 15,
+    fontWeight: '800',
+  },
+  successActionClose: {
+    width: '100%',
+    height: 48,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 14,
+    backgroundColor: '#fff',
+    borderWidth: 1,
+    borderColor: '#cbd5e1',
+  },
+  successActionCloseText: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: '#334155',
+  },
   previewOverlay: {
     ...StyleSheet.absoluteFillObject,
     zIndex: 200,
