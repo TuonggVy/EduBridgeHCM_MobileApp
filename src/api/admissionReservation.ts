@@ -85,6 +85,18 @@ export type ReservationFormTranscriptImage = {
   imageUrl: string | null;
 };
 
+export type ReservationMandatoryDocument = {
+  name: string;
+  required: boolean;
+  templateFileUrl?: string | null;
+};
+
+export type ReservationMethodDocument = {
+  name: string;
+  required: boolean;
+  templateUrl?: string | null;
+};
+
 /** GET /api/v1/parent/admission/reservation/form — phần tử body */
 export type ReservationFormItem = {
   id: number;
@@ -103,6 +115,7 @@ export type ReservationFormItem = {
   parentPhone: string | null;
   parentEmail: string | null;
   transferCode?: string | null;
+  confirmCode?: string | null;
   paymentProofUrl?: string | null;
   /** Số lần đã nộp lại minh chứng (payment-again); tối đa 3. */
   paymentResubmitCount?: number | null;
@@ -114,6 +127,8 @@ export type ReservationFormItem = {
   verifiedBy?: string | null;
   profileMetaData: ReservationFormMetaItem[];
   transcriptImages?: ReservationFormTranscriptImage[];
+  mandatoryDocuments?: ReservationMandatoryDocument[];
+  methodDocuments?: ReservationMethodDocument[];
 };
 
 type ReservationFormItemApi = Omit<ReservationFormItem, 'profileMetaData'> & {
@@ -179,6 +194,8 @@ function mapReservationFormItem(raw: ReservationFormItemApi): ReservationFormIte
     ...raw,
     profileMetaData,
     transcriptImages: Array.isArray(raw.transcriptImages) ? raw.transcriptImages : [],
+    mandatoryDocuments: Array.isArray(raw.mandatoryDocuments) ? raw.mandatoryDocuments : [],
+    methodDocuments: Array.isArray(raw.methodDocuments) ? raw.methodDocuments : [],
     paymentResubmitCount: parsePaymentResubmitCount(raw as ReservationFormItemApi & Record<string, unknown>),
   };
 }

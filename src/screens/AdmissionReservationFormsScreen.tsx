@@ -1,7 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
-  Alert,
   Modal,
   Pressable,
   RefreshControl,
@@ -15,6 +14,8 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 const MaterialIcons = require('@expo/vector-icons').MaterialIcons;
 import { ConfirmDialog } from '../components/ConfirmDialog';
+import { RequiredSubmissionDocumentsModal } from '../components/RequiredSubmissionDocumentsModal';
+import { SystemFeedbackModal } from '../components/SystemFeedbackModal';
 import {
   confirmReservationEnrollment,
   fetchAdmissionReservationForms,
@@ -23,6 +24,7 @@ import {
 import {
   canConfirmReservationEnrollment,
   canSubmitReservationPayment,
+  canViewRequiredSubmissionDocuments,
   isReservationPaymentAgain,
   reservationStatusUi,
   type ReservationFormStatus,
@@ -38,6 +40,13 @@ type Props = {
 type FilterItem = {
   id: 'ALL' | ReservationFormStatus;
   label: string;
+};
+
+type EnrollmentFeedbackState = {
+  visible: boolean;
+  title: string;
+  message: string;
+  variant: 'success' | 'error';
 };
 
 const FILTERS: FilterItem[] = [
@@ -82,7 +91,14 @@ export default function AdmissionReservationFormsScreen({ visible, onClose }: Pr
   const [selectedItem, setSelectedItem] = useState<ReservationFormItem | null>(null);
   const [paymentItem, setPaymentItem] = useState<ReservationFormItem | null>(null);
   const [confirmItem, setConfirmItem] = useState<ReservationFormItem | null>(null);
+  const [requiredDocsItem, setRequiredDocsItem] = useState<ReservationFormItem | null>(null);
   const [confirming, setConfirming] = useState(false);
+  const [enrollmentFeedback, setEnrollmentFeedback] = useState<EnrollmentFeedbackState>({
+    visible: false,
+    title: '',
+    message: '',
+    variant: 'success',
+  });
 
   const loadData = useCallback(async (mode: 'initial' | 'refresh' = 'initial') => {
     if (mode === 'initial') setLoading(true);
@@ -121,6 +137,7 @@ export default function AdmissionReservationFormsScreen({ visible, onClose }: Pr
       setPaymentItem(null);
       setConfirmItem(null);
       setConfirming(false);
+      setEnrollmentFeedback({ visible: false, title: '', message: '', variant: 'success' });
     }
   }, [visible]);
 
@@ -131,9 +148,19 @@ export default function AdmissionReservationFormsScreen({ visible, onClose }: Pr
       await confirmReservationEnrollment(confirmItem.id);
       setConfirmItem(null);
       void loadData('refresh');
-      Alert.alert('Thành công', 'Đã xác nhận nhập học.');
+      setEnrollmentFeedback({
+        visible: true,
+        title: 'Thành công',
+        message: 'Đã xác nhận nhập học.',
+        variant: 'success',
+      });
     } catch (e: unknown) {
-      Alert.alert('Lỗi', e instanceof Error ? e.message : 'Không xác nhận được nhập học.');
+      setEnrollmentFeedback({
+        visible: true,
+        title: 'Không xác nhận được nhập học',
+        message: e instanceof Error ? e.message : 'Vui lòng thử lại sau.',
+        variant: 'error',
+      });
     } finally {
       setConfirming(false);
     }
@@ -264,6 +291,25 @@ export default function AdmissionReservationFormsScreen({ visible, onClose }: Pr
                     <MaterialIcons name="how-to-reg" size={18} color="#fff" />
                     <Text style={styles.payBtnText}>Xác nhận nhập học</Text>
                   </LinearGradient>
+                </Pressable>
+              ) : null}
+
+              {canViewRequiredSubmissionDocuments(item.status) ? (
+                <Pressable
+                  onPress={() => setRequiredDocsItem(item)}
+                  style={({ pressed }) => [
+                    styles.payBtnWrap,
+                    (canSubmitReservationPayment(item) || canConfirmReservationEnrollment(item.status)) && {
+                      marginTop: 8,
+                    },
+                    pressed && { opacity: 0.92 },
+                  ]}
+                >
+                  <View style={styles.outlineBtn}>
+                    <MaterialIcons name="folder-special" size={18} color="#1976d2" />
+                    <Text style={styles.outlineBtnText}>Hồ sơ cần nộp</Text>
+                    <MaterialIcons name="chevron-right" size={20} color="#1976d2" />
+                  </View>
                 </Pressable>
               ) : null}
             </Pressable>
@@ -399,6 +445,22 @@ export default function AdmissionReservationFormsScreen({ visible, onClose }: Pr
           void loadData('refresh');
         }}
       />
+
+      <SystemFeedbackModal
+        visible={enrollmentFeedback.visible}
+        title={enrollmentFeedback.title}
+        message={enrollmentFeedback.message}
+        variant={enrollmentFeedback.variant}
+        onDismiss={() => setEnrollmentFeedback((prev) => ({ ...prev, visible: false }))}
+      />
+
+      <RequiredSubmissionDocumentsModal
+        visible={requiredDocsItem != null}
+        admissionFormId={requiredDocsItem?.id ?? 0}
+        schoolName={requiredDocsItem?.schoolName}
+        studentName={requiredDocsItem?.studentName}
+        onClose={() => setRequiredDocsItem(null)}
+      />
     </LinearGradient>
   );
 }
@@ -521,4 +583,16 @@ const styles = StyleSheet.create({
     borderRadius: 14,
   },
   payBtnText: { color: '#fff', fontSize: 14, fontWeight: '800' },
+  outlineBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    paddingVertical: 12,
+    borderRadius: 14,
+    borderWidth: 1.5,
+    borderColor: '#1976d2',
+    backgroundColor: '#fff',
+  },
+  outlineBtnText: { color: '#1976d2', fontSize: 14, fontWeight: '800' },
 });

@@ -154,6 +154,10 @@ export function canConfirmReservationEnrollment(status?: string | null): boolean
   return status === 'RESERVATION_DEPOSITED';
 }
 
+export function canViewRequiredSubmissionDocuments(status?: string | null): boolean {
+  return status === 'RESERVATION_CONFIRMED';
+}
+
 export function shouldHideRejectReason(status?: string | null): boolean {
   return status === 'RESERVATION_DEPOSITED' || status === 'RESERVATION_CONFIRMED';
 }

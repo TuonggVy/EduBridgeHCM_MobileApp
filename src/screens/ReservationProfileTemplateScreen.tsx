@@ -54,6 +54,13 @@ type UploadItem = {
   error?: string;
 };
 
+type SaveFeedbackState = {
+  visible: boolean;
+  title: string;
+  message: string;
+  variant: 'success' | 'error';
+};
+
 function toNumberId(value: number | string | undefined): number | null {
   if (typeof value === 'number' && Number.isFinite(value)) return value;
   if (typeof value === 'string') {
@@ -143,6 +150,12 @@ export default function ReservationProfileTemplateScreen({
   const [selectedStudentId, setSelectedStudentId] = useState<number | null>(null);
   const [uploadsByDoc, setUploadsByDoc] = useState<Record<string, UploadItem[]>>({});
   const [previewImageUrl, setPreviewImageUrl] = useState<string | null>(null);
+  const [saveFeedback, setSaveFeedback] = useState<SaveFeedbackState>({
+    visible: false,
+    title: '',
+    message: '',
+    variant: 'success',
+  });
 
   const excludedStudentIds = useMemo(
     () => new Set((existingTemplateStudentProfileIds ?? []).filter((id) => Number.isFinite(id))),
@@ -254,6 +267,7 @@ export default function ReservationProfileTemplateScreen({
       setSelectedStudentId(null);
       setUploadsByDoc({});
       setPreviewImageUrl(null);
+      setSaveFeedback({ visible: false, title: '', message: '', variant: 'success' });
     }
   }, [visible]);
 
@@ -398,9 +412,19 @@ export default function ReservationProfileTemplateScreen({
       await loadTemplate('refresh', selectedStudentId);
       setEditing(false);
       onSaved?.();
-      Alert.alert('Thành công', template ? 'Đã cập nhật hồ sơ giữ chỗ.' : 'Đã tạo hồ sơ giữ chỗ.');
+      setSaveFeedback({
+        visible: true,
+        title: 'Thành công',
+        message: template ? 'Đã cập nhật hồ sơ giữ chỗ.' : 'Đã tạo hồ sơ giữ chỗ.',
+        variant: 'success',
+      });
     } catch (e: unknown) {
-      Alert.alert('Lỗi', e instanceof Error ? e.message : 'Không lưu được hồ sơ giữ chỗ.');
+      setSaveFeedback({
+        visible: true,
+        title: 'Không lưu được hồ sơ giữ chỗ',
+        message: e instanceof Error ? e.message : 'Vui lòng thử lại sau.',
+        variant: 'error',
+      });
     } finally {
       setSaving(false);
     }
@@ -569,7 +593,7 @@ export default function ReservationProfileTemplateScreen({
                         ) : null}
                         {student.studentCode?.trim() ? (
                           <Text style={styles.studentCodeText} numberOfLines={1}>
-                            Mã HS: {student.studentCode.trim()}
+                            CCCD: {student.studentCode.trim()}
                           </Text>
                         ) : null}
                       </Pressable>
@@ -750,6 +774,45 @@ export default function ReservationProfileTemplateScreen({
             <MaterialIcons name="close" size={18} color="#fff" />
           </Pressable>
         </Pressable>
+      </Modal>
+
+      <Modal
+        transparent
+        visible={saveFeedback.visible}
+        animationType="fade"
+        onRequestClose={() => setSaveFeedback((prev) => ({ ...prev, visible: false }))}
+      >
+        <View style={styles.feedbackBackdrop}>
+          <View style={styles.feedbackCard}>
+            <View
+              style={[
+                styles.feedbackIconWrap,
+                saveFeedback.variant === 'success' ? styles.feedbackIconSuccess : styles.feedbackIconError,
+              ]}
+            >
+              <MaterialIcons
+                name={saveFeedback.variant === 'success' ? 'check-circle' : 'error-outline'}
+                size={26}
+                color={saveFeedback.variant === 'success' ? '#15803d' : '#b91c1c'}
+              />
+            </View>
+            <Text style={styles.feedbackTitle}>{saveFeedback.title}</Text>
+            <Text style={styles.feedbackMessage}>{saveFeedback.message}</Text>
+            <Pressable
+              style={styles.feedbackBtnWrap}
+              onPress={() => setSaveFeedback((prev) => ({ ...prev, visible: false }))}
+            >
+              <LinearGradient
+                colors={saveFeedback.variant === 'success' ? ['#1976d2', '#42a5f5'] : ['#dc2626', '#ef4444']}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 1 }}
+                style={styles.feedbackBtn}
+              >
+                <Text style={styles.feedbackBtnText}>Đã hiểu</Text>
+              </LinearGradient>
+            </Pressable>
+          </View>
+        </View>
       </Modal>
     </View>
   );
@@ -998,5 +1061,66 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(15,23,42,0.45)',
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  feedbackBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(15,23,42,0.4)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 24,
+  },
+  feedbackCard: {
+    width: '100%',
+    maxWidth: 360,
+    borderRadius: 18,
+    backgroundColor: '#fff',
+    paddingHorizontal: 18,
+    paddingTop: 18,
+    paddingBottom: 14,
+    alignItems: 'center',
+    shadowColor: '#0f172a',
+    shadowOpacity: 0.14,
+    shadowRadius: 16,
+    shadowOffset: { width: 0, height: 8 },
+    elevation: 8,
+  },
+  feedbackIconWrap: {
+    width: 54,
+    height: 54,
+    borderRadius: 27,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 10,
+  },
+  feedbackIconSuccess: { backgroundColor: '#dcfce7' },
+  feedbackIconError: { backgroundColor: '#fee2e2' },
+  feedbackTitle: {
+    fontSize: 18,
+    fontWeight: '800',
+    color: '#0f172a',
+    textAlign: 'center',
+  },
+  feedbackMessage: {
+    marginTop: 8,
+    fontSize: 14,
+    lineHeight: 20,
+    color: '#475569',
+    textAlign: 'center',
+  },
+  feedbackBtnWrap: {
+    width: '100%',
+    marginTop: 16,
+    borderRadius: 12,
+    overflow: 'hidden',
+  },
+  feedbackBtn: {
+    height: 44,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  feedbackBtnText: {
+    color: '#fff',
+    fontSize: 15,
+    fontWeight: '800',
   },
 });

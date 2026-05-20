@@ -1,7 +1,6 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import {
   ActivityIndicator,
-  Alert,
   Dimensions,
   Image,
   Modal,
@@ -16,6 +15,8 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 const MaterialIcons = require('@expo/vector-icons').MaterialIcons;
 import { ConfirmDialog } from '../components/ConfirmDialog';
+import { RequiredSubmissionDocumentsModal } from '../components/RequiredSubmissionDocumentsModal';
+import { SystemFeedbackModal } from '../components/SystemFeedbackModal';
 import {
   confirmReservationEnrollment,
   fetchParentDocumentCatalog,
@@ -25,6 +26,7 @@ import { formatGradeLevel } from '../utils/gradeLevel';
 import {
   canConfirmReservationEnrollment,
   canSubmitReservationPayment,
+  canViewRequiredSubmissionDocuments,
   isReservationPaymentAgain,
   reservationDisplayReason,
   reservationReasonTitle,
@@ -33,6 +35,13 @@ import {
 import ReservationPaymentScreen from './ReservationPaymentScreen';
 
 const { width: WIN_W, height: WIN_H } = Dimensions.get('window');
+
+type EnrollmentFeedbackState = {
+  visible: boolean;
+  title: string;
+  message: string;
+  variant: 'success' | 'error';
+};
 
 type Props = {
   visible: boolean;
@@ -73,8 +82,15 @@ export default function AdmissionReservationListScreen({
   const [previewIndex, setPreviewIndex] = useState(0);
   const [docNameByCode, setDocNameByCode] = useState<Map<string, string>>(new Map());
   const [paymentVisible, setPaymentVisible] = useState(false);
+  const [requiredDocsVisible, setRequiredDocsVisible] = useState(false);
   const [confirmVisible, setConfirmVisible] = useState(false);
   const [confirming, setConfirming] = useState(false);
+  const [enrollmentFeedback, setEnrollmentFeedback] = useState<EnrollmentFeedbackState>({
+    visible: false,
+    title: '',
+    message: '',
+    variant: 'success',
+  });
 
   const loadDocCatalog = useCallback(async () => {
     try {
@@ -97,8 +113,10 @@ export default function AdmissionReservationListScreen({
       setPreviewImages([]);
       setPreviewIndex(0);
       setPaymentVisible(false);
+      setRequiredDocsVisible(false);
       setConfirmVisible(false);
       setConfirming(false);
+      setEnrollmentFeedback({ visible: false, title: '', message: '', variant: 'success' });
     }
   }, [visible]);
 
@@ -109,9 +127,19 @@ export default function AdmissionReservationListScreen({
       await confirmReservationEnrollment(item.id);
       setConfirmVisible(false);
       onPaymentSuccess?.();
-      Alert.alert('Thành công', 'Đã xác nhận nhập học.');
+      setEnrollmentFeedback({
+        visible: true,
+        title: 'Thành công',
+        message: 'Đã xác nhận nhập học.',
+        variant: 'success',
+      });
     } catch (e: unknown) {
-      Alert.alert('Lỗi', e instanceof Error ? e.message : 'Không xác nhận được nhập học.');
+      setEnrollmentFeedback({
+        visible: true,
+        title: 'Không xác nhận được nhập học',
+        message: e instanceof Error ? e.message : 'Vui lòng thử lại sau.',
+        variant: 'error',
+      });
     } finally {
       setConfirming(false);
     }
@@ -134,8 +162,9 @@ export default function AdmissionReservationListScreen({
   const paymentProofUrl = item.paymentProofUrl?.trim() || null;
   const showPaymentCta = canSubmitReservationPayment(item);
   const showConfirmCta = canConfirmReservationEnrollment(item.status);
+  const showRequiredDocsCta = canViewRequiredSubmissionDocuments(item.status);
   const isPaymentAgain = isReservationPaymentAgain(item.status);
-  const showBottomBar = showPaymentCta || showConfirmCta;
+  const showBottomBar = showPaymentCta || showConfirmCta || showRequiredDocsCta;
 
   return (
     <LinearGradient colors={['#f8fafc', '#f1f5f9']} style={styles.screen}>
@@ -395,6 +424,22 @@ export default function AdmissionReservationListScreen({
               </LinearGradient>
             </Pressable>
           ) : null}
+          {showRequiredDocsCta ? (
+            <Pressable
+              onPress={() => setRequiredDocsVisible(true)}
+              style={({ pressed }) => [
+                styles.paymentBtnWrap,
+                (showPaymentCta || showConfirmCta) && { marginTop: 10 },
+                pressed && { opacity: 0.92 },
+              ]}
+            >
+              <View style={styles.outlinePaymentBtn}>
+                <MaterialIcons name="folder-special" size={20} color="#1976d2" />
+                <Text style={styles.outlinePaymentBtnText}>Hồ sơ cần nộp</Text>
+                <MaterialIcons name="chevron-right" size={22} color="#1976d2" />
+              </View>
+            </Pressable>
+          ) : null}
         </View>
       ) : null}
 
@@ -423,6 +468,22 @@ export default function AdmissionReservationListScreen({
           setPaymentVisible(false);
           onPaymentSuccess?.(result);
         }}
+      />
+
+      <RequiredSubmissionDocumentsModal
+        visible={requiredDocsVisible}
+        admissionFormId={item.id}
+        schoolName={item.schoolName}
+        studentName={item.studentName}
+        onClose={() => setRequiredDocsVisible(false)}
+      />
+
+      <SystemFeedbackModal
+        visible={enrollmentFeedback.visible}
+        title={enrollmentFeedback.title}
+        message={enrollmentFeedback.message}
+        variant={enrollmentFeedback.variant}
+        onDismiss={() => setEnrollmentFeedback((prev) => ({ ...prev, visible: false }))}
       />
 
       {previewImages.length > 0 ? (
@@ -690,4 +751,16 @@ const styles = StyleSheet.create({
     borderRadius: 18,
   },
   paymentBtnText: { color: '#fff', fontSize: 16, fontWeight: '800' },
+  outlinePaymentBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    paddingVertical: 14,
+    borderRadius: 14,
+    borderWidth: 1.5,
+    borderColor: '#1976d2',
+    backgroundColor: '#fff',
+  },
+  outlinePaymentBtnText: { color: '#1976d2', fontSize: 16, fontWeight: '800' },
 });

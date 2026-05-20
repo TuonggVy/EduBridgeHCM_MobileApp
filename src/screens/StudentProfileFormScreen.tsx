@@ -238,6 +238,40 @@ function normalizeVietnameseText(input: string): string {
     .trim();
 }
 
+function isoToDisplayDate(input?: string | null): string {
+  const raw = (input ?? '').trim();
+  const m = raw.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!m) return raw;
+  return `${m[3]}/${m[2]}/${m[1]}`;
+}
+
+function normalizeDisplayDateInput(input: string): string {
+  const digits = input.replace(/\D/g, '').slice(0, 8);
+  if (digits.length <= 2) return digits;
+  if (digits.length <= 4) return `${digits.slice(0, 2)}/${digits.slice(2)}`;
+  return `${digits.slice(0, 2)}/${digits.slice(2, 4)}/${digits.slice(4)}`;
+}
+
+function displayDateToIso(input: string): string | null {
+  const raw = input.trim();
+  if (!raw) return null;
+  const m = raw.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+  if (!m) return null;
+  return `${m[3]}-${m[2]}-${m[1]}`;
+}
+
+function isValidIsoDate(input: string): boolean {
+  const m = input.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!m) return false;
+  const year = Number(m[1]);
+  const month = Number(m[2]);
+  const day = Number(m[3]);
+  if (!Number.isInteger(year) || !Number.isInteger(month) || !Number.isInteger(day)) return false;
+  if (month < 1 || month > 12) return false;
+  const daysInMonth = new Date(year, month, 0).getDate();
+  return day >= 1 && day <= daysInMonth;
+}
+
 async function uploadImageToCloudinary(params: { uri: string; mimeType?: string; fileName?: string }) {
   if (!CLOUDINARY_CLOUD_NAME || !CLOUDINARY_UPLOAD_PRESET) {
     throw new Error('Thiếu cấu hình Cloudinary. Vui lòng thêm EXPO_PUBLIC_CLOUDINARY_CLOUD_NAME và EXPO_PUBLIC_CLOUDINARY_UPLOAD_PRESET');
@@ -323,6 +357,7 @@ export default function StudentProfileFormScreen({ visible, initialStudent, onCl
 
   const [studentName, setStudentName] = useState('');
   const [studentCode, setStudentCode] = useState('');
+  const [dateOfBirth, setDateOfBirth] = useState('');
   const [gender, setGender] = useState('');
   const [personalityCode, setPersonalityCode] = useState('');
   const [favouriteJob, setFavouriteJob] = useState('');
@@ -459,6 +494,7 @@ export default function StudentProfileFormScreen({ visible, initialStudent, onCl
     if (initialStudent) {
       setStudentName(initialStudent.studentName ?? '');
       setStudentCode(initialStudent.studentCode?.trim() ?? '');
+      setDateOfBirth(isoToDisplayDate(initialStudent.dateOfBirth));
       setGender(initialStudent.gender ?? '');
       setPersonalityCode(initialStudent.personalityTypeCode ?? '');
       setFavouriteJob(initialStudent.favouriteJob ?? '');
@@ -501,6 +537,7 @@ export default function StudentProfileFormScreen({ visible, initialStudent, onCl
     } else {
       setStudentName('');
       setStudentCode('');
+      setDateOfBirth('');
       setGender('');
       setPersonalityCode('');
       setFavouriteJob('');
@@ -840,9 +877,24 @@ export default function StudentProfileFormScreen({ visible, initialStudent, onCl
       .filter((item) => item.imageUrl);
 
     const code = studentCode.trim();
+    if (code && !/^\d{12}$/.test(code)) {
+      warnRequiredAt('studentCode', 'CCCD học sinh phải gồm đúng 12 chữ số');
+      return;
+    }
+    const dobText = dateOfBirth.trim();
+    const dobIso = dobText ? displayDateToIso(dobText) : null;
+    if (dobText && !dobIso) {
+      warnRequiredAt('dateOfBirth', 'Ngày sinh không hợp lệ, định dạng đúng: DD/MM/YYYY');
+      return;
+    }
+    if (dobIso && !isValidIsoDate(dobIso)) {
+      warnRequiredAt('dateOfBirth', 'Ngày sinh không hợp lệ');
+      return;
+    }
     const payloadBase = {
       studentName: name,
       studentCode: code,
+      dateOfBirth: dobIso || undefined,
       gender,
       personalityTypeCode: personalityCode.trim().toUpperCase(),
       favouriteJob: favJob,
@@ -970,11 +1022,35 @@ export default function StudentProfileFormScreen({ visible, initialStudent, onCl
               <TextInput
                 style={styles.input}
                 value={studentCode}
-                onChangeText={setStudentCode}
+                onChangeText={(t) => {
+                  const digitsOnly = t.replace(/\D/g, '').slice(0, 12);
+                  setStudentCode(digitsOnly);
+                  clearFieldError('studentCode');
+                }}
                 placeholder="CCCD (không bắt buộc)"
                 placeholderTextColor="#94a3b8"
-                autoCapitalize="characters"
+                keyboardType="number-pad"
+                maxLength={12}
               />
+              {!!fieldErrors.studentCode && <Text style={styles.fieldErrorText}>{fieldErrors.studentCode}</Text>}
+            </View>
+
+            <View style={styles.field} ref={setFieldRef('dateOfBirth')} collapsable={false}>
+              <Text style={styles.label}>Ngày sinh học sinh</Text>
+              <TextInput
+                style={styles.input}
+                value={dateOfBirth}
+                onChangeText={(t) => {
+                  setDateOfBirth(normalizeDisplayDateInput(t));
+                  clearFieldError('dateOfBirth');
+                }}
+                placeholder="DD/MM/YYYY (không bắt buộc)"
+                placeholderTextColor="#94a3b8"
+                autoCapitalize="none"
+                keyboardType="number-pad"
+                maxLength={10}
+              />
+              {!!fieldErrors.dateOfBirth && <Text style={styles.fieldErrorText}>{fieldErrors.dateOfBirth}</Text>}
             </View>
 
             <View style={styles.field} ref={setFieldRef('gender')} collapsable={false}>

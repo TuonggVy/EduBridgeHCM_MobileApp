@@ -149,6 +149,7 @@ export default function HomeScreen() {
   const [reservationListVisible, setReservationListVisible] = useState(false);
   const [reservationProfileVisible, setReservationProfileVisible] = useState(false);
   const [bulkSubmissionVisible, setBulkSubmissionVisible] = useState(false);
+  const [bulkSubmissionSchoolIds, setBulkSubmissionSchoolIds] = useState<number[]>([]);
 
   const refreshStudents = useCallback(async () => {
     try {
@@ -705,7 +706,10 @@ export default function HomeScreen() {
             onRetry={() => refreshSchools('initial')}
             onOpenSchool={openSchoolDetail}
             onToggleFavourite={toggleSchoolFavourite}
-            onOpenBulkSubmission={() => setBulkSubmissionVisible(true)}
+            onOpenBulkSubmission={(schoolIds) => {
+              setBulkSubmissionSchoolIds(Array.isArray(schoolIds) ? schoolIds : []);
+              setBulkSubmissionVisible(true);
+            }}
           />
         ) : activeTab === 'consult' ? (
           <ConversationsScreen
@@ -919,6 +923,10 @@ export default function HomeScreen() {
           closeStudentPicker();
           setConsultBookingVisible(true);
         }}
+        onOpenBulkSubmission={() => {
+          setSchoolDetailVisible(false);
+          setBulkSubmissionVisible(true);
+        }}
         onOpenAdmissionSubmission={({ admissionCampaignId }) => {
           setSelectedAdmissionCampaignId(admissionCampaignId);
           setSchoolDetailVisible(false);
@@ -1015,13 +1023,19 @@ export default function HomeScreen() {
         <AdmissionBulkSubmissionScreen
           visible={bulkSubmissionVisible}
           schools={schools}
-          onClose={() => setBulkSubmissionVisible(false)}
+          preselectedSchoolIds={bulkSubmissionSchoolIds}
+          onClose={() => {
+            setBulkSubmissionVisible(false);
+            setBulkSubmissionSchoolIds([]);
+          }}
           onViewSubmittedForms={() => {
             setBulkSubmissionVisible(false);
+            setBulkSubmissionSchoolIds([]);
             setReservationListVisible(true);
           }}
           onOpenReservationProfile={() => {
             setBulkSubmissionVisible(false);
+            setBulkSubmissionSchoolIds([]);
             setReservationProfileVisible(true);
           }}
         />

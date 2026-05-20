@@ -32,6 +32,7 @@ export type ParentStudentProfileApi = {
   id?: number | string;
   studentName: string;
   studentCode?: string | null;
+  dateOfBirth?: string | null;
   gender: string;
   personalityTypeCode: string;
   personalityCode?: string;
@@ -46,6 +47,7 @@ export type ParentStudentProfile = {
   id?: number | string;
   studentName: string;
   studentCode?: string | null;
+  dateOfBirth?: string | null;
   gender: string;
   personalityTypeCode: string;
   favouriteJob: string;
@@ -58,6 +60,7 @@ export type ParentStudentProfile = {
 export type CreateParentStudentPayload = {
   studentName: string;
   studentCode?: string;
+  dateOfBirth?: string;
   gender: string;
   personalityTypeCode: string;
   favouriteJob: string;
