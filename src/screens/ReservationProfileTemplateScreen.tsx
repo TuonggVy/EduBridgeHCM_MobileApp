@@ -703,16 +703,8 @@ export default function ReservationProfileTemplateScreen({
                 <Text style={styles.infoValue}>{genderLabel(template.gender)}</Text>
               </View>
               <View style={styles.infoItem}>
-                <Text style={styles.infoLabel}>Mã học sinh</Text>
+                <Text style={styles.infoLabel}>CCCD học sinh</Text>
                 <Text style={styles.infoValue}>{template.studentCode?.trim() || '—'}</Text>
-              </View>
-              <View style={styles.infoItem}>
-                <Text style={styles.infoLabel}>CCCD</Text>
-                <Text style={styles.infoValue}>{template.identityCard?.trim() || '—'}</Text>
-              </View>
-              <View style={styles.infoItemFull}>
-                <Text style={styles.infoLabel}>Địa chỉ</Text>
-                <Text style={styles.infoValue}>{template.address?.trim() || '—'}</Text>
               </View>
             </View>
           </View>
@@ -728,9 +720,17 @@ export default function ReservationProfileTemplateScreen({
                 <Text style={styles.infoLabel}>Số điện thoại</Text>
                 <Text style={styles.infoValue}>{template.parentPhone?.trim() || '—'}</Text>
               </View>
+              <View style={styles.infoItem}>
+                <Text style={styles.infoLabel}>CCCD</Text>
+                <Text style={styles.infoValue}>{template.identityCard?.trim() || '—'}</Text>
+              </View>
               <View style={styles.infoItemFull}>
                 <Text style={styles.infoLabel}>Email</Text>
                 <Text style={styles.infoValue}>{template.parentEmail?.trim() || '—'}</Text>
+              </View>
+              <View style={styles.infoItemFull}>
+                <Text style={styles.infoLabel}>Địa chỉ</Text>
+                <Text style={styles.infoValue}>{template.address?.trim() || '—'}</Text>
               </View>
             </View>
           </View>
