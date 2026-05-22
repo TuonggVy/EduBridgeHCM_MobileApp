@@ -230,6 +230,15 @@ export function SchoolsTabScreen({
     );
   }, []);
 
+  const selectAllSchools = useCallback(() => {
+    setSelectedSchoolIds(filteredSchools.map((school) => school.id));
+  }, [filteredSchools]);
+
+  const exitSelectionMode = useCallback(() => {
+    setSelectionMode(false);
+    setSelectedSchoolIds([]);
+  }, []);
+
   const handleBulkSubmissionAction = useCallback(() => {
     if (!onOpenBulkSubmission) return;
     if (!selectionMode) {
@@ -242,9 +251,8 @@ export function SchoolsTabScreen({
       return;
     }
     onOpenBulkSubmission(selectedSchoolIds);
-    setSelectionMode(false);
-    setSelectedSchoolIds([]);
-  }, [onOpenBulkSubmission, selectedSchoolIds, selectionMode]);
+    exitSelectionMode();
+  }, [onOpenBulkSubmission, exitSelectionMode, selectedSchoolIds, selectionMode]);
 
   const loadMore = useCallback(() => {
     if (visibleCount >= filteredSchools.length) return;
@@ -312,19 +320,43 @@ export function SchoolsTabScreen({
         </View>
 
         {onOpenBulkSubmission ? (
-          <Pressable style={styles.bulkSubmitWrap} onPress={handleBulkSubmissionAction}>
-            <LinearGradient
-              colors={['#1976d2', '#42a5f5']}
-              start={{ x: 0, y: 0 }}
-              end={{ x: 1, y: 1 }}
-              style={styles.bulkSubmitBtn}
-            >
-              <MaterialIcons name={selectionMode ? 'upload-file' : 'checklist'} size={20} color="#fff" />
-              <Text style={styles.bulkSubmitText}>
-                {selectionMode ? `Nộp hồ sơ${selectedSchoolIds.length ? ` (${selectedSchoolIds.length})` : ''}` : 'Chọn trường'}
-              </Text>
-            </LinearGradient>
-          </Pressable>
+          selectionMode ? (
+            <View style={styles.bulkSubmitRow}>
+              <Pressable style={styles.bulkSubmitWrapFlex} onPress={handleBulkSubmissionAction}>
+                <LinearGradient
+                  colors={['#1976d2', '#42a5f5']}
+                  start={{ x: 0, y: 0 }}
+                  end={{ x: 1, y: 1 }}
+                  style={styles.bulkSubmitBtn}
+                >
+                  <MaterialIcons name="upload-file" size={20} color="#fff" />
+                  <Text style={styles.bulkSubmitText}>
+                    {`Nộp hồ sơ${selectedSchoolIds.length ? ` (${selectedSchoolIds.length})` : ''}`}
+                  </Text>
+                </LinearGradient>
+              </Pressable>
+              <Pressable
+                style={styles.bulkSubmitCloseBtn}
+                onPress={exitSelectionMode}
+                hitSlop={8}
+                accessibilityLabel="Hủy chọn trường"
+              >
+                <MaterialIcons name="close" size={22} color="#64748b" />
+              </Pressable>
+            </View>
+          ) : (
+            <Pressable style={styles.bulkSubmitWrap} onPress={handleBulkSubmissionAction}>
+              <LinearGradient
+                colors={['#1976d2', '#42a5f5']}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 1 }}
+                style={styles.bulkSubmitBtn}
+              >
+                <MaterialIcons name="checklist" size={20} color="#fff" />
+                <Text style={styles.bulkSubmitText}>Chọn trường</Text>
+              </LinearGradient>
+            </Pressable>
+          )
         ) : null}
         {selectionMode ? (
           <Text style={styles.selectModeHint}>Chọn trường trên danh sách bằng ô checkbox, sau đó nhấn Nộp hồ sơ.</Text>
@@ -340,11 +372,18 @@ export function SchoolsTabScreen({
               </View>
             ) : null}
           </Pressable>
-          {activeFilterCount > 0 ? (
-            <Pressable onPress={clearAppliedFilters} hitSlop={8}>
-              <Text style={styles.sectionLink}>Xóa bộ lọc</Text>
-            </Pressable>
-          ) : null}
+          <View style={styles.filterActionRight}>
+            {selectionMode ? (
+              <Pressable onPress={selectAllSchools} hitSlop={8}>
+                <Text style={styles.sectionLink}>Chọn tất cả</Text>
+              </Pressable>
+            ) : null}
+            {activeFilterCount > 0 ? (
+              <Pressable onPress={clearAppliedFilters} hitSlop={8}>
+                <Text style={styles.sectionLink}>Xóa bộ lọc</Text>
+              </Pressable>
+            ) : null}
+          </View>
         </View>
         {activeFilterCount > 0 ? (
           <ScrollView
@@ -607,6 +646,12 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: '#1976d2',
   },
+  bulkSubmitRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: sp.sm,
+    marginTop: sp.sm,
+  },
   bulkSubmitWrap: {
     marginTop: sp.sm,
     borderRadius: radius.lg,
@@ -616,6 +661,26 @@ const styles = StyleSheet.create({
     shadowRadius: 8,
     shadowOffset: { width: 0, height: 4 },
     elevation: 3,
+  },
+  bulkSubmitWrapFlex: {
+    flex: 1,
+    borderRadius: radius.lg,
+    overflow: 'hidden',
+    shadowColor: '#1976d2',
+    shadowOpacity: 0.25,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 3,
+  },
+  bulkSubmitCloseBtn: {
+    width: 44,
+    height: 44,
+    borderRadius: radius.lg,
+    backgroundColor: '#fff',
+    borderWidth: 1,
+    borderColor: '#e2e8f0',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   bulkSubmitBtn: {
     flexDirection: 'row',
@@ -641,6 +706,11 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginTop: sp.sm,
     marginBottom: sp.sm,
+  },
+  filterActionRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: sp.md,
   },
   filterOpenBtn: {
     flexDirection: 'row',
