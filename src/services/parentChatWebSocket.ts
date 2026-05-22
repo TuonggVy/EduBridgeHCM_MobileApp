@@ -30,6 +30,8 @@ export type BuildPrivateChatPayloadParams = {
   campusId?: string | number | null;
   studentProfileId?: string | number | null;
   clientMessageId?: string;
+  /** Khi phụ huynh gửi kèm file (đồng bộ web `buildPrivateChatPayload`). */
+  files?: { fileName: string; fileUrl: string }[];
 };
 
 function normalizeCampusId(value: unknown): number {
@@ -53,6 +55,7 @@ export function buildPrivateChatPayload({
   campusId,
   studentProfileId,
   clientMessageId,
+  files,
 }: BuildPrivateChatPayloadParams) {
   const text = message ?? '';
   const ts = toLocalDateTimeIso();
@@ -82,6 +85,9 @@ export function buildPrivateChatPayload({
   if (studentProfileId != null && String(studentProfileId).trim() !== '') {
     const sp = Number(studentProfileId);
     out.studentProfileId = Number.isFinite(sp) ? Math.trunc(sp) : String(studentProfileId).trim();
+  }
+  if (Array.isArray(files) && files.length > 0) {
+    out.files = files.map(({ fileName, fileUrl }) => ({ fileName, fileUrl }));
   }
   return out;
 }

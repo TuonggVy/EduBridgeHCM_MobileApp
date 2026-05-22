@@ -1,6 +1,8 @@
 import React, { useState } from 'react';
 import { StatusBar } from 'expo-status-bar';
 import { ActivityIndicator, StyleSheet, View } from 'react-native';
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
+import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { GoogleSignin } from '@react-native-google-signin/google-signin';
 import { AuthProvider, useAuth } from './src/context/AuthContext';
 import { PushNotificationRuntime } from './src/components/PushNotificationRuntime';
@@ -57,16 +59,21 @@ function AppContent({
 export default function App() {
   const [authView, setAuthView] = useState<'login' | 'register'>('login');
   return (
-    <ToastProvider>
-      <AuthProvider onRegisterSuccess={() => setAuthView('login')}>
-        <PushNotificationRuntime />
-        <AppContent authView={authView} setAuthView={setAuthView} />
-      </AuthProvider>
-    </ToastProvider>
+    <GestureHandlerRootView style={styles.root}>
+      <SafeAreaProvider>
+        <ToastProvider>
+          <AuthProvider onRegisterSuccess={() => setAuthView('login')}>
+            <PushNotificationRuntime />
+            <AppContent authView={authView} setAuthView={setAuthView} />
+          </AuthProvider>
+        </ToastProvider>
+      </SafeAreaProvider>
+    </GestureHandlerRootView>
   );
 }
 
 const styles = StyleSheet.create({
+  root: { flex: 1 },
   bootstrapWrap: {
     flex: 1,
     alignItems: 'center',

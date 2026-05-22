@@ -45,6 +45,14 @@ function genderLabel(g: string): string {
   return g || '—';
 }
 
+function dateOfBirthLabel(value?: string | null): string | null {
+  const raw = (value ?? '').trim();
+  if (!raw) return null;
+  const m = raw.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!m) return raw;
+  return `${m[3]}/${m[2]}/${m[1]}`;
+}
+
 function scoreBarColor(score: number): string {
   if (score >= 8) return '#22c55e';
   if (score >= 5) return '#f59e0b';
@@ -146,11 +154,7 @@ export default function StudentProfileScreen({
     if (!student?.personalityTypeCode) return null;
     return findPersonalityByCode(personalityGrouped, student.personalityTypeCode) ?? null;
   }, [student, personalityGrouped]);
-
-  const subtitleGrade = formatGradeLevel(student?.academicInfos?.[0]?.gradeLevel);
-  const subtitle = subtitleGrade
-    ? `${genderLabel(student?.gender ?? '')} · ${subtitleGrade}`
-    : genderLabel(student?.gender ?? '');
+  const dobText = dateOfBirthLabel(student?.dateOfBirth);
 
   if (!student) return null;
 
@@ -174,9 +178,6 @@ export default function StudentProfileScreen({
               <Text style={styles.studentName} numberOfLines={2}>
                 {student.studentName}
               </Text>
-              <Text style={styles.subtitle} numberOfLines={2}>
-                {subtitle}
-              </Text>
             </View>
             <Pressable
               onPress={() => onEdit(student)}
@@ -192,6 +193,24 @@ export default function StudentProfileScreen({
           contentContainerStyle={styles.scrollContent}
           showsVerticalScrollIndicator={false}
         >
+          <View style={styles.card}>
+            <Text style={styles.cardSectionLabel}>Thông tin cơ bản</Text>
+            <View style={styles.infoGrid}>
+              <View style={styles.infoRow}>
+                <Text style={styles.infoLabel}>CCCD</Text>
+                <Text style={styles.infoValue}>{student.studentCode?.trim() || 'Chưa cập nhật'}</Text>
+              </View>
+              <View style={styles.infoRow}>
+                <Text style={styles.infoLabel}>Ngày sinh</Text>
+                <Text style={styles.infoValue}>{dobText || 'Chưa cập nhật'}</Text>
+              </View>
+              <View style={styles.infoRow}>
+                <Text style={styles.infoLabel}>Giới tính</Text>
+                <Text style={styles.infoValue}>{genderLabel(student.gender)}</Text>
+              </View>
+            </View>
+          </View>
+
           {/* Personality */}
           <View style={styles.card}>
             <Text style={styles.cardSectionLabel}>Tính cách (MBTI)</Text>
@@ -226,6 +245,16 @@ export default function StudentProfileScreen({
                   <Text style={styles.ctaBtnText}>Xem chi tiết</Text>
                   <Ionicons name="arrow-forward" size={18} color={PRIMARY} />
                 </Pressable>
+              </>
+            ) : student.traits?.length ? (
+              <>
+                <Text style={styles.pCode}>{student.personalityTypeCode || '—'}</Text>
+                {student.traits.map((t, i) => (
+                  <View key={`${t.name}-${i}`} style={detailStyles.bulletBlock}>
+                    <Text style={detailStyles.bulletTitle}>{t.name}</Text>
+                    <Text style={detailStyles.bulletBody}>{t.description}</Text>
+                  </View>
+                ))}
               </>
             ) : (
               <Text style={styles.muted}>Chưa chọn hoặc không tìm thấy mã {student.personalityTypeCode || '—'}.</Text>
@@ -330,6 +359,25 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: 'rgba(255,255,255,0.9)',
     fontWeight: '500',
+  },
+  infoGrid: {
+    gap: 10,
+  },
+  infoRow: {
+    borderRadius: radius.md,
+    backgroundColor: '#f8fafc',
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+  },
+  infoLabel: {
+    fontSize: 12,
+    color: '#64748b',
+    marginBottom: 3,
+  },
+  infoValue: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#0f172a',
   },
   editIcon: {
     width: 44,

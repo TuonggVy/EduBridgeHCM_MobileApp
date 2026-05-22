@@ -3,6 +3,7 @@
  */
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
+  Alert,
   View,
   Text,
   StyleSheet,
@@ -14,6 +15,7 @@ import {
   ActivityIndicator,
   Modal,
 } from 'react-native';
+import { LinearGradient } from 'expo-linear-gradient';
 import { SchoolCard } from '../../components/SchoolCard';
 import type { SchoolSummary } from '../../types/school';
 import { MaterialIcons, sp, radius } from './tabConstants';
@@ -40,6 +42,7 @@ export type SchoolsTabScreenProps = {
   onRetry: () => void;
   onOpenSchool: (schoolId: number) => void;
   onToggleFavourite: (schoolId: number) => void;
+  onOpenBulkSubmission?: (schoolIds?: number[]) => void;
 };
 
 export function SchoolsTabScreen({
@@ -51,6 +54,7 @@ export function SchoolsTabScreen({
   onRetry,
   onOpenSchool,
   onToggleFavourite,
+  onOpenBulkSubmission,
 }: SchoolsTabScreenProps) {
   const [query, setQuery] = useState('');
   const [visibleCount, setVisibleCount] = useState(SCHOOL_LIST_PAGE_SIZE);
@@ -61,6 +65,8 @@ export function SchoolsTabScreen({
   const [appliedDistricts, setAppliedDistricts] = useState<string[]>([]);
   const [draftBoardingTypes, setDraftBoardingTypes] = useState<string[]>([]);
   const [draftDistricts, setDraftDistricts] = useState<string[]>([]);
+  const [selectionMode, setSelectionMode] = useState(false);
+  const [selectedSchoolIds, setSelectedSchoolIds] = useState<number[]>([]);
 
   const activeFilterCount = appliedBoardingTypes.length + appliedDistricts.length;
 
@@ -207,10 +213,38 @@ export function SchoolsTabScreen({
     setVisibleCount(SCHOOL_LIST_PAGE_SIZE);
   }, [appliedBoardingTypes, appliedDistricts, query, schools]);
 
+  useEffect(() => {
+    if (!selectionMode) return;
+    const availableIds = new Set(filteredSchools.map((school) => school.id));
+    setSelectedSchoolIds((prev) => prev.filter((id) => availableIds.has(id)));
+  }, [filteredSchools, selectionMode]);
+
   const displayedSchools = useMemo(
     () => filteredSchools.slice(0, visibleCount),
     [filteredSchools, visibleCount]
   );
+
+  const toggleSelectSchool = useCallback((schoolId: number) => {
+    setSelectedSchoolIds((prev) =>
+      prev.includes(schoolId) ? prev.filter((id) => id !== schoolId) : [...prev, schoolId]
+    );
+  }, []);
+
+  const handleBulkSubmissionAction = useCallback(() => {
+    if (!onOpenBulkSubmission) return;
+    if (!selectionMode) {
+      setSelectionMode(true);
+      setSelectedSchoolIds([]);
+      return;
+    }
+    if (selectedSchoolIds.length === 0) {
+      Alert.alert('Chưa chọn trường', 'Vui lòng chọn ít nhất 1 trường để nộp hồ sơ.');
+      return;
+    }
+    onOpenBulkSubmission(selectedSchoolIds);
+    setSelectionMode(false);
+    setSelectedSchoolIds([]);
+  }, [onOpenBulkSubmission, selectedSchoolIds, selectionMode]);
 
   const loadMore = useCallback(() => {
     if (visibleCount >= filteredSchools.length) return;
@@ -277,6 +311,25 @@ export function SchoolsTabScreen({
           ) : null}
         </View>
 
+        {onOpenBulkSubmission ? (
+          <Pressable style={styles.bulkSubmitWrap} onPress={handleBulkSubmissionAction}>
+            <LinearGradient
+              colors={['#1976d2', '#42a5f5']}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 1 }}
+              style={styles.bulkSubmitBtn}
+            >
+              <MaterialIcons name={selectionMode ? 'upload-file' : 'checklist'} size={20} color="#fff" />
+              <Text style={styles.bulkSubmitText}>
+                {selectionMode ? `Nộp hồ sơ${selectedSchoolIds.length ? ` (${selectedSchoolIds.length})` : ''}` : 'Chọn trường'}
+              </Text>
+            </LinearGradient>
+          </Pressable>
+        ) : null}
+        {selectionMode ? (
+          <Text style={styles.selectModeHint}>Chọn trường trên danh sách bằng ô checkbox, sau đó nhấn Nộp hồ sơ.</Text>
+        ) : null}
+
         <View style={styles.filterActionRow}>
           <Pressable style={styles.filterOpenBtn} onPress={openFilterModal}>
             <MaterialIcons name="tune" size={18} color="#1d4ed8" />
@@ -326,6 +379,19 @@ export function SchoolsTabScreen({
           keyExtractor={(item) => String(item.id)}
           renderItem={({ item }) => (
             <View style={styles.schoolCardGap}>
+              {selectionMode ? (
+                <Pressable
+                  style={styles.selectCheckbox}
+                  onPress={() => toggleSelectSchool(item.id)}
+                  hitSlop={8}
+                >
+                  <MaterialIcons
+                    name={selectedSchoolIds.includes(item.id) ? 'check-box' : 'check-box-outline-blank'}
+                    size={24}
+                    color={selectedSchoolIds.includes(item.id) ? '#1976d2' : '#94a3b8'}
+                  />
+                </Pressable>
+              ) : null}
               <SchoolCard
                 name={item.name}
                 description={item.description}
@@ -335,7 +401,7 @@ export function SchoolsTabScreen({
                 onToggleFavourite={() => onToggleFavourite(item.id)}
                 showFooter={false}
                 containerStyle={styles.schoolCardFixedHeight}
-                onPress={() => onOpenSchool(item.id)}
+                onPress={() => (selectionMode ? toggleSelectSchool(item.id) : onOpenSchool(item.id))}
               />
             </View>
           )}
@@ -509,6 +575,19 @@ const styles = StyleSheet.create({
   },
   schoolCardGap: {
     marginBottom: sp.md,
+    position: 'relative',
+  },
+  selectCheckbox: {
+    position: 'absolute',
+    top: 10,
+    left: 10,
+    zIndex: 20,
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: 'rgba(255,255,255,0.95)',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   schoolCardFixedHeight: {
     height: 134,
@@ -527,6 +606,34 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '600',
     color: '#1976d2',
+  },
+  bulkSubmitWrap: {
+    marginTop: sp.sm,
+    borderRadius: radius.lg,
+    overflow: 'hidden',
+    shadowColor: '#1976d2',
+    shadowOpacity: 0.25,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 3,
+  },
+  bulkSubmitBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    paddingVertical: 14,
+    borderRadius: radius.lg,
+  },
+  bulkSubmitText: {
+    color: '#fff',
+    fontSize: 15,
+    fontWeight: '800',
+  },
+  selectModeHint: {
+    marginTop: sp.xs,
+    fontSize: 12,
+    color: '#475569',
   },
   filterActionRow: {
     flexDirection: 'row',

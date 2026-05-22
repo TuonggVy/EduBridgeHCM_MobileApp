@@ -111,6 +111,10 @@ function normalizeConversations(raw: unknown): ParentConversationsItem[] {
         asString(it?.updatedAt) ?? asString(it?.lastMessageTime) ?? asString(it?.time) ?? null;
     }
 
+    if (!lastMessageContent?.trim() && it?.lastMessageIsFile) {
+      lastMessageContent = 'Tệp đính kèm';
+    }
+
     const studentProfileIdRaw = it?.studentId ?? it?.studentProfileId;
     const studentProfileId =
       typeof studentProfileIdRaw === 'number'

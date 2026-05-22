@@ -30,7 +30,7 @@ const PRIMARY = '#1976d2';
 
 type Props = {
   visible: boolean;
-  campusProgramOfferingId: number | null;
+  admissionCampaignId: number | null;
   onClose: () => void;
   onViewSubmittedForms?: () => void;
 };
@@ -86,7 +86,7 @@ async function uploadImageToCloudinary(uri: string, fileName?: string) {
 
 export default function AdmissionReservationFormScreen({
   visible,
-  campusProgramOfferingId,
+  admissionCampaignId,
   onClose,
   onViewSubmittedForms,
 }: Props) {
@@ -103,13 +103,13 @@ export default function AdmissionReservationFormScreen({
   const [previewImageUrl, setPreviewImageUrl] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!visible || !campusProgramOfferingId) return;
+    if (!visible || !admissionCampaignId) return;
     let cancelled = false;
     setLoading(true);
     Promise.all([
       fetchParentStudents(),
       getProfile(),
-      fetchParentDocuments(campusProgramOfferingId),
+      fetchParentDocuments(admissionCampaignId),
     ])
       .then(([studentsRes, profileRes, docsRes]) => {
         if (cancelled) return;
@@ -132,7 +132,7 @@ export default function AdmissionReservationFormScreen({
     return () => {
       cancelled = true;
     };
-  }, [visible, campusProgramOfferingId]);
+  }, [visible, admissionCampaignId]);
 
   useEffect(() => {
     if (!visible) {
@@ -233,8 +233,8 @@ export default function AdmissionReservationFormScreen({
   };
 
   const handleSubmit = async () => {
-    if (!campusProgramOfferingId || !selectedStudentId) {
-      Alert.alert('Thiếu dữ liệu', 'Vui lòng chọn học sinh và gói tuyển sinh hợp lệ.');
+    if (!admissionCampaignId || !selectedStudentId) {
+      Alert.alert('Thiếu dữ liệu', 'Vui lòng chọn học sinh và chiến dịch tuyển sinh hợp lệ.');
       return;
     }
     if (missingRequired.length > 0) {
@@ -252,7 +252,7 @@ export default function AdmissionReservationFormScreen({
     try {
       await submitAdmissionReservationForm({
         submissionDocuments: docs,
-        campusProgramOfferingId,
+        admissionCampaignId,
         studentProfileId: selectedStudentId,
       });
       onViewSubmittedForms?.();

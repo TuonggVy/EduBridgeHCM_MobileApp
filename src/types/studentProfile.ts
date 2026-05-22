@@ -31,25 +31,36 @@ export type TranscriptImageItem = {
 export type ParentStudentProfileApi = {
   id?: number | string;
   studentName: string;
+  studentCode?: string | null;
+  dateOfBirth?: string | null;
   gender: string;
   personalityTypeCode: string;
+  personalityCode?: string;
   favouriteJob: string;
   academicProfileMetadata?: AcademicProfileMetadata[];
   transcriptImages?: TranscriptImageItem[];
+  traits?: PersonalityTrait[];
+  subjectsInSystem?: SubjectGroup[];
 };
 
 export type ParentStudentProfile = {
   id?: number | string;
   studentName: string;
+  studentCode?: string | null;
+  dateOfBirth?: string | null;
   gender: string;
   personalityTypeCode: string;
   favouriteJob: string;
   academicInfos: AcademicInfo[];
   transcriptImages?: TranscriptImageItem[];
+  traits?: PersonalityTrait[];
+  subjectsInSystem?: SubjectGroup[];
 };
 
 export type CreateParentStudentPayload = {
   studentName: string;
+  studentCode?: string;
+  dateOfBirth?: string;
   gender: string;
   personalityTypeCode: string;
   favouriteJob: string;
