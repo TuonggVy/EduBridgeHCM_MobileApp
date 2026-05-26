@@ -16,6 +16,7 @@ import {
 } from 'react-native';
 import { fetchSchoolCampaignTemplates, fetchSchoolPublicDetail } from '../api/school';
 import type { SchoolCampaignTemplate, SchoolDetail, SchoolSummary, SubjectJsonb } from '../types/school';
+import { campaignQueryYears, resolveCampaignOfferingNodes } from '../utils/schoolCampaign';
 import { MaterialIcons, radius, sp } from './tabs/tabConstants';
 
 const PRIMARY = '#1976d2';
@@ -52,14 +53,6 @@ function primaryCampusAddress(detail: SchoolDetail | null): string {
   return parts.length ? parts.join(', ') : '—';
 }
 
-function pickComparisonYear(detail: SchoolDetail | null): number {
-  const cur = detail?.curriculumList ?? [];
-  for (const c of cur) {
-    if (typeof c.applicationYear === 'number' && c.applicationYear > 0) return c.applicationYear;
-  }
-  return new Date().getFullYear();
-}
-
 function curriculumTypeVi(code: string | null | undefined): string {
   if (!code) return '—';
   if (code === 'INTERNATIONAL') return 'Quốc tế';
@@ -67,12 +60,14 @@ function curriculumTypeVi(code: string | null | undefined): string {
   return code.replace(/_/g, ' ');
 }
 
-function learningModeVi(code: string | null | undefined): string {
-  if (!code) return '—';
-  if (code === 'DAY_SCHOOL') return 'Bán trú / học ban ngày';
-  if (code === 'BOARDING' || code === 'FULL_BOARDING') return 'Nội trú';
-  if (code === 'HALF_BOARDING') return 'Bán trú có ăn nghỉ';
-  return code.replace(/_/g, ' ');
+function getLearningModeLabel(learningMode: unknown): string {
+  if (typeof learningMode !== 'string' || !learningMode.trim()) return '';
+  const normalized = learningMode.trim().toUpperCase().replace(/[\s-]+/g, '_');
+  if (normalized === 'DAY_SCHOOL') return 'Học ban ngày';
+  if (normalized === 'BOARDING' || normalized === 'FULL_BOARDING') return 'Nội trú';
+  if (normalized === 'SEMI_BOARDING') return 'Bán trú';
+  if (normalized === 'HALF_DAY' || normalized === 'HALF_BOARDING') return 'Bán ngày';
+  return learningMode.trim();
 }
 
 function readOfferingField(o: Record<string, unknown>, key: string): unknown {
@@ -82,21 +77,16 @@ function readOfferingField(o: Record<string, unknown>, key: string): unknown {
 function offeringTuition(o: Record<string, unknown>): number | null {
   const t = readOfferingField(o, 'tuitionFee');
   if (typeof t === 'number' && Number.isFinite(t)) return t;
-  const prog = readOfferingField(o, 'program');
-  if (prog && typeof prog === 'object') {
-    const bf = (prog as Record<string, unknown>).baseTuitionFee;
-    if (typeof bf === 'number' && Number.isFinite(bf)) return bf;
-  }
+  const { program } = resolveCampaignOfferingNodes(o);
+  const bf = program?.baseTuitionFee;
+  if (typeof bf === 'number' && Number.isFinite(bf)) return bf;
   return null;
 }
 
 function offeringFeeUnit(o: Record<string, unknown>): string | null {
-  const prog = readOfferingField(o, 'program');
-  if (prog && typeof prog === 'object') {
-    const u = (prog as Record<string, unknown>).feeUnit;
-    if (typeof u === 'string') return u;
-  }
-  return null;
+  const { program } = resolveCampaignOfferingNodes(o);
+  const u = program?.feeUnit;
+  return typeof u === 'string' ? u : null;
 }
 
 function tuitionSummary(detail: SchoolDetail | null, campaign: SchoolCampaignTemplate | null): string {
@@ -130,11 +120,9 @@ function programNamesLine(detail: SchoolDetail | null, campaign: SchoolCampaignT
   const namesFromCampaign = new Set<string>();
   for (const raw of campaign?.campusProgramOfferings ?? []) {
     if (!raw || typeof raw !== 'object') continue;
-    const o = raw as Record<string, unknown>;
-    const programObj = o.program && typeof o.program === 'object' ? (o.program as Record<string, unknown>) : null;
-    const curriculumObj = o.curriculum && typeof o.curriculum === 'object' ? (o.curriculum as Record<string, unknown>) : null;
-    if (typeof programObj?.name === 'string' && programObj.name.trim()) namesFromCampaign.add(programObj.name.trim());
-    if (typeof curriculumObj?.name === 'string' && curriculumObj.name.trim()) namesFromCampaign.add(curriculumObj.name.trim());
+    const { program, curriculum } = resolveCampaignOfferingNodes(raw as Record<string, unknown>);
+    if (typeof program?.name === 'string' && program.name.trim()) namesFromCampaign.add(program.name.trim());
+    if (typeof curriculum?.name === 'string' && curriculum.name.trim()) namesFromCampaign.add(curriculum.name.trim());
   }
   if (namesFromCampaign.size > 0) {
     const names = [...namesFromCampaign];
@@ -149,17 +137,8 @@ function curriculumTypesLine(detail: SchoolDetail | null, campaign: SchoolCampai
   const campaignTypes = new Set<string>();
   for (const raw of campaign?.campusProgramOfferings ?? []) {
     if (!raw || typeof raw !== 'object') continue;
-    const o = raw as Record<string, unknown>;
-    const curriculumObj = o.curriculum && typeof o.curriculum === 'object' ? (o.curriculum as Record<string, unknown>) : null;
-    const programObj = o.program && typeof o.program === 'object' ? (o.program as Record<string, unknown>) : null;
-    const nestedCur =
-      programObj?.curriculum && typeof programObj.curriculum === 'object'
-        ? (programObj.curriculum as Record<string, unknown>)
-        : null;
-    const type =
-      (typeof curriculumObj?.curriculumType === 'string' && curriculumObj.curriculumType) ||
-      (typeof nestedCur?.curriculumType === 'string' && nestedCur.curriculumType) ||
-      null;
+    const { curriculum } = resolveCampaignOfferingNodes(raw as Record<string, unknown>);
+    const type = typeof curriculum?.curriculumType === 'string' ? curriculum.curriculumType : null;
     if (type) campaignTypes.add(curriculumTypeVi(type));
   }
   if (campaignTypes.size > 0) return [...campaignTypes].join(' · ');
@@ -172,18 +151,8 @@ function mergeSubjects(detail: SchoolDetail | null, campaign: SchoolCampaignTemp
   const map = new Map<string, SubjectJsonb>();
   for (const raw of campaign?.campusProgramOfferings ?? []) {
     if (!raw || typeof raw !== 'object') continue;
-    const o = raw as Record<string, unknown>;
-    const curriculumObj =
-      o.curriculum && typeof o.curriculum === 'object' ? (o.curriculum as Record<string, unknown>) : null;
-    const programObj =
-      o.program && typeof o.program === 'object' ? (o.program as Record<string, unknown>) : null;
-    const nestedCurriculum =
-      programObj?.curriculum && typeof programObj.curriculum === 'object'
-        ? (programObj.curriculum as Record<string, unknown>)
-        : null;
-    const subjectOptions =
-      (Array.isArray(curriculumObj?.subjectOptions) ? curriculumObj?.subjectOptions : null) ??
-      (Array.isArray(nestedCurriculum?.subjectOptions) ? nestedCurriculum?.subjectOptions : null);
+    const { curriculum } = resolveCampaignOfferingNodes(raw as Record<string, unknown>);
+    const subjectOptions = Array.isArray(curriculum?.subjectOptions) ? curriculum.subjectOptions : null;
     if (!subjectOptions) continue;
     for (const rawSubject of subjectOptions) {
       if (!rawSubject || typeof rawSubject !== 'object') continue;
@@ -227,14 +196,17 @@ function mergeSubjects(detail: SchoolDetail | null, campaign: SchoolCampaignTemp
 
 function pickPrimaryCampaign(templates: SchoolCampaignTemplate[] | null | undefined): SchoolCampaignTemplate | null {
   if (!templates?.length) return null;
-  const open = templates.find((t) => String(t.status).includes('OPEN'));
-  return open ?? templates[0];
+  const open = templates.find(
+    (t) => t.status === 'OPEN_ADMISSION_CAMPAIGN' || String(t.status).toUpperCase().includes('OPEN')
+  );
+  if (open) return open;
+  return [...templates].sort((a, b) => (b.year ?? 0) - (a.year ?? 0))[0];
 }
 
 function admissionMethodLine(campaign: SchoolCampaignTemplate | null): string {
   const m = campaign?.admissionMethodDetails ?? [];
   if (!m.length) return '—';
-  return m.map((x) => x.displayName).join(' · ');
+  return m.map((x) => x.displayName).join('\n');
 }
 
 function campaignNameLine(campaign: SchoolCampaignTemplate | null): string {
@@ -242,22 +214,31 @@ function campaignNameLine(campaign: SchoolCampaignTemplate | null): string {
   return campaign.name;
 }
 
+function formatCampaignDate(value: string | null | undefined): string {
+  if (!value?.trim()) return '—';
+  const trimmed = value.trim();
+  const isoMatch = /^(\d{4})-(\d{2})-(\d{2})/.exec(trimmed);
+  if (isoMatch) {
+    const [, year, month, day] = isoMatch;
+    return `${day}/${month}/${year}`;
+  }
+  const date = new Date(trimmed);
+  if (!Number.isNaN(date.getTime())) {
+    const d = String(date.getDate()).padStart(2, '0');
+    const m = String(date.getMonth() + 1).padStart(2, '0');
+    const y = date.getFullYear();
+    return `${d}/${m}/${y}`;
+  }
+  return trimmed;
+}
+
 function admissionWindowLine(campaign: SchoolCampaignTemplate | null): string {
-  const offerings = campaign?.campusProgramOfferings ?? [];
-  const dates: string[] = [];
-  for (const raw of offerings) {
-    if (!raw || typeof raw !== 'object') continue;
-    const o = raw as Record<string, unknown>;
-    const od = o.openDate;
-    const cd = o.closeDate;
-    if (typeof od === 'string' && typeof cd === 'string') dates.push(`${od} → ${cd}`);
-  }
-  if (dates.length) return [...new Set(dates)].join('\n');
-  const d = campaign?.admissionMethodDetails?.[0];
-  if (d?.startDate?.length && d.endDate?.length) {
-    return `${d.startDate.join('-')} → ${d.endDate.join('-')}`;
-  }
-  return campaign?.startDate && campaign?.endDate ? `${campaign.startDate} → ${campaign.endDate}` : '—';
+  const start = formatCampaignDate(campaign?.startDate);
+  const end = formatCampaignDate(campaign?.endDate);
+  if (start === '—' && end === '—') return '—';
+  if (start === '—') return end;
+  if (end === '—') return start;
+  return `${start} → ${end}`;
 }
 
 function quotaLine(campaign: SchoolCampaignTemplate | null): string {
@@ -293,15 +274,16 @@ function quotaProgress(campaign: SchoolCampaignTemplate | null): { filled: numbe
   return { filled: Math.max(0, total - rem), total };
 }
 
+/** Gom `learningMode` từ các gói tuyển sinh (`campusProgramOfferings`). */
 function learningModesFromCampaign(campaign: SchoolCampaignTemplate | null): string {
   const offerings = campaign?.campusProgramOfferings ?? [];
   const modes = new Set<string>();
   for (const raw of offerings) {
     if (!raw || typeof raw !== 'object') continue;
-    const lm = (raw as Record<string, unknown>).learningMode;
-    if (typeof lm === 'string') modes.add(learningModeVi(lm));
+    const label = getLearningModeLabel(readOfferingField(raw as Record<string, unknown>, 'learningMode'));
+    if (label) modes.add(label);
   }
-  return modes.size ? [...modes].join(' · ') : '—';
+  return modes.size ? [...modes].join('\n') : '—';
 }
 
 function mandatoryDocNames(campaign: SchoolCampaignTemplate | null): string[] {
@@ -327,6 +309,21 @@ export type SchoolCompareScreenProps = {
   getIsFavourite: (schoolId: number) => boolean;
 };
 
+type CompareTableRowDef = {
+  key: string;
+  label: string;
+  values?: string[];
+  emphasize?: boolean;
+  renderCells?: (highlighted: boolean[]) => React.ReactNode;
+};
+
+function computeRowHighlight(values: string[]): boolean[] {
+  return values.map((_, i) => {
+    const others = values.filter((_, j) => j !== i);
+    return others.some((v) => v !== values[i]);
+  });
+}
+
 type SchoolBundle = {
   id: number;
   detail: SchoolDetail | null;
@@ -350,19 +347,19 @@ export default function SchoolCompareScreen({
   const [expandedSubjects, setExpandedSubjects] = useState<Record<number, boolean>>({});
   const [docsExpanded, setDocsExpanded] = useState<Record<number, boolean>>({});
 
-  const scrollRefs = useRef<(ScrollView | null)[]>([]);
+  const scrollRefs = useRef<Record<string, ScrollView | null>>({});
   const syncing = useRef(false);
 
-  const registerHScroll = useCallback((i: number, r: ScrollView | null) => {
-    scrollRefs.current[i] = r;
+  const registerHScroll = useCallback((key: string, r: ScrollView | null) => {
+    scrollRefs.current[key] = r;
   }, []);
 
-  const onSyncedScroll = useCallback((e: NativeSyntheticEvent<NativeScrollEvent>, idx: number) => {
+  const onSyncedScroll = useCallback((e: NativeSyntheticEvent<NativeScrollEvent>, sourceKey: string) => {
     if (syncing.current) return;
     const x = e.nativeEvent.contentOffset.x;
     syncing.current = true;
-    scrollRefs.current.forEach((r, j) => {
-      if (r && j !== idx) {
+    Object.entries(scrollRefs.current).forEach(([key, r]) => {
+      if (r && key !== sourceKey) {
         r.scrollTo({ x, animated: false });
       }
     });
@@ -370,6 +367,59 @@ export default function SchoolCompareScreen({
       syncing.current = false;
     });
   }, []);
+
+  const renderCompareTable = useCallback(
+    (tableKey: string, rows: CompareTableRowDef[]) => (
+      <View style={styles.compareTable}>
+        {rows.map((row, rowIdx) => {
+          const scrollKey = `${tableKey}-${row.key}`;
+          const highlighted = row.values != null ? computeRowHighlight(row.values) : [];
+          return (
+            <View
+              key={row.key}
+              style={[
+                styles.compareTableRow,
+                rowIdx === rows.length - 1 ? styles.compareTableRowLast : null,
+              ]}
+            >
+              <View style={[styles.labelCell, { width: LABEL_W }]}>
+                <Text style={styles.labelText}>{row.label}</Text>
+              </View>
+              <ScrollView
+                horizontal
+                nestedScrollEnabled
+                showsHorizontalScrollIndicator={false}
+                style={styles.compareDataScroll}
+                ref={(r) => registerHScroll(scrollKey, r)}
+                onScroll={(e) => onSyncedScroll(e, scrollKey)}
+                scrollEventThrottle={16}
+              >
+                {row.renderCells ? (
+                  row.renderCells(highlighted)
+                ) : (
+                  <View style={styles.compareDataRow}>
+                    {(row.values ?? []).map((v, i) => (
+                      <View
+                        key={i}
+                        style={[
+                          styles.dataCell,
+                          { width: COL_W },
+                          highlighted[i] ? styles.cellDiff : null,
+                        ]}
+                      >
+                        <Text style={row.emphasize ? styles.dataTextEm : styles.dataText}>{v}</Text>
+                      </View>
+                    ))}
+                  </View>
+                )}
+              </ScrollView>
+            </View>
+          );
+        })}
+      </View>
+    ),
+    [COL_W, onSyncedScroll, registerHScroll]
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -384,20 +434,40 @@ export default function SchoolCompareScreen({
           error: null,
         },
       }));
-      const currentYear = new Date().getFullYear();
-      const [detailResult, campaignResult] = await Promise.allSettled([
-        fetchSchoolPublicDetail(id),
-        fetchSchoolCampaignTemplates(id, currentYear),
-      ]);
-
+      let detail: SchoolDetail | null = null;
+      let detailRejected: unknown = null;
+      try {
+        const detailRes = await fetchSchoolPublicDetail(id);
+        detail = detailRes.body ?? null;
+      } catch (reason) {
+        detailRejected = reason;
+      }
       if (cancelled) return;
-      const detail = detailResult.status === 'fulfilled' ? detailResult.value.body ?? null : null;
-      const campaigns = campaignResult.status === 'fulfilled' ? campaignResult.value.body ?? [] : [];
+
+      let campaigns: SchoolCampaignTemplate[] = [];
+      let campaignRejected: unknown = null;
+      for (const year of campaignQueryYears(detail)) {
+        try {
+          const res = await fetchSchoolCampaignTemplates(id, year);
+          const rows = res.body ?? [];
+          if (rows.length > 0) {
+            campaigns = rows;
+            break;
+          }
+          campaigns = rows;
+        } catch (reason) {
+          campaignRejected = reason;
+        }
+        if (cancelled) return;
+      }
+
       const error =
-        detailResult.status === 'rejected' && campaignResult.status === 'rejected'
-          ? detailResult.reason instanceof Error
-            ? detailResult.reason.message
-            : 'Lỗi tải'
+        detailRejected != null && campaignRejected != null
+          ? detailRejected instanceof Error
+            ? detailRejected.message
+            : campaignRejected instanceof Error
+              ? campaignRejected.message
+              : 'Lỗi tải'
           : null;
 
       setBundles((prev) => ({
@@ -442,26 +512,6 @@ export default function SchoolCompareScreen({
     return allSchools.filter((s) => !selectedIds.includes(s.id) && (!q || s.name.toLowerCase().includes(q)));
   }, [allSchools, selectedIds, addQuery]);
 
-  const headerScrollIndex = 0;
-  const generalScrollIndex = 1;
-  const tuitionScrollIndex = 2;
-  const subjectsScrollIndex = 3;
-  const admissionScrollIndex = 4;
-  const docsScrollIndex = 5;
-  const learningScrollIndex = 6;
-
-  const renderLabelColumn = (rows: { label: string }[]) => (
-    <View style={[styles.labelCol, { width: LABEL_W }]}>
-      {rows.map((r) => (
-        <View key={r.label} style={[styles.labelCell, { minHeight: 44 }]}>
-          <Text style={styles.labelText} numberOfLines={3}>
-            {r.label}
-          </Text>
-        </View>
-      ))}
-    </View>
-  );
-
   const buildGeneralRows = () => {
     const founding = orderedBundles.map((b) => foundingYear(b.detail));
     const campusN = orderedBundles.map((b) => String(b.detail?.totalCampus ?? '—'));
@@ -474,14 +524,12 @@ export default function SchoolCompareScreen({
     return rows;
   };
 
-  const buildProgramRows = () => {
-    const campaignNames = orderedBundles.map((b) => campaignNameLine(b.campaign));
+  const buildProgramRows = (): CompareTableRowDef[] => {
     const types = orderedBundles.map((b) => curriculumTypesLine(b.detail, b.campaign));
     const names = orderedBundles.map((b) => programNamesLine(b.detail, b.campaign));
     return [
-      { label: 'Chiến dịch tuyển sinh', values: campaignNames },
-      { label: 'Loại chương trình', values: types },
-      { label: 'Tên chương trình', values: names },
+      { key: 'type', label: 'Loại chương trình', values: types },
+      { key: 'name', label: 'Tên chương trình', values: names },
     ];
   };
 
@@ -588,8 +636,8 @@ export default function SchoolCompareScreen({
         <ScrollView
           horizontal
           showsHorizontalScrollIndicator={false}
-          ref={(r) => registerHScroll(headerScrollIndex, r)}
-          onScroll={(e) => onSyncedScroll(e, headerScrollIndex)}
+          ref={(r) => registerHScroll('header', r)}
+          onScroll={(e) => onSyncedScroll(e, 'header')}
           scrollEventThrottle={16}
           contentContainerStyle={styles.headerRow}
         >
@@ -655,42 +703,7 @@ export default function SchoolCompareScreen({
         {buildGeneralRows().length > 0 ? (
           <View style={styles.section}>
             <Text style={styles.sectionTitle}>Thông tin chung</Text>
-            <View style={styles.compareRow}>
-              {renderLabelColumn(buildGeneralRows().map((r) => ({ label: r.label })))}
-              <ScrollView
-                horizontal
-                showsHorizontalScrollIndicator={false}
-                ref={(r) => registerHScroll(generalScrollIndex, r)}
-                onScroll={(e) => onSyncedScroll(e, generalScrollIndex)}
-                scrollEventThrottle={16}
-                style={{ flex: 1 }}
-              >
-                <View>
-                  {buildGeneralRows().map((row) => {
-                    const hi = row.values.map((_, i) => {
-                      const others = row.values.filter((_, j) => j !== i);
-                      return others.some((v) => v !== row.values[i]);
-                    });
-                    return (
-                      <View key={row.key} style={{ flexDirection: 'row' }}>
-                        {row.values.map((v, i) => (
-                          <View
-                            key={i}
-                            style={[
-                              styles.dataCell,
-                              { width: COL_W },
-                              hi[i] ? styles.cellDiff : null,
-                            ]}
-                          >
-                            <Text style={styles.dataText}>{v}</Text>
-                          </View>
-                        ))}
-                      </View>
-                    );
-                  })}
-                </View>
-              </ScrollView>
-            </View>
+            {renderCompareTable('general', buildGeneralRows())}
           </View>
         ) : null}
 
@@ -700,213 +713,90 @@ export default function SchoolCompareScreen({
           const progRows = buildProgramRows();
           if (orderedBundles.length === 0) return null;
           return (
-          <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Học phí & chương trình</Text>
-            <View style={styles.compareRow}>
-              <View style={[styles.labelCol, { width: LABEL_W }]}>
-                <View style={[styles.labelCell, { minHeight: 52 }]}>
-                  <Text style={styles.labelText}>Học phí</Text>
-                </View>
-                {progRows.map((r) => (
-                  <View key={r.label} style={[styles.labelCell, { minHeight: 52 }]}>
-                    <Text style={styles.labelText} numberOfLines={3}>
-                      {r.label}
-                    </Text>
-                  </View>
-                ))}
-              </View>
-              <ScrollView
-                horizontal
-                ref={(r) => registerHScroll(tuitionScrollIndex, r)}
-                onScroll={(e) => onSyncedScroll(e, tuitionScrollIndex)}
-                scrollEventThrottle={16}
-                showsHorizontalScrollIndicator={false}
-                style={{ flex: 1 }}
-              >
-                <View>
-                  <View style={{ flexDirection: 'row' }}>
-                    {tuitionVals.map((v, i) => {
-                      const vals = tuitionVals;
-                      const hi = vals.map((_, j) => {
-                        const o = vals.filter((_, k) => k !== j);
-                        return o.some((x) => x !== vals[j]);
-                      });
-                      return (
-                        <View
-                          key={i}
-                          style={[
-                            styles.dataCell,
-                            { width: COL_W },
-                            hi[i] ? styles.cellDiff : null,
-                          ]}
-                        >
-                          <Text style={styles.dataTextEm}>{v}</Text>
-                        </View>
-                      );
-                    })}
-                  </View>
-                  {progRows.map((row) => (
-                    <View key={row.label} style={{ flexDirection: 'row' }}>
-                      {row.values.map((v, i) => {
-                        const hi = row.values.map((_, j) => {
-                          const o = row.values.filter((_, k) => k !== j);
-                          return o.some((x) => x !== row.values[j]);
-                        });
-                        return (
-                          <View
-                            key={i}
-                            style={[
-                              styles.dataCell,
-                              { width: COL_W },
-                              hi[i] ? styles.cellDiff : null,
-                            ]}
-                          >
-                            <Text style={styles.dataText}>{v}</Text>
-                          </View>
-                        );
-                      })}
-                    </View>
-                  ))}
-                </View>
-              </ScrollView>
+            <View style={styles.section}>
+              <Text style={styles.sectionTitle}>Học phí & chương trình</Text>
+              {renderCompareTable('tuition', [
+                { key: 'tuition', label: 'Học phí', values: tuitionVals, emphasize: true },
+                ...progRows,
+              ])}
             </View>
-          </View>
           );
         })()}
 
         {/* Môn học */}
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Môn học</Text>
-          <View style={styles.compareRow}>
-            <View style={[styles.labelCol, { width: LABEL_W }]}>
-              <View style={[styles.labelCell, { minHeight: 80 }]}>
-                <Text style={styles.labelText}>Danh sách</Text>
-              </View>
-            </View>
-            <ScrollView
-              horizontal
-              ref={(r) => registerHScroll(subjectsScrollIndex, r)}
-              onScroll={(e) => onSyncedScroll(e, subjectsScrollIndex)}
-              scrollEventThrottle={16}
-              showsHorizontalScrollIndicator={false}
-              style={{ flex: 1 }}
-            >
-              <View style={{ flexDirection: 'row' }}>
-                {orderedBundles.map((b) => {
-                  const subs = mergeSubjects(b.detail, b.campaign);
-                  const expanded = expandedSubjects[b.id] ?? false;
-                  const shown = expanded ? subs : subs.slice(0, 8);
-                  return (
-                    <View key={b.id} style={[styles.dataCell, { width: COL_W }]}>
-                      {subs.length === 0 ? (
-                        <Text style={styles.dataText}>—</Text>
-                      ) : (
-                        <>
-                          <View style={styles.tagWrap}>
-                            {shown.map((s) => (
-                              <View key={s.name} style={styles.tag}>
-                                <Text style={styles.tagText} numberOfLines={2}>
-                                  {s.name}
-                                  {s.isMandatory ? ' (Bắt buộc)' : ''}
-                                </Text>
-                              </View>
-                            ))}
-                          </View>
-                          {subs.length > 8 ? (
-                            <Pressable onPress={() => setExpandedSubjects((p) => ({ ...p, [b.id]: !expanded }))}>
-                              <Text style={styles.linkSm}>{expanded ? 'Thu gọn' : 'Xem thêm'}</Text>
-                            </Pressable>
-                          ) : null}
-                        </>
-                      )}
-                    </View>
-                  );
-                })}
-              </View>
-            </ScrollView>
-          </View>
+          {renderCompareTable('subjects', [
+            {
+              key: 'list',
+              label: 'Danh sách',
+              renderCells: () => (
+                <View style={styles.compareDataRow}>
+                  {orderedBundles.map((b) => {
+                    const subs = mergeSubjects(b.detail, b.campaign);
+                    const expanded = expandedSubjects[b.id] ?? false;
+                    const shown = expanded ? subs : subs.slice(0, 8);
+                    return (
+                      <View key={b.id} style={[styles.dataCell, { width: COL_W }]}>
+                        {subs.length === 0 ? (
+                          <Text style={styles.dataText}>—</Text>
+                        ) : (
+                          <>
+                            <View style={styles.tagWrap}>
+                              {shown.map((s) => (
+                                <View key={s.name} style={styles.tag}>
+                                  <Text style={styles.tagText} numberOfLines={2}>
+                                    {s.name}
+                                    {s.isMandatory ? ' (Bắt buộc)' : ''}
+                                  </Text>
+                                </View>
+                              ))}
+                            </View>
+                            {subs.length > 8 ? (
+                              <Pressable onPress={() => setExpandedSubjects((p) => ({ ...p, [b.id]: !expanded }))}>
+                                <Text style={styles.linkSm}>{expanded ? 'Thu gọn' : 'Xem thêm'}</Text>
+                              </Pressable>
+                            ) : null}
+                          </>
+                        )}
+                      </View>
+                    );
+                  })}
+                </View>
+              ),
+            },
+          ])}
         </View>
 
         {/* Tuyển sinh */}
         {(() => {
+          const campaignVals = orderedBundles.map((b) => campaignNameLine(b.campaign));
           const methodVals = orderedBundles.map((b) => admissionMethodLine(b.campaign));
           const timeVals = orderedBundles.map((b) => admissionWindowLine(b.campaign));
           const quotaVals = orderedBundles.map((b) => quotaLine(b.campaign));
-          const admLabels = [
-            { label: 'Phương thức' },
-            { label: 'Thời gian' },
-            { label: 'Chỉ tiêu' },
-          ];
           return (
             <View style={styles.section}>
               <Text style={styles.sectionTitle}>Tuyển sinh</Text>
-              <View style={styles.compareRow}>
-                {renderLabelColumn(admLabels)}
-                <ScrollView
-                  horizontal
-                  ref={(r) => registerHScroll(admissionScrollIndex, r)}
-                  onScroll={(e) => onSyncedScroll(e, admissionScrollIndex)}
-                  scrollEventThrottle={16}
-                  showsHorizontalScrollIndicator={false}
-                  style={{ flex: 1 }}
-                >
-                  <View>
-                    <View style={{ flexDirection: 'row' }}>
-                      {methodVals.map((v, i) => {
-                        const hi = methodVals.map((_, j) => {
-                          const o = methodVals.filter((_, k) => k !== j);
-                          return o.some((x) => x !== methodVals[j]);
-                        });
-                        return (
-                          <View
-                            key={i}
-                            style={[
-                              styles.dataCell,
-                              { width: COL_W },
-                              hi[i] ? styles.cellDiff : null,
-                            ]}
-                          >
-                            <Text style={styles.dataText}>{v}</Text>
-                          </View>
-                        );
-                      })}
-                    </View>
-                    <View style={{ flexDirection: 'row' }}>
-                      {timeVals.map((v, i) => {
-                        const hi = timeVals.map((_, j) => {
-                          const o = timeVals.filter((_, k) => k !== j);
-                          return o.some((x) => x !== timeVals[j]);
-                        });
-                        return (
-                          <View
-                            key={i}
-                            style={[
-                              styles.dataCell,
-                              { width: COL_W },
-                              hi[i] ? styles.cellDiff : null,
-                            ]}
-                          >
-                            <Text style={styles.dataText}>{v}</Text>
-                          </View>
-                        );
-                      })}
-                    </View>
-                    <View style={{ flexDirection: 'row' }}>
-                      {orderedBundles.map((b) => {
+              {renderCompareTable('admission', [
+                { key: 'campaign', label: 'Chiến dịch tuyển sinh', values: campaignVals },
+                { key: 'method', label: 'Phương thức', values: methodVals },
+                { key: 'time', label: 'Thời gian tuyển sinh', values: timeVals },
+                {
+                  key: 'quota',
+                  label: 'Chỉ tiêu',
+                  values: quotaVals,
+                  renderCells: (highlighted) => (
+                    <View style={styles.compareDataRow}>
+                      {orderedBundles.map((b, idx) => {
                         const qText = quotaLine(b.campaign);
                         const p = quotaProgress(b.campaign);
-                        const hi = quotaVals.map((_, j) => {
-                          const o = quotaVals.filter((_, k) => k !== j);
-                          return o.some((x) => x !== quotaVals[j]);
-                        });
-                        const idx = orderedBundles.findIndex((x) => x.id === b.id);
                         return (
                           <View
                             key={b.id}
                             style={[
                               styles.dataCell,
                               { width: COL_W },
-                              hi[idx] ? styles.cellDiff : null,
+                              highlighted[idx] ? styles.cellDiff : null,
                             ]}
                           >
                             <Text style={styles.dataText}>{qText}</Text>
@@ -929,9 +819,9 @@ export default function SchoolCompareScreen({
                         );
                       })}
                     </View>
-                  </View>
-                </ScrollView>
-              </View>
+                  ),
+                },
+              ])}
             </View>
           );
         })()}
@@ -939,98 +829,58 @@ export default function SchoolCompareScreen({
         {/* Hồ sơ */}
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Hồ sơ yêu cầu</Text>
-          <View style={styles.compareRow}>
-            <View style={[styles.labelCol, { width: LABEL_W }]}>
-              <View style={[styles.labelCell, { minHeight: 72 }]}>
-                <Text style={styles.labelText}>Danh mục</Text>
-              </View>
-            </View>
-            <ScrollView
-              horizontal
-              ref={(r) => registerHScroll(docsScrollIndex, r)}
-              onScroll={(e) => onSyncedScroll(e, docsScrollIndex)}
-              scrollEventThrottle={16}
-              showsHorizontalScrollIndicator={false}
-              style={{ flex: 1 }}
-            >
-              <View style={{ flexDirection: 'row' }}>
-                {orderedBundles.map((b) => {
-                  const mandatory = mandatoryDocNames(b.campaign);
-                  const extra = methodDocNames(b.campaign);
-                  const merged = [...new Set([...mandatory, ...extra])];
-                  const expanded = docsExpanded[b.id] ?? false;
-                  const show = expanded ? merged : merged.slice(0, 3);
-                  return (
-                    <View key={b.id} style={[styles.dataCell, { width: COL_W }]}>
-                      {merged.length === 0 ? (
-                        <Text style={styles.dataText}>—</Text>
-                      ) : (
-                        <>
-                          {show.map((name, idx) => (
-                            <View key={idx} style={styles.checkRow}>
-                              <MaterialIcons name="check-circle" size={16} color={PRIMARY} />
-                              <Text style={styles.checkText} numberOfLines={2}>
-                                {name}
-                              </Text>
-                            </View>
-                          ))}
-                          {merged.length > 3 ? (
-                            <Pressable onPress={() => setDocsExpanded((p) => ({ ...p, [b.id]: !expanded }))}>
-                              <Text style={styles.linkSm}>{expanded ? 'Thu gọn' : 'Xem thêm'}</Text>
-                            </Pressable>
-                          ) : null}
-                        </>
-                      )}
-                    </View>
-                  );
-                })}
-              </View>
-            </ScrollView>
-          </View>
+          {renderCompareTable('docs', [
+            {
+              key: 'list',
+              label: 'Danh mục',
+              renderCells: () => (
+                <View style={styles.compareDataRow}>
+                  {orderedBundles.map((b) => {
+                    const mandatory = mandatoryDocNames(b.campaign);
+                    const extra = methodDocNames(b.campaign);
+                    const merged = [...new Set([...mandatory, ...extra])];
+                    const expanded = docsExpanded[b.id] ?? false;
+                    const show = expanded ? merged : merged.slice(0, 3);
+                    return (
+                      <View key={b.id} style={[styles.dataCell, { width: COL_W }]}>
+                        {merged.length === 0 ? (
+                          <Text style={styles.dataText}>—</Text>
+                        ) : (
+                          <>
+                            {show.map((name, idx) => (
+                              <View key={idx} style={styles.checkRow}>
+                                <MaterialIcons name="check-circle" size={16} color={PRIMARY} />
+                                <Text style={styles.checkText} numberOfLines={2}>
+                                  {name}
+                                </Text>
+                              </View>
+                            ))}
+                            {merged.length > 3 ? (
+                              <Pressable onPress={() => setDocsExpanded((p) => ({ ...p, [b.id]: !expanded }))}>
+                                <Text style={styles.linkSm}>{expanded ? 'Thu gọn' : 'Xem thêm'}</Text>
+                              </Pressable>
+                            ) : null}
+                          </>
+                        )}
+                      </View>
+                    );
+                  })}
+                </View>
+              ),
+            },
+          ])}
         </View>
 
         {/* Hình thức học */}
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Hình thức học</Text>
-          <View style={styles.compareRow}>
-            <View style={[styles.labelCol, { width: LABEL_W }]}>
-              <View style={[styles.labelCell, { minHeight: 44 }]}>
-                <Text style={styles.labelText}>Chế độ</Text>
-              </View>
-            </View>
-            <ScrollView
-              horizontal
-              ref={(r) => registerHScroll(learningScrollIndex, r)}
-              onScroll={(e) => onSyncedScroll(e, learningScrollIndex)}
-              scrollEventThrottle={16}
-              showsHorizontalScrollIndicator={false}
-              style={{ flex: 1 }}
-            >
-              <View style={{ flexDirection: 'row' }}>
-                {orderedBundles.map((b) => {
-                  const v = learningModesFromCampaign(b.campaign);
-                  const hi = orderedBundles.map((ob) => learningModesFromCampaign(ob.campaign));
-                  const diff = hi.map((_, i) => {
-                    const o = hi.filter((_, j) => j !== i);
-                    return o.some((x) => x !== hi[i]);
-                  });
-                  const idx = orderedBundles.findIndex((x) => x.id === b.id);
-                  return (
-                    <View
-                      key={b.id}
-                      style={[
-                        styles.dataCell,
-                        { width: COL_W },
-                        diff[idx] ? styles.cellDiff : null,
-                      ]}
-                    >
-                      <Text style={styles.dataText}>{v}</Text>
-                    </View>
-                  );
-                })}
-              </View>
-            </ScrollView>
-          </View>
+          {renderCompareTable('learning', [
+            {
+              key: 'mode',
+              label: 'Chế độ',
+              values: orderedBundles.map((b) => learningModesFromCampaign(b.campaign)),
+            },
+          ])}
         </View>
 
         <View style={{ height: 32 }} />
@@ -1222,9 +1072,7 @@ const styles = StyleSheet.create({
     color: TEXT,
     marginBottom: sp.sm,
   },
-  compareRow: {
-    flexDirection: 'row',
-    alignItems: 'stretch',
+  compareTable: {
     backgroundColor: '#fff',
     borderRadius: 16,
     overflow: 'hidden',
@@ -1234,32 +1082,42 @@ const styles = StyleSheet.create({
     shadowRadius: 8,
     elevation: 2,
   },
-  labelCol: {
-    backgroundColor: '#f8fafc',
-    borderRightWidth: StyleSheet.hairlineWidth,
-    borderRightColor: '#e2e8f0',
-    paddingVertical: sp.xs,
+  compareTableRow: {
+    flexDirection: 'row',
+    alignItems: 'stretch',
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: '#e2e8f0',
+  },
+  compareTableRowLast: {
+    borderBottomWidth: 0,
+  },
+  compareDataScroll: {
+    flex: 1,
+  },
+  compareDataRow: {
+    flexDirection: 'row',
+    alignItems: 'stretch',
   },
   labelCell: {
     justifyContent: 'center',
     paddingHorizontal: sp.sm,
-    paddingVertical: sp.xs,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: '#e2e8f0',
+    paddingVertical: sp.sm,
+    backgroundColor: '#f8fafc',
+    borderRightWidth: StyleSheet.hairlineWidth,
+    borderRightColor: '#e2e8f0',
+    alignSelf: 'stretch',
   },
   labelText: {
     fontSize: 12,
     fontWeight: '700',
     color: MUTED,
-    flex: 1,
   },
   dataCell: {
     padding: sp.sm,
     borderRightWidth: StyleSheet.hairlineWidth,
     borderRightColor: '#f1f5f9',
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: '#f1f5f9',
     justifyContent: 'center',
+    alignSelf: 'stretch',
   },
   cellDiff: {
     backgroundColor: HIGHLIGHT_DIFF,

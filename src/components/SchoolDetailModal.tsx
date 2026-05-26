@@ -24,6 +24,7 @@ import type { SchoolDetail } from '../types/school';
 import type { SchoolCampaignTemplate } from '../types/school';
 import type { ParentStudentProfile } from '../types/studentProfile';
 import { fetchSchoolCampaignTemplates, fetchSchoolPublicDetail, searchNearbyCampus } from '../api/school';
+import { campaignQueryYears, resolveCampaignOfferingNodes } from '../utils/schoolCampaign';
 import { bookOfflineConsultation, fetchParentConsultationSlots } from '../api/parentConsultation';
 import {
   type ParentConsultationSlot,
@@ -187,16 +188,7 @@ function buildCurriculumListFromCampaignTemplates(
   campaigns.forEach((campaign, campaignIdx) => {
     campaign.campusProgramOfferings.forEach((offering, offeringIdx) => {
       const offeringRaw = offering as Record<string, unknown>;
-      const programRaw =
-        offeringRaw.program && typeof offeringRaw.program === 'object'
-          ? (offeringRaw.program as Record<string, unknown>)
-          : null;
-      const curriculumRaw =
-        offeringRaw.curriculum && typeof offeringRaw.curriculum === 'object'
-          ? (offeringRaw.curriculum as Record<string, unknown>)
-          : programRaw?.curriculum && typeof programRaw.curriculum === 'object'
-            ? (programRaw.curriculum as Record<string, unknown>)
-            : null;
+      const { program: programRaw, curriculum: curriculumRaw } = resolveCampaignOfferingNodes(offeringRaw);
       if (!curriculumRaw && !programRaw) return;
 
       const fallbackName =
@@ -690,21 +682,43 @@ export function SchoolDetailModal({
     if (!visible || !school?.id || loading) return;
     let cancelled = false;
     setCampaignLoading(true);
-    const year = new Date().getFullYear();
-    void fetchSchoolCampaignTemplates(school.id, year)
-      .then((res) => {
-        if (!cancelled) setCampaignTemplates(res.body);
-      })
+
+    const detailForYear: SchoolDetail | null = school
+      ? {
+          ...school,
+          curriculumList: apiCurriculumList.length > 0 ? apiCurriculumList : (school.curriculumList ?? []),
+        }
+      : null;
+
+    void (async () => {
+      let templates: SchoolCampaignTemplate[] = [];
+      for (const year of campaignQueryYears(detailForYear)) {
+        try {
+          const res = await fetchSchoolCampaignTemplates(school.id, year);
+          const rows = res.body ?? [];
+          if (rows.length > 0) {
+            templates = rows;
+            break;
+          }
+          templates = rows;
+        } catch {
+          // thử năm kế tiếp
+        }
+        if (cancelled) return;
+      }
+      if (!cancelled) setCampaignTemplates(templates);
+    })()
       .catch(() => {
         if (!cancelled) setCampaignTemplates([]);
       })
       .finally(() => {
         if (!cancelled) setCampaignLoading(false);
       });
+
     return () => {
       cancelled = true;
     };
-  }, [visible, loading, school?.id]);
+  }, [visible, loading, school, apiCurriculumList]);
 
   useEffect(() => {
     if (!visible || !school?.id || loading) return;
@@ -1364,11 +1378,14 @@ export function SchoolDetailModal({
                         const learningMode = typeof offering.learningMode === 'string' ? offering.learningMode : null;
                         const openDate = typeof offering.openDate === 'string' ? offering.openDate : null;
                         const closeDate = typeof offering.closeDate === 'string' ? offering.closeDate : null;
-                        const programRaw =
-                          offering.program && typeof offering.program === 'object'
-                            ? (offering.program as Record<string, unknown>)
-                            : null;
-                        const programName = typeof programRaw?.name === 'string' ? programRaw.name : 'Chương trình';
+                        const { program: programRaw, curriculum: curriculumRaw } =
+                          resolveCampaignOfferingNodes(offering as Record<string, unknown>);
+                        const programName =
+                          typeof programRaw?.name === 'string'
+                            ? programRaw.name
+                            : typeof curriculumRaw?.name === 'string'
+                              ? curriculumRaw.name
+                              : 'Chương trình';
                         const statusRaw =
                           typeof offering.applicationStatus === 'string'
                             ? offering.applicationStatus
