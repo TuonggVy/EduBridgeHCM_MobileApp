@@ -25,6 +25,7 @@ import {
 import { formatGradeLevel } from '../utils/gradeLevel';
 import {
   canConfirmReservationEnrollment,
+  canEditRejectedReservation,
   canSubmitReservationPayment,
   canViewRequiredSubmissionDocuments,
   isReservationPaymentAgain,
@@ -35,6 +36,7 @@ import {
 import { useAuth } from '../context/AuthContext';
 import { fireConfirmEnrollmentEmail } from '../services/sendConfirmEnrollmentEmail';
 import ReservationPaymentScreen from './ReservationPaymentScreen';
+import ReservationProfileTemplateScreen from './ReservationProfileTemplateScreen';
 
 const { width: WIN_W, height: WIN_H } = Dimensions.get('window');
 
@@ -78,13 +80,18 @@ export default function AdmissionReservationListScreen({
   item,
   onBack,
   onPaymentSuccess,
-}: Props & { onPaymentSuccess?: (result?: { paymentResubmitCount: number }) => void }) {
+  onProfileSaved,
+}: Props & {
+  onPaymentSuccess?: (result?: { paymentResubmitCount: number }) => void;
+  onProfileSaved?: () => void;
+}) {
   const insets = useSafeAreaInsets();
   const { user } = useAuth();
   const [previewImages, setPreviewImages] = useState<string[]>([]);
   const [previewIndex, setPreviewIndex] = useState(0);
   const [docNameByCode, setDocNameByCode] = useState<Map<string, string>>(new Map());
   const [paymentVisible, setPaymentVisible] = useState(false);
+  const [editVisible, setEditVisible] = useState(false);
   const [requiredDocsVisible, setRequiredDocsVisible] = useState(false);
   const [confirmVisible, setConfirmVisible] = useState(false);
   const [confirming, setConfirming] = useState(false);
@@ -116,6 +123,7 @@ export default function AdmissionReservationListScreen({
       setPreviewImages([]);
       setPreviewIndex(0);
       setPaymentVisible(false);
+      setEditVisible(false);
       setRequiredDocsVisible(false);
       setConfirmVisible(false);
       setConfirming(false);
@@ -167,8 +175,9 @@ export default function AdmissionReservationListScreen({
   const showPaymentCta = canSubmitReservationPayment(item);
   const showConfirmCta = canConfirmReservationEnrollment(item.status);
   const showRequiredDocsCta = canViewRequiredSubmissionDocuments(item.status);
+  const showEditCta = canEditRejectedReservation(item.status);
   const isPaymentAgain = isReservationPaymentAgain(item.status);
-  const showBottomBar = showPaymentCta || showConfirmCta || showRequiredDocsCta;
+  const showBottomBar = showPaymentCta || showConfirmCta || showRequiredDocsCta || showEditCta;
 
   return (
     <LinearGradient colors={['#f8fafc', '#f1f5f9']} style={styles.screen}>
@@ -444,6 +453,26 @@ export default function AdmissionReservationListScreen({
               </View>
             </Pressable>
           ) : null}
+          {showEditCta ? (
+            <Pressable
+              onPress={() => setEditVisible(true)}
+              style={({ pressed }) => [
+                styles.paymentBtnWrap,
+                (showPaymentCta || showConfirmCta || showRequiredDocsCta) && { marginTop: 10 },
+                pressed && { opacity: 0.92 },
+              ]}
+            >
+              <LinearGradient
+                colors={['#1976d2', '#42a5f5']}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 1 }}
+                style={styles.paymentBtn}
+              >
+                <MaterialIcons name="edit" size={20} color="#fff" />
+                <Text style={styles.paymentBtnText}>Chỉnh sửa</Text>
+              </LinearGradient>
+            </Pressable>
+          ) : null}
         </View>
       ) : null}
 
@@ -473,6 +502,24 @@ export default function AdmissionReservationListScreen({
           onPaymentSuccess?.(result);
         }}
       />
+
+      <Modal
+        visible={editVisible}
+        animationType="slide"
+        presentationStyle="fullScreen"
+        onRequestClose={() => setEditVisible(false)}
+      >
+        <ReservationProfileTemplateScreen
+          visible={editVisible}
+          studentProfileId={item.studentProfileId ?? null}
+          startInEditMode
+          rejectReason={item.rejectReason}
+          onClose={() => setEditVisible(false)}
+          onSaved={() => {
+            onProfileSaved?.();
+          }}
+        />
+      </Modal>
 
       <RequiredSubmissionDocumentsModal
         visible={requiredDocsVisible}

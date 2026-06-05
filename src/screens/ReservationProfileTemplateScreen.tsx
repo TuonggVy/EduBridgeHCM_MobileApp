@@ -27,6 +27,7 @@ import { ApiError } from '../api/client';
 import { fetchParentStudents } from '../api/parentStudent';
 import type { ParentStudentProfile } from '../types/studentProfile';
 import { formatGradeLevel } from '../utils/gradeLevel';
+import { parseRejectReasons } from '../utils/reservationStatus';
 
 const CLOUDINARY_CLOUD_NAME =
   process.env.EXPO_PUBLIC_CLOUDINARY_CLOUD_NAME?.trim() || process.env.VITE_CLOUDINARY_CLOUD_NAME?.trim() || '';
@@ -43,6 +44,8 @@ type Props = {
   startInEditMode?: boolean;
   /** Học sinh đã có mẫu — dùng khi tạo hồ sơ cho học sinh khác. */
   existingTemplateStudentProfileIds?: number[];
+  /** Lý do từ chối từ đơn giữ chỗ — hiển thị khi chỉnh sửa hồ sơ bị từ chối. */
+  rejectReason?: string | null;
   onSaved?: () => void;
 };
 
@@ -136,6 +139,7 @@ export default function ReservationProfileTemplateScreen({
   studentProfileId: studentProfileIdProp,
   startInEditMode = false,
   existingTemplateStudentProfileIds,
+  rejectReason,
   onSaved,
 }: Props) {
   const [loading, setLoading] = useState(false);
@@ -156,6 +160,8 @@ export default function ReservationProfileTemplateScreen({
     message: '',
     variant: 'success',
   });
+  const [visibleRejectReason, setVisibleRejectReason] = useState<string | null>(null);
+  const [rejectReasonDismissed, setRejectReasonDismissed] = useState(false);
 
   const excludedStudentIds = useMemo(
     () => new Set((existingTemplateStudentProfileIds ?? []).filter((id) => Number.isFinite(id))),
@@ -225,7 +231,7 @@ export default function ReservationProfileTemplateScreen({
       if (body) {
         setSelectedStudentId(body.studentProfileId);
         setUploadsByDoc(uploadsFromMeta(body.profileMetaData ?? []));
-        setEditing(false);
+        setEditing(startInEditMode);
       } else {
         const excludedIds = new Set(existingTemplateStudentProfileIds ?? []);
         const firstWithoutTemplate = list.find((s) => {
@@ -254,6 +260,13 @@ export default function ReservationProfileTemplateScreen({
   }, [visible, studentProfileIdProp, loadTemplate]);
 
   useEffect(() => {
+    if (!visible) return;
+    if (!rejectReasonDismissed) {
+      setVisibleRejectReason(rejectReason?.trim() || null);
+    }
+  }, [visible, rejectReason, rejectReasonDismissed]);
+
+  useEffect(() => {
     if (!visible) {
       setLoading(false);
       setRefreshing(false);
@@ -268,6 +281,8 @@ export default function ReservationProfileTemplateScreen({
       setUploadsByDoc({});
       setPreviewImageUrl(null);
       setSaveFeedback({ visible: false, title: '', message: '', variant: 'success' });
+      setVisibleRejectReason(null);
+      setRejectReasonDismissed(false);
     }
   }, [visible]);
 
@@ -294,6 +309,24 @@ export default function ReservationProfileTemplateScreen({
         return !uploaded;
       }),
     [requiredDocuments, uploadsByDoc]
+  );
+
+  const parsedRejectReasons = useMemo(
+    () => parseRejectReasons(visibleRejectReason),
+    [visibleRejectReason]
+  );
+
+  const rejectReasonByDocKey = useMemo(() => {
+    const map = new Map<string, string>();
+    parsedRejectReasons.forEach((item) => {
+      if (item.docKey) map.set(item.docKey, item.reason);
+    });
+    return map;
+  }, [parsedRejectReasons]);
+
+  const generalRejectReasons = useMemo(
+    () => parsedRejectReasons.filter((item) => !item.docKey),
+    [parsedRejectReasons]
   );
 
   const startEditing = useCallback(() => {
@@ -410,7 +443,13 @@ export default function ReservationProfileTemplateScreen({
         });
       }
       await loadTemplate('refresh', selectedStudentId);
-      setEditing(false);
+      const editingRejectedForm = Boolean(rejectReason?.trim());
+      if (editingRejectedForm) {
+        setRejectReasonDismissed(true);
+        setVisibleRejectReason(null);
+      } else {
+        setEditing(false);
+      }
       onSaved?.();
       setSaveFeedback({
         visible: true,
@@ -434,8 +473,12 @@ export default function ReservationProfileTemplateScreen({
     const uploads = uploadsByDoc[doc.code] ?? [];
     const hasUploaded = uploads.some((item) => item.remoteUrl);
     const showRequiredError = doc.required && !hasUploaded;
+    const docRejectReason = rejectReasonByDocKey.get(doc.code);
     return (
-      <View key={doc.code} style={[styles.docCard, showRequiredError && styles.docCardError]}>
+      <View
+        key={doc.code}
+        style={[styles.docCard, (showRequiredError || docRejectReason) && styles.docCardError]}
+      >
         <View style={styles.docHeader}>
           <Text style={styles.docTitle}>{doc.name}</Text>
           <View style={[styles.docBadge, doc.required ? styles.badgeRequired : styles.badgeOptional]}>
@@ -444,6 +487,12 @@ export default function ReservationProfileTemplateScreen({
             </Text>
           </View>
         </View>
+        {docRejectReason ? (
+          <View style={styles.docRejectBox}>
+            <MaterialIcons name="report-gmailerrorred" size={14} color="#b91c1c" />
+            <Text style={styles.docRejectText}>{docRejectReason}</Text>
+          </View>
+        ) : null}
         <Pressable style={styles.uploadZone} onPress={() => handlePickImage(doc.code)} disabled={saving}>
           <MaterialIcons name="cloud-upload" size={26} color={PRIMARY} />
           <Text style={styles.uploadTitle}>Tải ảnh lên</Text>
@@ -533,6 +582,27 @@ export default function ReservationProfileTemplateScreen({
       ) : editing ? (
         <>
           <ScrollView contentContainerStyle={styles.content}>
+            {generalRejectReasons.length > 0 || rejectReasonByDocKey.size > 0 ? (
+              <View style={styles.rejectBanner}>
+                <View style={styles.rejectBannerHead}>
+                  <View style={styles.rejectBannerIcon}>
+                    <MaterialIcons name="report-gmailerrorred" size={18} color="#b91c1c" />
+                  </View>
+                  <Text style={styles.rejectBannerTitle}>Lý do trường từ chối</Text>
+                </View>
+                {generalRejectReasons.map((item, index) => (
+                  <View key={`general-${index}`} style={styles.rejectBannerItem}>
+                    <Text style={styles.rejectBannerText}>{item.reason}</Text>
+                  </View>
+                ))}
+                {rejectReasonByDocKey.size > 0 ? (
+                  <Text style={styles.rejectBannerHint}>
+                    Xem chi tiết lý do từ chối từng tài liệu bên dưới.
+                  </Text>
+                ) : null}
+              </View>
+            ) : null}
+
             <View style={styles.card}>
               <View style={styles.sectionHeadRow}>
                 <Text style={[styles.sectionTitle, styles.sectionTitleInline]}>Chọn học sinh</Text>
@@ -947,6 +1017,38 @@ const styles = StyleSheet.create({
     marginBottom: 10,
   },
   docCardError: { borderColor: '#fecaca', backgroundColor: '#fff7f7' },
+  docRejectBox: {
+    marginTop: 8,
+    borderRadius: 10,
+    backgroundColor: '#fff1f2',
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 6,
+  },
+  docRejectText: { flex: 1, fontSize: 12, color: '#991b1b', lineHeight: 18 },
+  rejectBanner: {
+    borderRadius: 16,
+    backgroundColor: '#fff1f2',
+    borderWidth: 1,
+    borderColor: '#fecdd3',
+    padding: 14,
+  },
+  rejectBannerHead: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 8 },
+  rejectBannerIcon: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: '#fee2e2',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  rejectBannerTitle: { fontSize: 14, fontWeight: '800', color: '#b91c1c' },
+  rejectBannerItem: { marginTop: 6 },
+  rejectBannerDoc: { fontSize: 12, fontWeight: '700', color: '#9f1239' },
+  rejectBannerText: { marginTop: 2, fontSize: 12, color: '#991b1b', lineHeight: 18 },
+  rejectBannerHint: { marginTop: 8, fontSize: 11, color: '#9f1239', fontStyle: 'italic' },
   docHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8 },
   docTitle: { flex: 1, fontSize: 14, fontWeight: '700', color: '#0f172a' },
   docBadge: { borderRadius: 999, paddingHorizontal: 10, paddingVertical: 4 },

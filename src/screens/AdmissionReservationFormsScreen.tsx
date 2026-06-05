@@ -139,6 +139,7 @@ export default function AdmissionReservationFormsScreen({ visible, onClose }: Pr
       setSelectedItem(null);
       setPaymentItem(null);
       setConfirmItem(null);
+      setRequiredDocsItem(null);
       setConfirming(false);
       setEnrollmentFeedback({ visible: false, title: '', message: '', variant: 'success' });
     }
@@ -406,6 +407,27 @@ export default function AdmissionReservationFormsScreen({ visible, onClose }: Pr
                 if (!prev) return prev;
                 return normalized.find((i) => i.id === prev.id) ?? prev;
               });
+            } catch {
+              void loadData('refresh');
+            }
+          }}
+          onProfileSaved={async () => {
+            const formId = selectedItem?.id;
+            try {
+              const res = await fetchAdmissionReservationForms(activeFilter);
+              const normalized = Array.isArray(res.body) ? res.body : [];
+              normalized.sort((a, b) => {
+                const aTime = a.createdTime ? new Date(a.createdTime).getTime() : 0;
+                const bTime = b.createdTime ? new Date(b.createdTime).getTime() : 0;
+                return bTime - aTime;
+              });
+              setItems(normalized);
+              if (formId != null) {
+                setSelectedItem((prev) => {
+                  if (!prev || prev.id !== formId) return prev;
+                  return normalized.find((i) => i.id === formId) ?? { ...prev, rejectReason: null };
+                });
+              }
             } catch {
               void loadData('refresh');
             }
