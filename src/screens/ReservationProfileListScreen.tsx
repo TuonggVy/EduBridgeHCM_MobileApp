@@ -200,7 +200,7 @@ export default function ReservationProfileListScreen({ visible, onClose }: Props
                   <View style={styles.infoRow}>
                     <MaterialIcons name="description" size={16} color="#64748b" />
                     <Text style={styles.infoRowText}>
-                      {docCount} tài liệu · {transcriptCount} ảnh học bạ
+                      {docCount} tài liệu
                     </Text>
                   </View>
                   <View style={styles.infoRow}>

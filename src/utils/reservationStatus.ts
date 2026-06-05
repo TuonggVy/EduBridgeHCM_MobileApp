@@ -158,6 +158,68 @@ export function canViewRequiredSubmissionDocuments(status?: string | null): bool
   return status === 'RESERVATION_CONFIRMED';
 }
 
+export function canEditRejectedReservation(status?: string | null): boolean {
+  return status === 'RESERVATION_REJECTED';
+}
+
+export type ParsedRejectReason = {
+  docKey?: string;
+  reason: string;
+};
+
+export function parseRejectReasons(rejectReason?: string | null): ParsedRejectReason[] {
+  const raw = rejectReason?.trim();
+  if (!raw) return [];
+
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (Array.isArray(parsed)) {
+      return parsed
+        .map((item): ParsedRejectReason | null => {
+          if (typeof item === 'string' && item.trim()) return { reason: item.trim() };
+          if (item && typeof item === 'object') {
+            const record = item as Record<string, unknown>;
+            const docKey =
+              typeof record.key === 'string'
+                ? record.key
+                : typeof record.docKey === 'string'
+                  ? record.docKey
+                  : undefined;
+            const reason =
+              typeof record.reason === 'string'
+                ? record.reason
+                : typeof record.message === 'string'
+                  ? record.message
+                  : null;
+            if (reason?.trim()) return { docKey, reason: reason.trim() };
+          }
+          return null;
+        })
+        .filter((item): item is ParsedRejectReason => item != null);
+    }
+    if (parsed && typeof parsed === 'object') {
+      const results: ParsedRejectReason[] = [];
+      Object.entries(parsed as Record<string, unknown>).forEach(([key, value]) => {
+        const reason = typeof value === 'string' ? value.trim() : '';
+        if (reason) results.push({ docKey: key, reason });
+      });
+      return results;
+    }
+  } catch {
+    // plain text
+  }
+
+  if (raw.includes('\n')) {
+    return raw
+      .split('\n')
+      .map((line) => line.trim())
+      .filter(Boolean)
+      .map((reason) => ({ reason }));
+  }
+
+  return [{ reason: raw }];
+}
+
 export function shouldHideRejectReason(status?: string | null): boolean {
   return status === 'RESERVATION_DEPOSITED' || status === 'RESERVATION_CONFIRMED';
 }
