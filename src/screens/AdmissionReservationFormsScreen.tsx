@@ -29,6 +29,8 @@ import {
   reservationStatusUi,
   type ReservationFormStatus,
 } from '../utils/reservationStatus';
+import { useAuth } from '../context/AuthContext';
+import { fireConfirmEnrollmentEmail } from '../services/sendConfirmEnrollmentEmail';
 import AdmissionReservationListScreen from './AdmissionReservationListScreen';
 import ReservationPaymentScreen from './ReservationPaymentScreen';
 
@@ -82,6 +84,7 @@ function displayText(value?: string | null, fallback = '—'): string {
 
 export default function AdmissionReservationFormsScreen({ visible, onClose }: Props) {
   const insets = useSafeAreaInsets();
+  const { user } = useAuth();
   const [activeFilter, setActiveFilter] = useState<FilterItem['id']>('ALL');
   const [loading, setLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
@@ -145,7 +148,8 @@ export default function AdmissionReservationFormsScreen({ visible, onClose }: Pr
     if (!confirmItem || confirming) return;
     setConfirming(true);
     try {
-      await confirmReservationEnrollment(confirmItem.id);
+      const res = await confirmReservationEnrollment(confirmItem.id);
+      fireConfirmEnrollmentEmail(confirmItem, res, user?.email);
       setConfirmItem(null);
       void loadData('refresh');
       setEnrollmentFeedback({
