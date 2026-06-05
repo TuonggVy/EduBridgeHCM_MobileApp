@@ -32,6 +32,8 @@ import {
   reservationReasonTitle,
   reservationStatusUi,
 } from '../utils/reservationStatus';
+import { useAuth } from '../context/AuthContext';
+import { fireConfirmEnrollmentEmail } from '../services/sendConfirmEnrollmentEmail';
 import ReservationPaymentScreen from './ReservationPaymentScreen';
 
 const { width: WIN_W, height: WIN_H } = Dimensions.get('window');
@@ -78,6 +80,7 @@ export default function AdmissionReservationListScreen({
   onPaymentSuccess,
 }: Props & { onPaymentSuccess?: (result?: { paymentResubmitCount: number }) => void }) {
   const insets = useSafeAreaInsets();
+  const { user } = useAuth();
   const [previewImages, setPreviewImages] = useState<string[]>([]);
   const [previewIndex, setPreviewIndex] = useState(0);
   const [docNameByCode, setDocNameByCode] = useState<Map<string, string>>(new Map());
@@ -124,7 +127,8 @@ export default function AdmissionReservationListScreen({
     if (!item || confirming) return;
     setConfirming(true);
     try {
-      await confirmReservationEnrollment(item.id);
+      const res = await confirmReservationEnrollment(item.id);
+      fireConfirmEnrollmentEmail(item, res, user?.email);
       setConfirmVisible(false);
       onPaymentSuccess?.();
       setEnrollmentFeedback({
