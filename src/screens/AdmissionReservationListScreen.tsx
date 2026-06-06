@@ -172,6 +172,7 @@ export default function AdmissionReservationListScreen({
   const programLabel = displayText(item.programName, '');
   const transcripts = (item.transcriptImages ?? []).filter((t) => Boolean(t.imageUrl));
   const paymentProofUrl = item.paymentProofUrl?.trim() || null;
+  const confirmCode = item.confirmCode?.trim() || null;
   const showPaymentCta = canSubmitReservationPayment(item);
   const showConfirmCta = canConfirmReservationEnrollment(item.status);
   const showRequiredDocsCta = canViewRequiredSubmissionDocuments(item.status);
@@ -223,6 +224,20 @@ export default function AdmissionReservationListScreen({
               <Text style={[styles.statusText, { color: status.text }]}>{status.label}</Text>
             </LinearGradient>
           </View>
+
+          {confirmCode ? (
+            <View style={styles.confirmCodeBox}>
+              <View style={styles.confirmCodeIconWrap}>
+                <MaterialIcons name="verified" size={20} color="#15803d" />
+              </View>
+              <View style={styles.confirmCodeContent}>
+                <Text style={styles.confirmCodeLabel}>MÃ XÁC NHẬN NHẬP HỌC</Text>
+                <Text style={styles.confirmCodeValue} selectable>
+                  {confirmCode}
+                </Text>
+              </View>
+            </View>
+          ) : null}
 
           <Text style={styles.sectionTitle}>Thông tin học sinh</Text>
           <View style={styles.infoGrid}>
@@ -638,6 +653,28 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   statusText: { fontSize: 11, fontWeight: '700' },
+  confirmCodeBox: {
+    marginTop: 14,
+    borderRadius: 16,
+    padding: 12,
+    backgroundColor: '#ecfdf5',
+    borderWidth: 1,
+    borderColor: '#bbf7d0',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  confirmCodeIconWrap: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: '#dcfce7',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  confirmCodeContent: { flex: 1, gap: 2 },
+  confirmCodeLabel: { fontSize: 10, fontWeight: '700', color: '#166534' },
+  confirmCodeValue: { fontSize: 18, fontWeight: '800', color: '#15803d', letterSpacing: 0.5 },
   sectionTitle: { marginTop: 14, fontSize: 14, fontWeight: '700', color: '#0f172a' },
   sectionTitleSpaced: { marginTop: 16 },
   infoGrid: { marginTop: 8, flexDirection: 'row', flexWrap: 'wrap', gap: 8 },

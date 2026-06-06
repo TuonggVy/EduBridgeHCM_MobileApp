@@ -911,7 +911,7 @@ export default function StudentProfileFormScreen({ visible, initialStudent, onCl
           : Number(String(rawId).trim());
 
     if (initialStudent && !Number.isFinite(studentIdForUpdate)) {
-      showWarning('Thiếu mã học sinh, không thể cập nhật. Vui lòng tải lại danh sách.', 'Warning');
+      showWarning('Thiếu CCCD học sinh, không thể cập nhật. Vui lòng tải lại danh sách.', 'Warning');
       return;
     }
 
