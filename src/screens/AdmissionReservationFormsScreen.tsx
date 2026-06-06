@@ -219,6 +219,7 @@ export default function AdmissionReservationFormsScreen({ visible, onClose }: Pr
       >
         {items.map((item) => {
           const status = reservationStatusUi(item.status);
+          const confirmCode = item.confirmCode?.trim() || null;
           const docCount = (item.profileMetaData ?? []).filter((m) => (m.imageUrl?.length ?? 0) > 0).length;
           const transcriptCount = (item.transcriptImages ?? []).filter((t) => Boolean(t.imageUrl)).length;
           return (
@@ -257,6 +258,15 @@ export default function AdmissionReservationFormsScreen({ visible, onClose }: Pr
                 <MaterialIcons name="schedule" size={16} color="#64748b" />
                 <Text style={styles.infoRowText}>Nộp: {formatDateTime(item.createdTime)}</Text>
               </View>
+
+              {confirmCode ? (
+                <View style={styles.confirmCodeRow}>
+                  <MaterialIcons name="verified" size={16} color="#15803d" />
+                  <Text style={styles.confirmCodeRowText} numberOfLines={1}>
+                    Mã xác nhận: <Text style={styles.confirmCodeRowValue}>{confirmCode}</Text>
+                  </Text>
+                </View>
+              ) : null}
 
               {canSubmitReservationPayment(item) ? (
                 <Pressable
@@ -577,6 +587,17 @@ const styles = StyleSheet.create({
   statusPillText: { fontSize: 12, fontWeight: '700' },
   infoRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   infoRowText: { flex: 1, fontSize: 13, color: '#475569' },
+  confirmCodeRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    borderRadius: 12,
+    backgroundColor: '#ecfdf5',
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+  },
+  confirmCodeRowText: { flex: 1, fontSize: 13, color: '#166534' },
+  confirmCodeRowValue: { fontWeight: '800', color: '#15803d' },
   centerWrap: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 28, gap: 10 },
   emptyIconWrap: {
     width: 84,
