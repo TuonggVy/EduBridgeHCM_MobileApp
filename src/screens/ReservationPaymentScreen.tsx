@@ -510,12 +510,6 @@ export default function ReservationPaymentScreen({
                       value={qrInfo.bankInfo.accountName}
                       onCopy={() => void copyText(qrInfo.bankInfo.accountName, 'Đã sao chép tên chủ tài khoản')}
                     />
-                    <BankRow
-                      icon="receipt-long"
-                      label="Nội dung CK"
-                      value={transferContent}
-                      onCopy={() => void copyText(transferContent, 'Đã sao chép nội dung chuyển khoản')}
-                    />
                   </View>
                 ) : null}
 
